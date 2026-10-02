@@ -21,7 +21,7 @@
     "@solana/wallet-adapter-solflare": "^0.6.34",
     "@solana/web3.js": "^1.99.0",
     "bn.js": "^5.2.5",
-    "next": "^15.5.27",
+    "next": "^16.3.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
