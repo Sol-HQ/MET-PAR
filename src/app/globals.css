@@ -1,0 +1,385 @@
+:root {
+  color-scheme: light;
+  --paper: #f3ecdf;
+  --paper-2: #fffaf2;
+  --ink: #1d1a16;
+  --muted: #5e564c;
+  --line: #d9cbb6;
+  --stamp: #8d2f2a;
+  --pine: #1f5c45;
+  --shadow: 0 16px 40px rgba(60, 42, 20, 0.08);
+  --display: var(--font-display), "Iowan Old Style", Palatino, serif;
+  --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(141, 47, 42, 0.08), transparent 28rem),
+    var(--paper);
+  color: var(--ink);
+  font-family: var(--display);
+}
+
+body { min-height: 100vh; }
+
+a { color: inherit; }
+
+button, input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button.solid {
+  background: var(--ink);
+  color: var(--paper-2);
+}
+
+button.text {
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.page {
+  width: min(1080px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding-bottom: 4rem;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--ink);
+}
+
+.brand {
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  text-decoration: none;
+}
+
+.mark {
+  font-size: 1.8rem;
+  letter-spacing: 0.08em;
+}
+
+.top-actions, .actions, .segmented, .lookup {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper-2);
+}
+
+.banner, .error, .status, .note {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.banner {
+  margin: 1rem 0 0;
+  padding: 0.75rem 0.9rem;
+  background: #f3d7c8;
+}
+
+.error { color: var(--stamp); }
+.status { color: var(--pine); }
+.note { color: var(--muted); }
+
+.lede h1, .board-title h1 {
+  font-weight: 520;
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  line-height: 0.95;
+  margin: 0.2rem 0 0.8rem;
+  max-width: 14ch;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--stamp);
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+
+.preset {
+  text-align: left;
+  background: var(--paper-2);
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.preset.selected { outline: 2px solid var(--ink); }
+.preset-kicker {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sheet {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+  padding: 1.2rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem 1rem;
+  margin: 0;
+}
+
+dt {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+dd {
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+form {
+  display: grid;
+  gap: 0.8rem;
+  align-content: start;
+}
+
+label {
+  display: grid;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+input {
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink);
+  padding: 0.7rem 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.launch {
+  display: grid;
+  gap: 0.8rem;
+  max-width: 28rem;
+  margin-top: 1.4rem;
+}
+
+.rows {
+  display: grid;
+  gap: 1.6rem;
+  margin-top: 2rem;
+}
+
+.rows h2 {
+  margin: 0 0 0.6rem;
+  font-weight: 520;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.8rem;
+}
+
+.card {
+  background: var(--paper-2);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+}
+
+.card h3 {
+  margin: 0;
+  font-weight: 520;
+}
+
+.card h3 span, .board-title h1 span {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.rule {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.card-actions a, .card-actions button {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 0.4rem 0.55rem;
+  text-decoration: none;
+}
+
+.listings {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+
+.listings a {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  font-family: var(--mono);
+}
+
+.quotes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin: 1.2rem 0;
+}
+
+.quotes article, .migrate {
+  background: var(--paper-2);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.quotes h2, .migrate h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.figure {
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+  margin: 0.4rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.figure span {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.meter {
+  height: 0.45rem;
+  background: var(--line);
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  background: var(--pine);
+}
+
+.quote-slip {
+  grid-template-columns: 1fr 1fr;
+}
+
+.gate {
+  position: fixed;
+  inset: 0;
+  background: rgba(29, 26, 22, 0.46);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.gate-card {
+  width: min(38rem, 100%);
+  background: var(--paper);
+  padding: 1.2rem;
+  border: 1px solid var(--ink);
+}
+
+.gate-card ul {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  padding-left: 1.1rem;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+@media (max-width: 800px) {
+  .presets, .sheet, .quotes, dl, .quote-slip, .card-grid {
+    grid-template-columns: 1fr;
+  }
+  .top, footer, .listings a {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

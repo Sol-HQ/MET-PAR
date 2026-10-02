@@ -1,0 +1,38 @@
+{
+  "name": "par",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PAR, a listing desk for Meteora Dynamic Bonding Curve launches quoted in USDC.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "print-curve": "tsx scripts/print-curve.ts",
+    "create-config": "tsx scripts/create-config.ts"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@meteora-ag/dynamic-bonding-curve-sdk": "1.5.13",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/wallet-adapter-base": "^0.9.28",
+    "@solana/wallet-adapter-phantom": "^0.9.30",
+    "@solana/wallet-adapter-react": "^0.15.40",
+    "@solana/wallet-adapter-react-ui": "^0.9.40",
+    "@solana/wallet-adapter-solflare": "^0.6.34",
+    "@solana/web3.js": "^1.99.0",
+    "bn.js": "^5.2.5",
+    "next": "^15.5.27",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.8",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
