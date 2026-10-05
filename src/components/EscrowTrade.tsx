@@ -232,7 +232,7 @@ export function EscrowTrade({
       ) : (
         <p className="note">The buy stays closed until the sale wait ends.</p>
       )}
-      {clockOver ? <p className="note">The bidding clock has ended. The GitHub job finishes the auction.</p> : null}
+      {clockOver ? <p className="note">The bidding clock has ended. This site finishes the auction.</p> : null}
       <div className="asset-nav">
         {needsMark && publicKey ? (
           <button type="button" className="solid" disabled={busy} onClick={() => void mark().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Graduation was not marked."))}>

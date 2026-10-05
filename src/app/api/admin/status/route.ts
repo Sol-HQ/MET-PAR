@@ -2,7 +2,8 @@ import nacl from "tweetnacl";
 import { PublicKey } from "@solana/web3.js";
 import { isAdminWallet } from "@/lib/admins";
 import type { ClusterName } from "@/lib/constants";
-import { hasIndex, listCoins, listItems, readWatcher, wakeWatcher } from "@/lib/store";
+import { hasIndex, listCoins, listItems, readWatcher } from "@/lib/store";
+import { watchOnce } from "@/lib/watch-pass";
 
 function clusterOf(value: string | null): ClusterName | null {
   return value === "devnet" || value === "mainnet-beta" ? value : null;
@@ -43,7 +44,9 @@ export async function POST(request: Request) {
   if (!Number.isFinite(issuedAt) || Math.abs(Date.now() - issuedAt) > 10 * 60 * 1000) {
     return Response.json({ error: "The admin signature expired. Sign it again." }, { status: 400 });
   }
-  if (!hasIndex()) return Response.json({ error: "The record store is not configured." }, { status: 503 });
+  if (cluster !== "devnet") {
+    return Response.json({ error: "The watcher runs on the practice network." }, { status: 400 });
+  }
   const message = ["PAR watcher pass", `cluster=${cluster}`, `issuedAt=${issuedAt}`].join("\n");
   let signature: Uint8Array;
   try {
@@ -57,6 +60,11 @@ export async function POST(request: Request) {
     new PublicKey(body.publicKey).toBytes(),
   );
   if (!verified) return Response.json({ error: "The admin signature does not match." }, { status: 403 });
-  await wakeWatcher(cluster);
-  return Response.json({ asked: true });
+  try {
+    const result = await watchOnce();
+    return Response.json(result);
+  } catch (error) {
+    const note = error instanceof Error ? error.message : "The pass failed.";
+    return Response.json({ error: note }, { status: 500 });
+  }
 }

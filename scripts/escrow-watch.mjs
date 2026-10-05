@@ -1,11 +1,10 @@
 /**
  * PAR escrow watcher.
  *
- * GitHub Actions runs one pass about every 5 minutes (`node scripts/escrow-watch.mjs --once`).
- * The signing key and the record-store key stay in GitHub secrets. They are not in the repository.
+ * The site runs one pass from /api/cron/escrow once a day. That is the fastest schedule the free
+ * Vercel plan allows. An admin can also run a pass from the admin page.
  * A pass reads the escrow program, marks graduation when a pool has migrated, and finishes any
  * auction whose clock has ended. A missed pass still finishes the same auctions on the next run.
- * `node scripts/escrow-watch.mjs` without `--once` keeps a local loop for a manual check.
  */
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
@@ -244,21 +243,23 @@ async function runPass(connection, payer, graduationTried) {
   return result;
 }
 
-async function main() {
-  const once = process.argv.includes("--once");
-  if (!once) takeLock();
+export async function watchOnce() {
   const payer = loadPayer();
   const connection = new Connection(envRpc(), "confirmed");
-  console.log(
-    once
-      ? `watcher ${payer.publicKey.toBase58()} on the practice network, one pass`
-      : `watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`,
-  );
-  const graduationTried = new Map();
-  if (once) {
-    await runPass(connection, payer, graduationTried);
+  console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, one pass`);
+  return runPass(connection, payer, new Map());
+}
+
+async function main() {
+  if (process.argv.includes("--once")) {
+    await watchOnce();
     return;
   }
+  takeLock();
+  const payer = loadPayer();
+  const connection = new Connection(envRpc(), "confirmed");
+  console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`);
+  const graduationTried = new Map();
   for (;;) {
     await runPass(connection, payer, graduationTried);
     const until = Date.now() + INTERVAL_MS;
@@ -275,4 +276,10 @@ async function main() {
   }
 }
 
-main();
+const entry = process.argv[1] || "";
+if (entry.endsWith("escrow-watch.mjs")) {
+  main().catch((error) => {
+    console.log(error instanceof Error ? error.message : "pass failed");
+    process.exitCode = 1;
+  });
+}

@@ -318,8 +318,9 @@ export function AdminDesk() {
         cluster,
       }),
     });
-    const body = (await response.json()) as { error?: string };
-    if (!response.ok) throw new Error(body.error || "The watcher was not asked.");
+    const body = (await response.json()) as { error?: string; watched?: number; marked?: number; settled?: number };
+    if (!response.ok) throw new Error(body.error || "The pass failed.");
+    return body;
   }
 
   async function onPublish() {
@@ -549,10 +550,10 @@ export function AdminDesk() {
           <section className="rows">
             <h2>Watcher</h2>
             <p>
-              The watcher is a GitHub Action in this repository. About every 5 minutes GitHub runs one pass on the
-              practice network. It marks graduation and finishes an auction whose clock has ended. The result is
-              written here. The free Vercel plan can schedule a job only once a day, which is too slow for these
-              clocks, so the job lives in Git and GitHub runs it. The real network does not use this job.
+              The watcher is a daily job on this site, on the practice network. The free plan can run that job once
+              a day, in the 8 o’clock hour in the morning Eastern. It marks graduation and finishes an auction whose
+              clock has ended. A practice clock can end in about a minute, so use Run a pass while you are testing.
+              The real network does not use this job.
             </p>
             <p className="note">
               {records?.watcher?.last_at
@@ -566,17 +567,19 @@ export function AdminDesk() {
                 setError("");
                 setBusy(true);
                 askWatcher()
-                  .then(() =>
-                    setStatus("Recorded. GitHub runs the next pass within about 5 minutes and writes the result here."),
+                  .then((result) =>
+                    setStatus(
+                      `Pass finished. Watching ${result.watched ?? 0}. Marked ${result.marked ?? 0}. Finished ${result.settled ?? 0}.`,
+                    ),
                   )
                   .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The watcher was not asked."))
                   .finally(() => setBusy(false));
               }}
             >
-              Ask for a pass
+              Run a pass
             </button>
             {cluster !== "devnet" ? (
-              <p className="note">This button records a request on the practice network. The real network has no watcher.</p>
+              <p className="note">Run a pass is for the practice network. The real network has no watcher.</p>
             ) : null}
           </section>
           <section className="rows">
