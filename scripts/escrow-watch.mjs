@@ -6,6 +6,8 @@
  * auction whose clock has ended. A missed pass still finishes the same auctions on the next run.
  */
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { needsGraduationMark, needsSettle, readListingData } from "./escrow-clock.mjs";
@@ -18,14 +20,15 @@ const MARK = Buffer.from([125, 72, 57, 129, 59, 15, 247, 251]);
 const SETTLE = Buffer.from([175, 42, 185, 87, 144, 131, 102, 212]);
 const INTERVAL_MS = 15 * 60_000;
 const GRADUATION_RETRY_MS = 10 * 60_000;
-const LOCK = new URL("../keys/escrow-watch.lock", import.meta.url);
-const KEY = new URL("../keys/me.json", import.meta.url);
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const LOCK = join(root, "keys", "escrow-watch.lock");
+const KEY = join(root, "keys", "me.json");
 
 function envValue(name) {
   if (process.env[name]) return process.env[name];
   const prefix = `${name}=`;
   for (const file of [".env.local", ".env"]) {
-    const path = new URL(`../${file}`, import.meta.url);
+    const path = join(root, file);
     if (!existsSync(path)) continue;
     const line = readFileSync(path, "utf8")
       .split(/\r?\n/)
