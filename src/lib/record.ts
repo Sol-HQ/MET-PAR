@@ -56,6 +56,8 @@ export type RecordFacts = {
   escrowProgram?: string;
   serial?: string;
   makerName?: string;
+  /** Readable sheet page. Omitted when the extra trait does not fit in the transaction. */
+  sheet?: string;
 };
 
 /** Short fields written on chain. The full sheet sits behind the record link and is pinned by its hash here. */
@@ -79,6 +81,7 @@ export function recordAttributes(facts: RecordFacts): RecordAttribute[] {
     { key: "serial", value: facts.serial?.trim() || "none" },
     { key: "maker", value: facts.makerName?.trim() || "none" },
     { key: "escrow program", value: facts.escrowProgram || "none" },
+    ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
   ];
 }
 

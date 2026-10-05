@@ -1,20 +1,23 @@
 "use client";
 
+import { deriveDbcPoolAddress } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { Keypair } from "@solana/web3.js";
 import { signedPictureHeaders } from "@/lib/picture";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, MIGRATION_FEE_CHOICES, migrationFeeLabel } from "@/lib/constants";
+import { BASE_DECIMALS, DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, MIGRATION_FEE_CHOICES, migrationFeeLabel, quoteMintAddress } from "@/lib/constants";
 import { readCurveShape } from "@/lib/curve";
 import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
 import { BILLION_SUPPLY, checkParPrices, type LaunchChoice } from "@/lib/launch";
-import { DEFAULT_PLATFORM_SETTINGS, assertCurveFee, parseFeePercent, type PlatformSettings } from "@/lib/platform";
+import { DEFAULT_PLATFORM_SETTINGS, METEORA_TRADING_FEE_PERCENT, assertCurveFee, creatorSharePercent, parseFeePercent, type PlatformSettings } from "@/lib/platform";
 import { FREE_UPLOAD_BYTES } from "@/lib/record";
 import { useCluster } from "@/lib/cluster";
-import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT, saleVenueWords } from "@/lib/title";
+import { parseTokenAmount } from "@/lib/tensor-sale";
+import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
 
 /** What the whole supply is priced at, at par. The creator picks it. It is not an appraisal. */
 const VALUES: Record<"USDC" | "SOL", number[]> = {
@@ -71,6 +74,8 @@ export type Draft = {
   saleDays: string;
   /** Escrow only. Fixed price, or an auction whose clock starts on the first bid. */
   sale: "fixed" | "auction";
+  /** The fixed price, or the auction reserve, in this token. The escrow stores it at deposit. */
+  titlePrice: string;
   /** Where the title goes. Auth wallets can pick escrow on the practice network. Mainnet stays on Tensor. */
   hold: "wallet" | "escrow";
   shipDays: string;
@@ -100,7 +105,7 @@ export function launchChoice(draft: Draft): LaunchChoice {
   return { kind: "custom-par", supply: BILLION_SUPPLY, parPrice: Number(draft.par), poolPrice: Number(draft.pool) };
 }
 
-function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen" | "feeEnd" | "straightFall" | "dynamicFee" | "compoundOn" | "poolFee" | "compoundShare" | "poolFeeBps"> & Partial<Draft>): Draft {
+function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "titlePrice" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen" | "feeEnd" | "straightFall" | "dynamicFee" | "compoundOn" | "poolFee" | "compoundShare" | "poolFeeBps"> & Partial<Draft>): Draft {
   return {
     existsNow: "yes",
     marks: "own",
@@ -109,6 +114,7 @@ function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale
     pitch: "",
     saleDays: String(SALE_DELAY_DAYS),
     sale: "fixed",
+    titlePrice: "",
     hold: "wallet",
     quote: "USDC",
     fee: "fall",
@@ -322,6 +328,9 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
   if (step === "Claim") {
     if (!draft.claim.trim()) return "Write what the holder of the title can claim.";
     if (wholeDays(draft.saleDays) === null) return "The days after graduation before the title sale are a whole number from 1 to 365.";
+    if (draft.hold === "escrow" && !parseTokenAmount(draft.titlePrice)) {
+      return draft.sale === "auction" ? "Type the reserve in this token. A bid has to reach it." : "Type the price in this token. The buyer pays that amount.";
+    }
   }
   if (step === "Redemption") {
     if (wholeDays(draft.shipDays) === null) return "Delivery days are a whole number from 1 to 365.";
@@ -399,6 +408,21 @@ export function AssetDesk() {
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
   const unit = draft.quote;
   const [escrowHint, setEscrowHint] = useState("");
+  const [preparedKeys] = useState(() => ({
+    baseMint: Keypair.generate(),
+    config: Keypair.generate(),
+    record: Keypair.generate(),
+    title: Keypair.generate(),
+  }));
+  const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
+  const quoteMintKey = quoteMintAddress(cluster, quoteKind);
+  const quoteMint = quoteMintKey.toBase58();
+  const tokenMint = preparedKeys.baseMint.publicKey.toBase58();
+  const poolAddress = deriveDbcPoolAddress(quoteMintKey, preparedKeys.baseMint.publicKey, preparedKeys.config.publicKey).toBase58();
+  const platformCut = platform.platformFeePercent;
+  const creatorCut = creatorSharePercent(platformCut);
+  const shortClock = cluster === "devnet" && rail === "escrow";
+  const waitUnit = shortClock ? "seconds" : "days";
 
   useEffect(() => {
     void fetch("/api/platform")
@@ -493,6 +517,14 @@ export function AssetDesk() {
 
   const sheet = useMemo(
     (): [string, string][] => [
+      [
+        "Sale path",
+        rail === "escrow"
+          ? draft.sale === "auction"
+            ? "Escrow, because Escrow is selected on Claim. The title is auctioned only through the PAR escrow program."
+            : "Escrow, because Escrow is selected on Claim. The title is sold only through the PAR escrow program."
+          : "Tensor, because Tensor is selected on Claim. The title is listed through Tensor's marketplace program.",
+      ],
       ["Object", `${draft.assetName || draft.objectName}. ${draft.kind}. ${draft.existsNow === "yes" ? "It exists now." : "It does not exist yet."}`],
       ["Serial", draft.serial.trim() || "None"],
       ["Holder", `${draft.holder}, ${draft.where}.`],
@@ -501,15 +533,36 @@ export function AssetDesk() {
       ["Work", draft.work],
       ["Claim", draft.claim],
       ["Redemption", `The holder of the title claims it. Delivery takes ${draft.shipDays} days after the claim. ${draft.shipping} If a claim goes wrong: ${draft.terms}`],
-      ["Title sale", `The title is listed from the PAR sale page through the ${saleVenueWords(rail)}, only for ${symbol || "the token"}, not before ${draft.saleDays} days after graduation. ${
+      [
+        "Title sale",
         rail === "escrow"
-          ? `${draft.sale === "auction" ? `It is an auction. The clock starts on the first bid at the reserve and runs ${AUCTION_HOURS} hours. A bid in the last hour extends it ${AUCTION_EXTEND_HOURS} hour. With no bid it sits ${AUCTION_SIT_DAYS} days and does not return on its own. ` : "The first person to pay the price gets it. "}${SALE_BURN_PERCENT}% of the price is burned, ${creatorSalePercent()}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-          : `${SALE_BURN_PERCENT}% of the price is burned and ${100 - SALE_BURN_PERCENT}% goes to the creator.`
-      }`],
-      ["Token", `${draft.tokenName} (${symbol}). ${COIN_WORDS}`],
-      ["Curve", `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee is put back into the pool after the lock.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`],
+          ? `Escrow is selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program, only for ${symbol || "the token"}, once the sale opens ${draft.saleDays} ${waitUnit} after graduation. ${
+              draft.sale === "auction"
+                ? `It is an auction. The reserve is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. ${
+                    shortClock
+                      ? "The clock starts on the first bid at the reserve and runs 72 seconds. A bid in the last second extends it 1 second. With no bid it sits 60 seconds and does not come back on its own."
+                      : `The clock starts on the first bid at the reserve and runs ${AUCTION_HOURS} hours. A bid in the last hour extends it ${AUCTION_EXTEND_HOURS} hour. With no bid it sits ${AUCTION_SIT_DAYS} days and does not come back on its own.`
+                  } `
+                : `The price is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. The first person to pay it gets the title. `
+            }${SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent()}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+          : `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${symbol || "the token"}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`,
+      ],
+      [
+        "Token",
+        `${draft.tokenName} (${symbol}). Token address ${tokenMint}. ${BASE_DECIMALS} decimals. Supply 1,000,000,000. Quoted in ${unit}. Quote mint ${quoteMint}. Pool ${poolAddress}. ${COIN_WORDS} The picture on the Object step is the token image and the record image.`,
+      ],
+      [
+        "Picture",
+        pictureView
+          ? "The picture on this sheet is the token image and the record image."
+          : "No picture yet. Add one on the Object step. That picture is the token image and the record image.",
+      ],
+      [
+        "Curve",
+        `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} ${draft.dynamicFee ? "A volatility fee can add at most one fifth of that fee." : "No volatility fee."} Meteora keeps ${METEORA_TRADING_FEE_PERCENT}% of the trading fee. PAR keeps ${platformCut}%. The creator keeps ${creatorCut}%. ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee is put back into the pool after the lock.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}, and those shares can be claimed.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`,
+      ],
     ],
-    [draft, symbol, unit, sizeLine, curve.locked, rail],
+    [draft, symbol, unit, sizeLine, curve.locked, rail, waitUnit, shortClock, tokenMint, quoteMint, poolAddress, pictureView, platformCut, creatorCut],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -748,13 +801,10 @@ export function AssetDesk() {
             <textarea value={draft.claim} onChange={(event) => patch({ claim: event.target.value })} rows={4} />
           </label>
           <p className="note">
-            There is one asset and one title. {COIN_WORDS} The title can be bought {draft.saleDays || "some"} days
-            after graduation.{" "}
-            The Tensor path keeps the title in your wallet. It is not frozen. When the sale opens, you list it on
-            its PAR sale page. That page uses Tensor&apos;s program. Tensor pays you the full price, and you burn{" "}
-            {SALE_BURN_PERCENT}% of it. The listing may also show on Tensor&apos;s site. The escrow path holds the
-            title. At the sale it burns {SALE_BURN_PERCENT}%, pays {creatorSalePercent()}% to the creator, and pays{" "}
-            {SALE_PROGRAM_FEE_PERCENT}% to the PAR program.
+            There is one asset and one title. {COIN_WORDS} The title can be bought {draft.saleDays || "some"} {waitUnit} after graduation.{" "}
+            {rail === "escrow"
+              ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${SALE_BURN_PERCENT}%, pays you ${creatorSalePercent()}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
+              : `Tensor is selected. The title stays in your wallet. When the sale opens, you list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`}
           </p>
           <div className="segmented" role="group" aria-label="Title path">
             <button type="button" aria-pressed={rail !== "escrow"} onClick={() => patch({ hold: "wallet" })}>
@@ -820,11 +870,83 @@ export function AssetDesk() {
                   Auction
                 </button>
               </div>
-              <p className="note">
-                {draft.sale === "auction"
-                  ? `The title sits after the wait. The first bid at the reserve starts a ${AUCTION_HOURS}-hour clock. A bid in the last hour moves the end out by ${AUCTION_EXTEND_HOURS} hour. If nobody bids, it stays ${AUCTION_SIT_DAYS} days and does not come back on its own.`
-                  : "The first person to pay the price gets the title."}
-              </p>
+              <label>
+                {draft.sale === "auction" ? `Reserve, in ${symbol || "this token"}` : `Price, in ${symbol || "this token"}`}
+                <input
+                  value={draft.titlePrice}
+                  onChange={(event) => patch({ titlePrice: event.target.value.replace(/[^\d.]/g, "") })}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                />
+                <span className="note">
+                  {draft.sale === "auction"
+                    ? "A bid at or above this reserve starts the clock. You can change the reserve until the first bid."
+                    : "The first person to pay this price gets the title. You can change the price until a buyer pays."}
+                </span>
+              </label>
+              <dl className="quote-slip">
+                <div>
+                  <dt>{draft.sale === "auction" ? "Reserve" : "Price"}</dt>
+                  <dd>{draft.titlePrice.trim() || "Type it above"} {symbol || "tokens"}</dd>
+                </div>
+                <div>
+                  <dt>Opens</dt>
+                  <dd>
+                    {draft.saleDays || "unset"} days after graduation.
+                    {cluster === "devnet" ? " On the practice network the escrow counts each of these days as one second." : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Paid in</dt>
+                  <dd>This token only.</dd>
+                </div>
+                <div>
+                  <dt>Burn</dt>
+                  <dd>{SALE_BURN_PERCENT}% is burned by the escrow.</dd>
+                </div>
+                <div>
+                  <dt>Creator</dt>
+                  <dd>{creatorSalePercent()}% goes to you.</dd>
+                </div>
+                <div>
+                  <dt>Program</dt>
+                  <dd>{SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.</dd>
+                </div>
+                {draft.sale === "auction" ? (
+                  <>
+                    <div>
+                      <dt>Clock</dt>
+                      <dd>
+                        {AUCTION_HOURS} hours after the first bid at the reserve.
+                        {cluster === "devnet" ? " On the practice network this clock is 72 seconds." : ""} The escrow program sets this clock.
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Extension</dt>
+                      <dd>
+                        A bid in the last hour moves the end to {AUCTION_EXTEND_HOURS} hour after that bid.
+                        {cluster === "devnet" ? " On the practice network that extension is 1 second." : ""}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>No bid</dt>
+                      <dd>
+                        The title stays {AUCTION_SIT_DAYS} days. You can take it back after that. It does not come back on its own.
+                        {cluster === "devnet" ? " On the practice network that wait is 60 seconds." : ""}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Finish</dt>
+                      <dd>This site finishes the auction when the clock ends.</dd>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <dt>Who gets it</dt>
+                    <dd>The first person to pay the price.</dd>
+                  </div>
+                )}
+              </dl>
             </>
           ) : null}
         </form>
@@ -974,13 +1096,30 @@ export function AssetDesk() {
             The amount is the fee percent above. Meteora can add a volatility piece on top of that percent while the price is moving fast. The piece is at most one fifth of the fee you typed, so a 25% fee can rise by up to 5 points, then it fades when the price is calm. The two together still stop at 99%. There is no second box: the ceiling is one fifth of the fee already typed. It does not change the lock.
           </p>
           <section className="card">
-            <h2>Every fee on this object</h2>
-            <p>Curve fee. Buyers pay the percent you type while the coin is still on the curve. A flat fee stays there. A falling fee moves from the opening percent to the ending percent over the clock you pick, either in equal steps or faster at the start.</p>
-            <p>Volatility fee. Optional. It is extra, and only while the price is moving. Its ceiling is one fifth of the curve fee. The total still stops at 99%.</p>
-            <p>Who receives the curve fee. Meteora keeps 20% of it. That share is fixed. Of the whole fee, the platform keeps the percent on the admin page, 20% unless an admin changes it, and the creator keeps the rest. At 20% platform, that is Meteora 20%, platform 20%, creator 60%.</p>
-            <p>Opening the pool. Meteora takes 0.2% of the tokens and 0.2% of the quote as the pool opens. That share cannot be turned off. This page does not add a second migration skim, and it does not charge a pool creation fee.</p>
-            <p>Pool fee after the lock. Every later trade pays the pool fee. Meteora keeps 20% of that fee first. The other 80% sits on the locked position: 25% of it is the platform and 75% is the creator, which is 20% and 60% of the whole fee. If you put fees back into the pool, the share you type of that 80% is added back. At 100%, nothing of that pool fee is left to claim. The locked tokens and quote stay in the pool.</p>
-            <p>The title. On the escrow path the program burns the percent you choose, keeps 2%, and sends the rest to the creator. At a 25% burn the creator receives 73%. On the Tensor path the creator receives the list price. The buyer pays Tensor about 2% on top. This platform does not take a cut of a Tensor sale.</p>
+            <h2>The fee on this form</h2>
+            <p>
+              Buyers pay the percent you type above, on each trade while the coin is on the curve. A flat fee stays at that percent. A falling fee moves from the opening percent to the ending percent.
+            </p>
+            <p>Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of that fee. That share stays on.</p>
+            <p>
+              {platformCut === 0
+                ? `PAR keeps none of that fee. You keep the other ${creatorCut}%.`
+                : `PAR keeps ${platformCut}% of that fee. You keep ${creatorCut}%. Those shares stay on for this coin.`}
+            </p>
+            <p>
+              You keep your share the whole time the coin trades on the curve. Volatility is optional. Leave that box empty and there is no volatility fee. Checked, Meteora can add at most one fifth of the fee you typed, and the total still stops at 99%.
+            </p>
+            <p>
+              After the lock, trades pay the pool fee below. Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of that fee too.
+              {platformCut === 0 ? " You keep the other 80%." : ` You keep ${creatorCut}% and PAR keeps ${platformCut}%.`}
+              {" "}Putting pool fees back into the pool is optional, and it can be off. Leave it off and those shares can be claimed. Turn it on and the share you type is added back into the pool. At 100%, nothing of that pool fee is left to claim. The locked tokens and quote stay in the pool either way.
+            </p>
+            <p>When the pool opens, Meteora takes 0.2% of the tokens and 0.2% of the quote. That share stays on. This form adds no second skim and charges no pool creation fee.</p>
+            <p>
+              {rail === "escrow"
+                ? `The title sale is separate from this trading fee. Escrow is selected, so the title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program. The program burns ${SALE_BURN_PERCENT}% of the price, keeps ${SALE_PROGRAM_FEE_PERCENT}%, and pays you ${creatorSalePercent()}%.`
+                : `The title sale is separate from this trading fee. Tensor is selected, so the title is listed through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of the price and keep the rest.`}
+            </p>
           </section>
           <label className="check">
             <input type="checkbox" checked={draft.compoundOn} onChange={(event) => patch({ compoundOn: event.target.checked })} />
@@ -1096,10 +1235,43 @@ export function AssetDesk() {
             <h2>
               {draft.tokenName || "Token"} <span>{symbol}</span>
             </h2>
+            {pictureView ? (
+              <img className="asset-picture" src={pictureView} alt={draft.tokenName || "Token"} />
+            ) : (
+              <p className="note">No picture yet. The picture from the Object step is the token image and the record image.</p>
+            )}
             <dl>
+              <div>
+                <dt>Token address</dt>
+                <dd>{tokenMint}</dd>
+              </div>
+              <div>
+                <dt>Name</dt>
+                <dd>{draft.tokenName || "Token"}</dd>
+              </div>
+              <div>
+                <dt>Symbol</dt>
+                <dd>{symbol || "Unset"}</dd>
+              </div>
+              <div>
+                <dt>Decimals</dt>
+                <dd>{BASE_DECIMALS}</dd>
+              </div>
+              <div>
+                <dt>Supply</dt>
+                <dd>1,000,000,000</dd>
+              </div>
               <div>
                 <dt>Quote</dt>
                 <dd>{unit}</dd>
+              </div>
+              <div>
+                <dt>Quote mint</dt>
+                <dd>{quoteMint}</dd>
+              </div>
+              <div>
+                <dt>Pool</dt>
+                <dd>{poolAddress}</dd>
               </div>
               <div>
                 <dt>Par</dt>
@@ -1119,6 +1291,21 @@ export function AssetDesk() {
                   {draft.fee === "flat"
                     ? `${draft.feeOpen}% until graduation`
                     : `${draft.feeOpen}% falling ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%`}
+                  {draft.dynamicFee ? " Volatility can add at most one fifth of that fee." : " No volatility fee."}
+                </dd>
+              </div>
+              <div>
+                <dt>Fee split</dt>
+                <dd>
+                  Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%.
+                </dd>
+              </div>
+              <div>
+                <dt>Sale path</dt>
+                <dd>
+                  {rail === "escrow"
+                    ? `PAR escrow. ${draft.sale === "auction" ? "Auction" : "Fixed price"} at ${draft.titlePrice.trim() || "unset"} ${symbol || "tokens"}. Opens ${draft.saleDays} ${waitUnit} after graduation.`
+                    : `Tensor. Opens ${draft.saleDays} days after graduation. Listed from the PAR sale page.`}
                 </dd>
               </div>
               <div>
@@ -1142,7 +1329,16 @@ export function AssetDesk() {
 
       {step === "Sheet" ? (
         <div className="asset-sheet">
-          <p className="note">This is your record sheet, your meta sheet. Both NFTs carry it.</p>
+          <p className="note">
+            {rail === "escrow"
+              ? draft.sale === "auction"
+                ? "Sale path: PAR escrow. These words say the title is auctioned only through the PAR escrow program, because Escrow is selected on Claim."
+                : "Sale path: PAR escrow. These words say the title is sold only through the PAR escrow program, because Escrow is selected on Claim."
+              : "Sale path: Tensor. These words say the title is listed through Tensor's marketplace program, because Tensor is selected on Claim."}
+          </p>
+          <p className="note">
+            The NFT in a wallet shows the name, the picture, and short traits: the token address, the sale path, and a link named full sheet. That link is a page on Arweave. Opening it shows this whole sheet, the promises, the token address, and the picture. The same facts are stored in the record file the NFT points at.
+          </p>
           <ol className="beats asset-beats">
             {sheet.map(([title, body]) => (
               <li key={title}>
@@ -1162,6 +1358,7 @@ export function AssetDesk() {
             problem={firstProblem(draft, checks)}
             platform={platform}
             curveLines={[curve.locked, sizeLine].filter(Boolean).join(" ")}
+            preparedKeys={preparedKeys}
           />
         </div>
       ) : null}

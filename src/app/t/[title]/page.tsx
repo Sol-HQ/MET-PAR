@@ -1,12 +1,13 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
-import { DBC_PROGRAM_ID, explorerAccount, rpcUrl, type ClusterName } from "@/lib/constants";
-import { formatMoney } from "@/lib/format";
-import { loadPool } from "@/lib/load-pool";
-import { readRecord } from "@/lib/record";
-import { readCopy } from "@/lib/record-copy";
+import { ObjectPicture } from "@/components/AssetOnPool";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { SaleTrade } from "@/components/SaleTrade";
+import { DBC_PROGRAM_ID, explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
+import { formatMoney, shortAddress } from "@/lib/format";
+import { loadPool } from "@/lib/load-pool";
+import { RECORD_VAULT, readRecord } from "@/lib/record";
+import { readCopy } from "@/lib/record-copy";
 import { creatorSalePercent, ESCROW_PROGRAM, readListing, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 const TOKEN_DECIMALS = 6;
@@ -27,6 +28,9 @@ type Sheet = {
   name?: string;
   description?: string;
   image?: string;
+  claim?: string;
+  handoff?: string;
+  promises?: string[];
   record?: {
     pitch?: string;
     object?: { story?: string; name?: string; kind?: string };
@@ -40,6 +44,9 @@ type Sheet = {
 function writtenLines(sheet: Sheet): string[] {
   const lines = [
     sheet.description || "",
+    sheet.claim ? `Claim: ${sheet.claim}` : "",
+    sheet.handoff || "",
+    ...(sheet.promises || []),
     sheet.record?.object?.story || "",
     sheet.record?.pitch || "",
     sheet.record?.claim?.text ? `Claim: ${sheet.record.claim.text}` : "",
@@ -50,6 +57,25 @@ function writtenLines(sheet: Sheet): string[] {
     ...(sheet.record?.title?.promises || []),
   ];
   return lines.map((line) => line.trim()).filter(Boolean);
+}
+
+async function firstSeen(connection: Connection, address: string): Promise<{ signature: string; at: number | null } | null> {
+  if (!ADDRESS.test(address)) return null;
+  try {
+    let before: string | undefined;
+    let found: { signature: string; at: number | null } | null = null;
+    for (let page = 0; page < 4; page += 1) {
+      const rows = await connection.getSignaturesForAddress(new PublicKey(address), { limit: 1000, before });
+      if (!rows.length) break;
+      const last = rows[rows.length - 1];
+      found = { signature: last.signature, at: last.blockTime ?? null };
+      if (rows.length < 1000) break;
+      before = last.signature;
+    }
+    return found;
+  } catch {
+    return null;
+  }
 }
 
 function attributeList(heading: string, rows: Record<string, string>) {
@@ -134,12 +160,16 @@ export default async function SalePage({
     } catch {
       sheet = { description: stored };
     }
-  } else if (record?.uri?.startsWith("https://arweave.net/")) {
+  } else if (record?.uri?.startsWith("https://")) {
     sheet = (await fetch(record.uri, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : {}))
       .catch(() => ({}))) as Sheet;
   }
   const prose = writtenLines(sheet);
+  const [recordMint, titleMint] = await Promise.all([
+    firstSeen(connection, recordAddress),
+    firstSeen(connection, address),
+  ]);
   const pool = record?.attributes.pool || "";
   const sale = pool ? await poolSale(connection, pool) : null;
   const snapshot = pool ? await loadPool(connection, pool).catch(() => null) : null;
@@ -180,18 +210,190 @@ export default async function SalePage({
         ? `The token has not graduated. The sale opens ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} after it does.`
         : leftEscrow
           ? "The sale finished. The title has left the escrow."
-          : opensAt
-          ? `The token graduated. The sale opens ${day(opensAt)}.`
-          : saleOpen
+          : opensAt && now >= opensAt
+            ? listing?.sale === "auction"
+              ? `The auction is open. It opened ${day(opensAt)}.`
+              : `The sale is open. It opened ${day(opensAt)}.`
+            : opensAt
+              ? `The token graduated. The sale opens ${day(opensAt)}.`
+              : saleOpen
             ? `The sale is open. It opened ${day(curveOpensAt)}.`
             : curveOpensAt
               ? `The token graduated on ${day(finishedAt)}. The sale opens ${day(curveOpensAt)}.`
               : `The token graduated. The sale opens ${delay} days after graduation.`;
 
+  const inEscrow = Boolean(status?.rail === "escrow" && status.listing && title.owner === status.listing);
+  const tensorOpen = Boolean(status?.tensor && saleOpen);
+  const creatorHolds = Boolean(
+    status?.rail === "creator" && record && status.owner === record.attributes.creator && !status.tensor,
+  );
+  const sold =
+    leftEscrow ||
+    Boolean(
+      status?.rail === "creator" && record && status.owner && status.owner !== record.attributes.creator && !status.tensor,
+    );
+  const auction = listing?.sale === "auction";
+  const clockOver = Boolean(auction && listing && listing.endsAt > 0 && now >= listing.endsAt && inEscrow);
+  const forSaleNow = (inEscrow && opensAt > 0 && now >= opensAt && !clockOver) || tensorOpen;
+  const stateLine = !title.exists
+    ? "This title is not on chain."
+    : sold
+      ? "Sold."
+      : clockOver
+        ? "The auction clock has ended."
+        : auction && forSaleNow
+          ? "In auction."
+          : forSaleNow
+            ? "For sale."
+            : graduated === false
+              ? "Waiting for graduation."
+              : inEscrow
+                ? "Waiting for the sale to open."
+                : creatorHolds
+                  ? "The creator holds this title. It is not listed."
+                  : saleLine;
+  const holderLine = !title.exists
+    ? "The title is not on chain."
+    : inEscrow
+      ? "The PAR escrow holds this title."
+      : status?.tensor
+        ? "Tensor's marketplace program holds this title."
+        : creatorHolds
+          ? "The creator wallet holds this title."
+          : `The wallet ${shortAddress(title.owner)} holds this title.`;
+  const vault = record?.attributes.vault || RECORD_VAULT[cluster];
+  const objectName = sheet.name || sheet.record?.object?.name || title.name || "This object";
+
   return (
     <section className="card record-create">
-      <p className="eyebrow">Title sale</p>
-      <h2>{title.name || "Unknown title"}</h2>
+      <p className="eyebrow">Sales page</p>
+      <h2>{objectName}</h2>
+      <p className="object-status">{stateLine}</p>
+      <p>
+        This token{symbol && symbol !== "the token" ? `, ${symbol},` : ""} is attached to this real-world asset. {holderLine} {saleLine}{" "}
+        {pool ? <Link href={`/pool/${pool}`}>Open the coin page</Link> : null}
+      </p>
+      <ObjectPicture src={typeof sheet.image === "string" ? sheet.image : ""} alt={objectName} />
+      {sold ? (
+        <>
+          <h2>Not for purchase</h2>
+          <p>This title has been sold. The purchase is closed.</p>
+        </>
+      ) : null}
+      {inEscrow && listing && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
+        <>
+          <h2>{forSaleNow ? (auction ? "In auction" : "Available for purchase") : "Purchase"}</h2>
+          <p className="note">
+            {forSaleNow
+              ? `This title is available for purchase from the PAR escrow, paid in ${symbol}.`
+              : `The PAR escrow holds this title. Purchase stays closed until ${graduated === false ? "the coin graduates and the wait ends" : "the sale opens"}.`}
+          </p>
+          <EscrowTrade
+            pageCluster={cluster}
+            program={ESCROW_PROGRAM[cluster]}
+            title={address}
+            mint={record.attributes.mint}
+            creator={listing.creator}
+            pool={listing.pool}
+            symbol={symbol}
+            price={listing.price.toString()}
+            burnPercent={listing.burnPercent}
+            sale={listing.sale}
+            graduatedAt={listing.graduatedAt}
+            delaySeconds={listing.delaySeconds}
+            highBid={listing.highBid.toString()}
+            previousBidder={listing.highBidder}
+            endsAt={listing.endsAt}
+            curveFull={snapshot?.isMigrated === true}
+          />
+        </>
+      ) : null}
+      {status?.rail === "creator" && record?.attributes.mint && !sold ? (
+        <>
+          <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
+          <p className="note">
+            {tensorOpen
+              ? `This title is available for purchase through Tensor's program, paid in ${symbol}.`
+              : `The creator lists this title through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
+          </p>
+          <SaleTrade
+            pageCluster={cluster}
+            title={address}
+            mint={record.attributes.mint}
+            creator={record.attributes.creator}
+            symbol={symbol}
+            burn={Number.isFinite(burn) ? burn : 0}
+            delayDays={Number.isFinite(delay) ? delay : 0}
+            finishedAt={finishedAt}
+            graduated={graduated === true}
+            holdsTitle={creatorHolds}
+            listing={
+              status.tensor
+                ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
+                : null
+            }
+          />
+        </>
+      ) : null}
+      <h2>How this was minted</h2>
+      <dl className="quote-slip">
+        <div>
+          <dt>When the record was minted</dt>
+          <dd>
+            {recordMint?.at ? day(recordMint.at) : "The chain did not return a mint time."}
+            {recordMint ? (
+              <>
+                {" "}
+                <a href={explorerTx(recordMint.signature, cluster)} target="_blank" rel="noreferrer">
+                  Mint transaction
+                </a>
+              </>
+            ) : null}
+          </dd>
+        </div>
+        <div>
+          <dt>When the title was minted</dt>
+          <dd>
+            {titleMint?.at ? day(titleMint.at) : "The chain did not return a mint time."}
+            {titleMint ? (
+              <>
+                {" "}
+                <a href={explorerTx(titleMint.signature, cluster)} target="_blank" rel="noreferrer">
+                  Mint transaction
+                </a>
+              </>
+            ) : null}
+          </dd>
+        </div>
+        <div>
+          <dt>Record minted to</dt>
+          <dd>
+            The program vault{vault ? ` ${vault}` : ""}. It stays frozen there.
+          </dd>
+        </div>
+        <div>
+          <dt>Title minted to</dt>
+          <dd>
+            {status?.rail === "escrow"
+              ? "The creator minted the title, then placed it in the PAR escrow."
+              : "The creator minted the title into the creator wallet."}
+          </dd>
+        </div>
+        <div>
+          <dt>Held now</dt>
+          <dd>
+            {holderLine}
+            {title.owner ? ` ${title.owner}` : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>How</dt>
+          <dd>
+            Metaplex Core. The record is the master. It was minted to the program vault and frozen there, and its words are locked. The title is the one edition that can be sold. Its words are locked, and its update authority is none.
+          </dd>
+        </div>
+      </dl>
+      <h2>{title.name || "Title"}</h2>
       {attributeList("Written on this title", title.attributes)}
       {record?.exists ? attributeList("Written on the record", record.attributes) : null}
       {prose.length ? (
@@ -206,20 +408,13 @@ export default async function SalePage({
           The long object story is not stored beside this test record. What you can compare is the attribute list above. Those lines are the words on the NFT.
         </p>
       )}
-      {typeof sheet.image === "string" && sheet.image ? (
-        <img src={sheet.image} alt={title.name} style={{ maxWidth: 320, borderRadius: 12 }} />
-      ) : null}
       <p className="note">
         This coin is a payment token and a meme. It pays for this title. The meme is the joy and heart of the object. It is not a share, and it pays nothing.{" "}
-        {status?.rail === "escrow"
-          ? `The PAR escrow holds this title. A buyer calls that program and pays in ${symbol} only. `
-          : `The creator lists this title on this page, through Tensor's program, paid in ${symbol} only. The listing may also show on Tensor's own site. `}
         {Number.isFinite(burn)
           ? status?.rail === "escrow"
-            ? `${burn}% of the price is burned by the escrow, ${creatorSalePercent(burn)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program. `
-            : `The creator is paid the full price and promised to burn ${burn}% of it. `
+            ? `${burn}% of the price is burned by the escrow, ${creatorSalePercent(burn)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+            : `The creator is paid the full price and promised to burn ${burn}% of it.`
           : ""}
-        {saleLine}
       </p>
       {snapshot ? (
         <section className="quotes" aria-label="This coin">
@@ -285,11 +480,22 @@ export default async function SalePage({
       {status ? (
         <ul className="record-checks">
           <li className="ok">The record in the vault names this title</li>
-          {status.checks.map((check) => (
-            <li key={check.label} className={check.ok ? "ok" : "no"}>
-              {check.label}
-            </li>
-          ))}
+          {status.checks.map((check) => {
+            const finished =
+              (sold && check.label === "The escrow holds the title") ||
+              (sold && check.label === "The creator wallet still holds the title");
+            const label =
+              sold && check.label === "The escrow holds the title"
+                ? "The title has left the escrow"
+                : sold && check.label === "The creator wallet still holds the title"
+                  ? "The title has moved to the buyer"
+                  : check.label;
+            return (
+              <li key={check.label} className={finished || check.ok ? "ok" : "no"}>
+                {label}
+              </li>
+            );
+          })}
           {status.tensor ? (
             <li className={saleOpen ? "ok" : "no"}>
               {saleOpen ? "The sale is open" : "Listed before the sale could open"}
@@ -299,45 +505,6 @@ export default async function SalePage({
       ) : (
         <p className="error">No master in the program vault names this title. Treat it as unverified.</p>
       )}
-      {status?.rail === "escrow" && listing && record?.attributes.mint && ESCROW_PROGRAM[cluster] ? (
-        <EscrowTrade
-          pageCluster={cluster}
-          program={ESCROW_PROGRAM[cluster]}
-          title={address}
-          mint={record.attributes.mint}
-          creator={listing.creator}
-          pool={listing.pool}
-          symbol={symbol}
-          price={listing.price.toString()}
-          burnPercent={listing.burnPercent}
-          sale={listing.sale}
-          graduatedAt={listing.graduatedAt}
-          delaySeconds={listing.delaySeconds}
-          highBid={listing.highBid.toString()}
-          previousBidder={listing.highBidder}
-          endsAt={listing.endsAt}
-          curveFull={snapshot?.isMigrated === true}
-        />
-      ) : null}
-      {status?.rail === "creator" && record?.attributes.mint ? (
-        <SaleTrade
-          pageCluster={cluster}
-          title={address}
-          mint={record.attributes.mint}
-          creator={record.attributes.creator}
-          symbol={symbol}
-          burn={Number.isFinite(burn) ? burn : 0}
-          delayDays={Number.isFinite(delay) ? delay : 0}
-          finishedAt={finishedAt}
-          graduated={graduated === true}
-          holdsTitle={status.owner === record.attributes.creator && !status.tensor}
-          listing={
-            status.tensor
-              ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
-              : null
-          }
-        />
-      ) : null}
       {sheet.record?.title?.promises?.length ? (
         <>
           <p className="eyebrow">What the creator signed</p>
@@ -349,9 +516,11 @@ export default async function SalePage({
         </>
       ) : null}
       <p className="note">
-        {status?.rail === "escrow"
-          ? "A buyer calls the PAR escrow program from this page. "
-          : "Listing and buying on this page both go through Tensor's program. "}
+        {sold
+          ? "This sale is closed. "
+          : status?.rail === "escrow"
+            ? "A buyer calls the PAR escrow program from this page. "
+            : "Listing and buying on this page both go through Tensor's program. "}
         {pool ? <Link href={`/pool/${pool}`}>Open the pool page</Link> : null}
         {pool ? " · " : null}
         <a href={explorerAccount(address, cluster)} target="_blank" rel="noreferrer">

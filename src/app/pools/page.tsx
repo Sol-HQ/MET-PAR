@@ -23,7 +23,7 @@ export default function PoolsPage() {
           </Link>
         </div>
       </section>
-      <PoolBoard />
+      <PoolBoard showAssets />
     </div>
   );
 }

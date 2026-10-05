@@ -1013,7 +1013,7 @@ export function Desk() {
           Add a volatility fee on the curve
         </label>
         <p className="note">
-          The amount is the fee percent above. The volatility piece is at most one fifth of that percent while the price is moving, then it fades. A 25% fee can rise by up to 5 points. The two together still stop at 99%. There is no second box. It does not change how much quote locks. Meteora keeps 20% of the trading fee. The platform keeps its percent of the whole fee, 20% unless an admin changes it, and the creator keeps the rest.
+          The amount is the fee percent above. The volatility piece is at most one fifth of that percent while the price is moving, then it fades. A 25% fee can rise by up to 5 points. The two together still stop at 99%. There is no second box. It does not change how much quote locks. Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of the trading fee. PAR keeps {platform.platformFeePercent}%. You keep {creatorSharePercent(platform.platformFeePercent)}%. Those shares stay on for this coin.
         </p>
         <label className="check">
           <input type="checkbox" checked={compoundOn} onChange={(event) => setCompoundOn(event.target.checked)} />
@@ -1148,11 +1148,9 @@ export function Desk() {
           <div>
             <dt>Where the trading fee goes</dt>
             <dd>
-              Meteora {METEORA_TRADING_FEE_PERCENT}%, fixed in the program. Platform {platform.platformFeePercent}%.
-              Token creator {creatorSharePercent(platform.platformFeePercent)}%. Fees accrue on the pool as
-              people trade. The creator wallet claims the creator share on the token page. The platform wallet
-              claims the platform share on that same page, and admin lists every token for the same claim. The
-              creator cannot change this split.
+              Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platform.platformFeePercent}%. You{" "}
+              {creatorSharePercent(platform.platformFeePercent)}%. Those shares stay on for this coin. You claim
+              your share on the token page.
             </dd>
           </div>
           <div>

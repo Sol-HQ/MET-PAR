@@ -592,6 +592,26 @@ input.bad {
   background: var(--paper);
 }
 
+.object-board {
+  display: grid;
+  gap: 1rem;
+}
+
+.object-shot {
+  width: min(100%, 20rem);
+  height: auto;
+  display: block;
+  margin: 0.4rem 0 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.object-status {
+  font-weight: 650;
+  margin: 0 0 0.8rem;
+}
+
 .rule {
   margin: 0;
   font-family: var(--mono);
@@ -881,6 +901,11 @@ textarea {
 
 .rights-grid .card p {
   margin: 0;
+}
+
+.rights-grid dd,
+.asset-beats span {
+  overflow-wrap: anywhere;
 }
 
 .asset-beats {

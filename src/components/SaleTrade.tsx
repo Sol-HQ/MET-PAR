@@ -169,8 +169,8 @@ export function SaleTrade({
             {busy ? "Listing…" : "List on this page"}
           </button>
         ) : null}
-        {canBuy && wallet && wallet !== creator ? (
-          <button type="button" className="solid" disabled={busy} onClick={buy}>
+        {canBuy && wallet !== creator ? (
+          <button type="button" className="solid" disabled={busy || !wallet} onClick={buy}>
             {busy ? "Buying…" : `Buy for ${formatTokenAmount(buyerTotal(BigInt(listing?.amount || "0")))} ${symbol}`}
           </button>
         ) : null}

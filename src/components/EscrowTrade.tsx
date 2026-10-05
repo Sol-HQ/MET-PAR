@@ -239,22 +239,22 @@ export function EscrowTrade({
             {busy ? "Working…" : "Mark graduation"}
           </button>
         ) : null}
-        {open && sale === "fixed" && publicKey && !clockOver ? (
-          <button type="button" className="solid" disabled={busy} onClick={() => void buy().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The buy was not sent."))}>
+        {open && sale === "fixed" && !clockOver ? (
+          <button type="button" className="solid" disabled={busy || !publicKey} onClick={() => void buy().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The buy was not sent."))}>
             {busy ? "Buying…" : `Buy for ${formatTokenAmount(reserve)} ${symbol}`}
           </button>
         ) : null}
       </div>
-      {open && sale === "auction" && publicKey && !clockOver ? (
+      {open && sale === "auction" && !clockOver ? (
         <label>
           Bid in {symbol}
           <input value={bid} onChange={(event) => setBid(event.target.value)} inputMode="decimal" />
-          <button type="button" className="solid" disabled={busy} onClick={() => void placeBid().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The bid was not sent."))}>
+          <button type="button" className="solid" disabled={busy || !publicKey} onClick={() => void placeBid().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The bid was not sent."))}>
             {busy ? "Bidding…" : "Place the bid"}
           </button>
         </label>
       ) : null}
-      {!publicKey ? <p className="note">Connect a wallet to mark graduation, buy, or bid.</p> : null}
+      {!publicKey && (needsMark || (open && !clockOver)) ? <p className="note">Connect a wallet to {needsMark ? "mark graduation, " : ""}{sale === "auction" ? "bid" : "buy"}.</p> : null}
       {done.startsWith("http") ? (
         <p className="note">
           <a href={done} target="_blank" rel="noreferrer">

@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
 import { ListingActions } from "@/components/ListingActions";
+import { AssetOnPool } from "@/components/AssetOnPool";
 import { RecordPanel } from "@/components/RecordPanel";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
@@ -841,6 +842,7 @@ export function PoolView({ address }: { address: string }) {
       {!snapshot && !error ? <p>Loading the curve…</p> : null}
       {snapshot ? (
         <>
+          <AssetOnPool pool={snapshot.address} cluster={cluster} />
           <header className="board-title">
             {snapshot.image ? <img className="token-preview" src={snapshot.image} alt="" /> : null}
             <h1>

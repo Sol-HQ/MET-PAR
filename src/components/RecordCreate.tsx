@@ -12,7 +12,7 @@ import { DEFAULT_FEE_DECAY_SECONDS, explorerAccount, explorerTx, quoteMintAddres
 import { readCurveShape, type CurveShape } from "@/lib/curve";
 import { bpsToPercent, formatLamports } from "@/lib/format";
 import { buildLaunchConfig } from "@/lib/launch";
-import { assertCurveFee, parseFeePercent, type PlatformSettings } from "@/lib/platform";
+import { METEORA_TRADING_FEE_PERCENT, assertCurveFee, creatorSharePercent, parseFeePercent, type PlatformSettings } from "@/lib/platform";
 import {
   FREE_UPLOAD_BYTES,
   PUBLIC_ORIGIN,
@@ -25,6 +25,8 @@ import {
   sha256Hex,
 } from "@/lib/record";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
+import { sheetPageHtml } from "@/lib/sheet-html";
+import { parseTokenAmount } from "@/lib/tensor-sale";
 import {
   AUCTION_EXTEND_HOURS,
   AUCTION_HOURS,
@@ -65,19 +67,11 @@ type Plan = {
   venue: string;
   promises: string[];
   lines: string[];
+  recordSheet: boolean;
+  titleSheet: boolean;
 };
 
 type Promise_ = { message: string; signature: string };
-
-const TOKEN_DECIMALS = 6;
-
-/** The first escrow price, in the token's smallest unit. After the burn and the program fee, the creator receives the declared value at par. The creator can reprice later. */
-function openingEscrowPrice(declared: string, par: string): bigint {
-  const tokens = (Number(declared) * 100) / creatorSalePercent() / Number(par);
-  const units = Math.min(Math.ceil(tokens * 10 ** TOKEN_DECIMALS), 1_000_000_000 * 10 ** TOKEN_DECIMALS);
-  if (!Number.isFinite(units) || units <= 0) throw new Error("The declared value and par do not give a title price.");
-  return BigInt(units);
-}
 
 function titleName(assetName: string): string {
   return `${assetName} title`;
@@ -103,19 +97,25 @@ function sheetJson(input: {
   curveLines: string;
   image: { arweave: string; copy: string; sha256: string };
   promise: Promise_;
+  htmlUrl: string;
 }): string {
   const { draft, plan } = input;
   const mint = plan.keys.baseMint.publicKey.toBase58();
   const symbol = draft.symbol.trim().toUpperCase();
+  const saleKind = plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor";
   return JSON.stringify(
     {
       name: draft.assetName,
-      description: draft.story,
+      description: `Full sheet: ${input.htmlUrl}\n\n${draft.story}`,
       image: input.image.arweave,
-      external_url: `${PUBLIC_ORIGIN}/pool/${plan.pool}`,
+      external_url: input.htmlUrl,
       attributes: [
         { trait_type: "Record", value: RECORD_KIND },
         { trait_type: "Token", value: symbol },
+        { trait_type: "Token address", value: mint },
+        { trait_type: "Sold through", value: saleVenueWords(plan.rail) },
+        { trait_type: "Sale", value: saleKind },
+        { trait_type: "Full sheet", value: input.htmlUrl },
         { trait_type: "Title", value: plan.keys.title.publicKey.toBase58() },
         { trait_type: "Declared value", value: `${draft.declared} ${draft.quote}` },
       ],
@@ -136,8 +136,12 @@ function sheetJson(input: {
           mint: plan.keys.baseMint.publicKey.toBase58(),
           name: draft.tokenName,
           symbol,
+          decimals: 6,
+          supply: "1000000000",
           uri: plan.tokenUri,
+          image: input.image.arweave,
           pool: plan.pool,
+          poolPage: `${PUBLIC_ORIGIN}/pool/${plan.pool}`,
           config: plan.keys.config.publicKey.toBase58(),
           quote: draft.quote,
           quoteMint: input.quoteMint,
@@ -171,7 +175,11 @@ function sheetJson(input: {
           endingFee: bpsToPercent(plan.endingBps),
           feeDecaySeconds: plan.openingBps === plan.endingBps ? 0 : DEFAULT_FEE_DECAY_SECONDS,
           migrationFeeBps: plan.shape.compound ? plan.shape.compound.poolFeeBps : plan.migrationFeeBps,
+          volatility: draft.dynamicFee,
+          compound: Boolean(plan.shape.compound),
+          meteoraFeePercent: METEORA_TRADING_FEE_PERCENT,
           platformFeePercent: plan.platformFeePercent,
+          creatorFeePercent: creatorSharePercent(plan.platformFeePercent),
         },
         title: {
           kind: TITLE_KIND,
@@ -188,11 +196,12 @@ function sheetJson(input: {
             burnPercent: SALE_BURN_PERCENT,
             creatorPercent: plan.rail === "escrow" ? creatorSalePercent() : 100 - SALE_BURN_PERCENT,
             programPercent: plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
-            price: "Set by the creator in dollars and paid in this token.",
+            price: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "Set by the creator in this token.",
             burnedBy: plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
             auction:
               plan.rail === "escrow" && draft.sale === "auction"
                 ? {
+                    reserve: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "",
                     clockStarts: "on the first bid at or above the reserve",
                     hours: AUCTION_HOURS,
                     extendHours: AUCTION_EXTEND_HOURS,
@@ -206,6 +215,7 @@ function sheetJson(input: {
         },
         sheet: input.rows.map(([title, body]) => ({ title, body })),
         image: input.image,
+        readableSheet: input.htmlUrl,
       },
     },
     null,
@@ -221,6 +231,7 @@ export function RecordCreate({
   problem,
   platform,
   curveLines,
+  preparedKeys,
 }: {
   draft: Draft;
   rows: [string, string][];
@@ -229,6 +240,7 @@ export function RecordCreate({
   problem: string;
   platform: PlatformSettings;
   curveLines: string;
+  preparedKeys: Keys;
 }) {
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -314,16 +326,12 @@ export function RecordCreate({
         undefined,
         shapeRead.shape,
       );
-      const keys: Keys = {
-        baseMint: Keypair.generate(),
-        config: Keypair.generate(),
-        record: Keypair.generate(),
-        title: Keypair.generate(),
-      };
+      const keys: Keys = preparedKeys;
       const mint = keys.baseMint.publicKey.toBase58();
       const record = keys.record.publicKey.toBase58();
       const title = keys.title.publicKey.toBase58();
-      const creator = wallet.publicKey.toBase58();
+      const payerKey = wallet.publicKey;
+      const creator = payerKey.toBase58();
       const pool = deriveDbcPoolAddress(quoteMint, keys.baseMint.publicKey, keys.config.publicKey).toBase58();
       const tokenUri = recordTokenUri(record, mint, cluster);
       if (tokenUri.length > 200) throw new Error("The token link is over 200 characters.");
@@ -337,9 +345,26 @@ export function RecordCreate({
         sale: draft.sale,
         shortClock: cluster === "devnet" && rail === "escrow",
       });
-      if (rail === "escrow") openingEscrowPrice(draft.declared, draft.par);
+      const titlePrice = rail === "escrow" ? parseTokenAmount(draft.titlePrice) : null;
+      if (rail === "escrow" && !titlePrice) throw new Error("Type the title price in the token on the Claim step.");
 
-      const draftPlan: Plan = { keys, pool, tokenUri, openingBps, endingBps, migrationFeeBps, shape: shapeRead.shape, platformFeePercent, rail, venue, promises, lines: [] };
+      const draftPlan: Plan = {
+        keys,
+        pool,
+        tokenUri,
+        openingBps,
+        endingBps,
+        migrationFeeBps,
+        shape: shapeRead.shape,
+        platformFeePercent,
+        rail,
+        venue,
+        promises,
+        lines: [],
+        recordSheet: false,
+        titleSheet: false,
+      };
+      const sheetSlot = arweaveUrl("x".repeat(43));
       const sampleMessage = promiseMessage({ promises, record, title, mint, creator });
       const sample = sheetJson({
         promise: { message: sampleMessage, signature: "A".repeat(88) },
@@ -351,67 +376,114 @@ export function RecordCreate({
         vault,
         quoteMint: quoteMint.toBase58(),
         curveLines,
-        image: { arweave: arweaveUrl("x".repeat(43)), copy: pictureCopy, sha256: "0".repeat(64) },
+        image: { arweave: sheetSlot, copy: pictureCopy, sha256: "0".repeat(64) },
+        htmlUrl: sheetSlot,
       });
       const sheetBytes = new TextEncoder().encode(sample).length;
       if (sheetBytes > FREE_UPLOAD_BYTES) throw new Error("Your record sheet is over 105 KiB. Shorten the longest fields.");
-
-      const recordTx = new Transaction().add(
-        ...recordInstruction({
-          endpoint: connection.rpcEndpoint,
-          asset: keys.record,
-          payer: wallet.publicKey,
-          vault: new PublicKey(vault),
+      const htmlBytes = new TextEncoder().encode(
+        sheetPageHtml({
           name: draft.assetName,
-          uri: arweaveUrl("x".repeat(43)),
-          attributes: recordAttributes({
-            mint,
-            pool,
-            vault,
-            creator: wallet.publicKey.toBase58(),
-            symbol: draft.symbol.trim().toUpperCase(),
-            quote: draft.quote,
-            par: draft.par,
-            poolPrice: draft.pool,
-            handoffDays: draft.shipDays,
-            declared: draft.declared,
-            sheetSha256: "0".repeat(64),
-            imageSha256: "0".repeat(64),
-            title,
-            titleHeldBy: railWords(rail),
-            serial: draft.serial,
-            makerName: draft.makerName,
-            escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
-          }),
+          pathLine: `${rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
+          rows,
+          promises,
+          imageUrl: sheetSlot,
         }),
-      );
-      const recordPrepared = await prepareTransaction(connection, wallet.publicKey, recordTx, [keys.record]);
-      const recordBytes = recordPrepared.transaction.serialize({ requireAllSignatures: false }).length;
+      ).length;
+      if (htmlBytes > FREE_UPLOAD_BYTES) throw new Error("The readable sheet is over 105 KiB. Shorten the longest fields.");
+
+      const recordFacts = (sheet?: string) =>
+        recordAttributes({
+          mint,
+          pool,
+          vault,
+          creator: payerKey.toBase58(),
+          symbol: draft.symbol.trim().toUpperCase(),
+          quote: draft.quote,
+          par: draft.par,
+          poolPrice: draft.pool,
+          handoffDays: draft.shipDays,
+          declared: draft.declared,
+          sheetSha256: "0".repeat(64),
+          imageSha256: "0".repeat(64),
+          title,
+          titleHeldBy: railWords(rail),
+          serial: draft.serial,
+          makerName: draft.makerName,
+          escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
+          sheet,
+        });
+      const buildRecordTx = (sheet?: string) =>
+        new Transaction().add(
+          ...recordInstruction({
+            endpoint: connection.rpcEndpoint,
+            asset: keys.record,
+            payer: payerKey,
+            vault: new PublicKey(vault),
+            name: draft.assetName,
+            uri: sheetSlot,
+            attributes: recordFacts(sheet),
+          }),
+        );
+      let recordSheet = true;
+      let recordPrepared = await prepareTransaction(connection, wallet.publicKey, buildRecordTx(sheetSlot), [keys.record]);
+      let recordBytes = recordPrepared.transaction.serialize({ requireAllSignatures: false }).length;
+      if (recordBytes > 1232) {
+        recordSheet = false;
+        recordPrepared = await prepareTransaction(connection, wallet.publicKey, buildRecordTx(), [keys.record]);
+        recordBytes = recordPrepared.transaction.serialize({ requireAllSignatures: false }).length;
+        if (recordBytes > 1232) throw new Error(`The record transaction is ${recordBytes} bytes. The limit is 1232.`);
+      }
       const simulated = await connection.simulateTransaction(recordPrepared.transaction, undefined, [keys.record.publicKey]);
       if (simulated.value.err) throw new Error(`The record would fail: ${JSON.stringify(simulated.value.err)}`);
       const recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
 
-      const titleTx = new Transaction().add(
-        ...titleInstructions({
-          endpoint: connection.rpcEndpoint,
-          asset: keys.title,
-          creator: wallet.publicKey,
-          name: titleName(draft.assetName),
-          uri: arweaveUrl("x".repeat(43)),
-          attributes: titleAttributes({ record, mint, pool, creator, rail, delayDays: Number(draft.saleDays), burnPercent: SALE_BURN_PERCENT, venue, program: ESCROW_PROGRAM[cluster], sale: draft.sale, shortClock: cluster === "devnet" && rail === "escrow" }),
-        }),
-      );
-      const titlePrepared = await prepareTransaction(connection, wallet.publicKey, titleTx, [keys.title]);
-      const titleBytes = titlePrepared.transaction.serialize({ requireAllSignatures: false }).length;
+      const titleFacts = (sheet?: string) =>
+        titleAttributes({
+          record,
+          mint,
+          pool,
+          creator,
+          rail,
+          delayDays: Number(draft.saleDays),
+          burnPercent: SALE_BURN_PERCENT,
+          venue,
+          program: ESCROW_PROGRAM[cluster],
+          sale: draft.sale,
+          shortClock: cluster === "devnet" && rail === "escrow",
+          sheet,
+        });
+      const buildTitleTx = (sheet?: string) =>
+        new Transaction().add(
+          ...titleInstructions({
+            endpoint: connection.rpcEndpoint,
+            asset: keys.title,
+            creator: payerKey,
+            name: titleName(draft.assetName),
+            uri: sheetSlot,
+            attributes: titleFacts(sheet),
+          }),
+        );
+      let titleSheet = true;
+      let titlePrepared = await prepareTransaction(connection, wallet.publicKey, buildTitleTx(sheetSlot), [keys.title]);
+      let titleBytes = titlePrepared.transaction.serialize({ requireAllSignatures: false }).length;
+      if (titleBytes > 1232) {
+        titleSheet = false;
+        titlePrepared = await prepareTransaction(connection, wallet.publicKey, buildTitleTx(), [keys.title]);
+        titleBytes = titlePrepared.transaction.serialize({ requireAllSignatures: false }).length;
+        if (titleBytes > 1232) throw new Error(`The title transaction is ${titleBytes} bytes. The limit is 1232.`);
+      }
       const titleSimulated = await connection.simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey]);
       if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
       const titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
+      draftPlan.recordSheet = recordSheet;
+      draftPlan.titleSheet = titleSheet;
 
-      const walletOpens = rail === "escrow" ? "eight" : "seven";
+      const walletOpens = rail === "escrow" ? "nine" : "eight";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
-        `Order: you sign the promises, your record sheet and picture go to Arweave, then the template, the token, the record, and the title${rail === "escrow" ? ", then the title goes into the escrow" : ""}.`,
-        `The wallet opens ${walletOpens} times: the promises, two upload signatures, the template, the token, the record, the title${rail === "escrow" ? ", and the escrow deposit" : ""}.`,
+        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the template, the token, the record, and the title${rail === "escrow" ? ", then the title goes into the escrow" : ""}.`,
+        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the template, the token, the record, the title${rail === "escrow" ? ", and the escrow deposit" : ""}.`,
         `Token: ${draft.tokenName} (${draft.symbol.trim().toUpperCase()})`,
         `Token mint: ${mint}`,
         `Pool: ${pool}`,
@@ -419,10 +491,11 @@ export function RecordCreate({
         `Record: ${record}`,
         `Title: ${title}`,
         `Platform vault: ${vault}`,
-        `The title goes to the ${railWords(rail)}${rail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(rail)}. PAR tracks it at ${venue}`,
+        `The title goes to the ${railWords(rail)}${rail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(rail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
         rail === "escrow"
-          ? `The sale opens ${draft.saleDays} days after graduation. It is paid in ${draft.symbol.trim().toUpperCase()} only: ${SALE_BURN_PERCENT}% is burned, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-          : `The sale opens ${draft.saleDays} days after graduation. It is paid in ${draft.symbol.trim().toUpperCase()} only: ${SALE_BURN_PERCENT}% is burned, ${100 - SALE_BURN_PERCENT}% goes to you.`,
+          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draft.symbol.trim().toUpperCase()}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draft.symbol.trim().toUpperCase()} only: ${SALE_BURN_PERCENT}% is burned by the escrow, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+          : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`,
+        `The wallet NFT carries the token address ${mint}. The full sheet is a readable Arweave page${recordSheet || titleSheet ? ", linked from the NFT as full sheet" : ", linked from the record file"}.`,
         `Token link, frozen at creation: ${tokenUri}`,
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         `Par ${draft.par} ${draft.quote}. Pool price ${draft.pool} ${draft.quote}. ${curveLines}`,
@@ -474,6 +547,23 @@ export function RecordCreate({
       const imageArweave = arweaveUrl(imageUpload.id);
       mark("Picture stored on Arweave", imageArweave);
 
+      const pathLine =
+        plan.rail === "escrow"
+          ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program. Token address: ${keys.baseMint.publicKey.toBase58()}`
+          : `Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program. Token address: ${keys.baseMint.publicKey.toBase58()}`;
+      const htmlUpload = await turbo.upload({
+        data: sheetPageHtml({
+          name: draft.assetName,
+          pathLine,
+          rows,
+          promises: plan.promises,
+          imageUrl: imageArweave,
+        }),
+        dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
+      });
+      const htmlArweave = arweaveUrl(htmlUpload.id);
+      mark("Readable sheet stored on Arweave", htmlArweave);
+
       const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
       const quoteMint = quoteMintAddress(cluster, quoteKind);
       const sheet = sheetJson({
@@ -487,6 +577,7 @@ export function RecordCreate({
         curveLines,
         image: { arweave: imageArweave, copy: pictureCopy, sha256: imageSha256 },
         promise,
+        htmlUrl: htmlArweave,
       });
       const sheetSha256 = await sha256Hex(new TextEncoder().encode(sheet));
       const sheetUpload = await turbo.upload({
@@ -567,6 +658,7 @@ export function RecordCreate({
             serial: draft.serial,
             makerName: draft.makerName,
             escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
+            sheet: plan.recordSheet ? htmlArweave : undefined,
           }),
         }),
       );
@@ -592,6 +684,7 @@ export function RecordCreate({
             program: ESCROW_PROGRAM[cluster],
             sale: draft.sale,
             shortClock: cluster === "devnet" && plan.rail === "escrow",
+            sheet: plan.titleSheet ? htmlArweave : undefined,
           }),
         }),
       );
@@ -604,6 +697,8 @@ export function RecordCreate({
           throw new Error("The escrow path is not available on this network.");
         }
         await waitForAccount(connection, keys.title.publicKey);
+        const typedPrice = parseTokenAmount(draft.titlePrice);
+        if (!typedPrice) throw new Error("Type the title price in the token on the Claim step.");
         const depositTx = new Transaction().add(
           escrowDepositInstruction({
             program: new PublicKey(ESCROW_PROGRAM[cluster]),
@@ -612,7 +707,7 @@ export function RecordCreate({
             record: keys.record.publicKey,
             mint: keys.baseMint.publicKey,
             pool: new PublicKey(pool),
-            price: openingEscrowPrice(draft.declared, draft.par),
+            price: typedPrice,
             delayDays: Number(draft.saleDays),
             burnPercent: SALE_BURN_PERCENT,
             sale: draft.sale,
@@ -663,12 +758,14 @@ export function RecordCreate({
         the program vault and stays there. One edition is made. That edition is the title, and it carries the same
         meta sheet. The NFT on the chain is the proof. PAR keeps a copy of those proofs.
       </p>
-      <p className="note">
-        The Tensor path keeps the title in your wallet. When the sale opens, you list it on its PAR sale page. That
-        page uses Tensor&apos;s program, and the listing may also show on Tensor&apos;s own site. The escrow path
-        puts the title into the PAR escrow. A buyer calls that program. It pays you, burns the share, and hands
-        over the title. {ESCROW_COMING}
-      </p>
+        <p className="note">
+          {rail === "escrow"
+            ? draft.sale === "auction"
+              ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
+              : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
+            : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."}
+          {cluster === "devnet" ? "" : ` ${ESCROW_COMING}`}
+        </p>
       {cluster !== "devnet" ? (
         <p className="error">Records are made on the practice network only until the real network vault is set.</p>
       ) : null}
