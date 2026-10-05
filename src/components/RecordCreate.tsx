@@ -25,7 +25,7 @@ import {
   sha256Hex,
 } from "@/lib/record";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
-import { sheetPageHtml } from "@/lib/sheet-html";
+import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import {
   AUCTION_EXTEND_HOURS,
@@ -67,8 +67,9 @@ type Plan = {
   venue: string;
   promises: string[];
   lines: string[];
-  recordSheet: boolean;
-  titleSheet: boolean;
+  /** Attribute keys dropped so the full sheet link still fits. The sheet link is never in this list. */
+  omitRecord: string[];
+  omitTitle: string[];
 };
 
 type Promise_ = { message: string; signature: string };
@@ -76,6 +77,39 @@ type Promise_ = { message: string; signature: string };
 function titleName(assetName: string): string {
   return `${assetName} title`;
 }
+
+function keepSheet(rows: { key: string; value: string }[], omit: string[]) {
+  const kept = rows.filter((row) => row.key === "full sheet" || row.key === "mint" || row.key === "sale page" || row.key === "sold through" || !omit.includes(row.key));
+  for (const key of ["full sheet", "mint", "sale page", "sold through"]) {
+    if (!kept.some((row) => row.key === key)) throw new Error(`The NFT is missing ${key}.`);
+  }
+  return kept;
+}
+
+/** Other traits can come off. The full sheet link stays. */
+const DROP_BEFORE_SHEET = [
+  "auction",
+  "burned",
+  "image sha256",
+  "sheet sha256",
+  "serial",
+  "maker",
+  "declared",
+  "handoff days",
+  "par",
+  "pool price",
+  "quote",
+  "escrow program",
+  "sale opens",
+  "paid in",
+  "held by",
+  "title held by",
+  "vault",
+  "creator",
+  "title",
+  "record",
+  "sale",
+];
 
 type Progress = { label: string; done: boolean; link?: string };
 
@@ -106,16 +140,24 @@ function sheetJson(input: {
   return JSON.stringify(
     {
       name: draft.assetName,
-      description: `Full sheet: ${input.htmlUrl}\n\n${draft.story}`,
+      description: `${sheetLead({
+        name: draft.assetName,
+        tokenName: draft.tokenName,
+        symbol,
+        mint,
+        soldThrough: saleVenueWords(plan.rail),
+        salePage: plan.venue,
+      })}\n\n${draft.story}\n\nFull sheet: ${input.htmlUrl}`,
       image: input.image.arweave,
       external_url: input.htmlUrl,
       attributes: [
-        { trait_type: "Record", value: RECORD_KIND },
+        { trait_type: "Full sheet", value: input.htmlUrl },
         { trait_type: "Token", value: symbol },
         { trait_type: "Token address", value: mint },
+        { trait_type: "Sale page", value: plan.venue },
         { trait_type: "Sold through", value: saleVenueWords(plan.rail) },
         { trait_type: "Sale", value: saleKind },
-        { trait_type: "Full sheet", value: input.htmlUrl },
+        { trait_type: "Record", value: RECORD_KIND },
         { trait_type: "Title", value: plan.keys.title.publicKey.toBase58() },
         { trait_type: "Declared value", value: `${draft.declared} ${draft.quote}` },
       ],
@@ -123,7 +165,7 @@ function sheetJson(input: {
         category: "image",
         files: [
           { uri: input.image.arweave, type: "image/jpeg" },
-          { uri: input.image.copy, type: "image/jpeg" },
+          { uri: input.htmlUrl, type: "text/html" },
         ],
       },
       record: {
@@ -361,8 +403,8 @@ export function RecordCreate({
         venue,
         promises,
         lines: [],
-        recordSheet: false,
-        titleSheet: false,
+        omitRecord: [],
+        omitTitle: [],
       };
       const sheetSlot = arweaveUrl("x".repeat(43));
       const sampleMessage = promiseMessage({ promises, record, title, mint, creator });
@@ -384,6 +426,12 @@ export function RecordCreate({
       const htmlBytes = new TextEncoder().encode(
         sheetPageHtml({
           name: draft.assetName,
+          tokenName: draft.tokenName,
+          symbol: draft.symbol.trim().toUpperCase(),
+          mint,
+          soldThrough: saleVenueWords(rail),
+          salePage: venue,
+          pool,
           pathLine: `${rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
           rows,
           promises,
@@ -392,7 +440,28 @@ export function RecordCreate({
       ).length;
       if (htmlBytes > FREE_UPLOAD_BYTES) throw new Error("The readable sheet is over 105 KiB. Shorten the longest fields.");
 
-      const recordFacts = (sheet?: string) =>
+      async function fitNft(
+        label: string,
+        rows: { key: string; value: string }[],
+        build: (attributes: { key: string; value: string }[]) => Transaction,
+        signer: Keypair,
+      ) {
+        if (!rows.some((row) => row.key === "full sheet")) throw new Error(`The ${label} is missing the full sheet link.`);
+        const omitted: string[] = [];
+        let current = rows;
+        for (;;) {
+          const prepared = await prepareTransaction(connection, payerKey, build(current), [signer]);
+          const bytes = prepared.transaction.serialize({ requireAllSignatures: false }).length;
+          if (bytes <= 1232) return { prepared, bytes, omitted };
+          const drop = DROP_BEFORE_SHEET.find((key) => current.some((row) => row.key === key));
+          if (!drop) throw new Error(`The ${label} is ${bytes} bytes with the full sheet link. The limit is 1232.`);
+          current = current.filter((row) => row.key !== drop);
+          omitted.push(drop);
+        }
+      }
+
+      const recordFit = await fitNft(
+        "record",
         recordAttributes({
           mint,
           pool,
@@ -411,34 +480,32 @@ export function RecordCreate({
           serial: draft.serial,
           makerName: draft.makerName,
           escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
-          sheet,
-        });
-      const buildRecordTx = (sheet?: string) =>
-        new Transaction().add(
-          ...recordInstruction({
-            endpoint: connection.rpcEndpoint,
-            asset: keys.record,
-            payer: payerKey,
-            vault: new PublicKey(vault),
-            name: draft.assetName,
-            uri: sheetSlot,
-            attributes: recordFacts(sheet),
-          }),
-        );
-      let recordSheet = true;
-      let recordPrepared = await prepareTransaction(connection, wallet.publicKey, buildRecordTx(sheetSlot), [keys.record]);
-      let recordBytes = recordPrepared.transaction.serialize({ requireAllSignatures: false }).length;
-      if (recordBytes > 1232) {
-        recordSheet = false;
-        recordPrepared = await prepareTransaction(connection, wallet.publicKey, buildRecordTx(), [keys.record]);
-        recordBytes = recordPrepared.transaction.serialize({ requireAllSignatures: false }).length;
-        if (recordBytes > 1232) throw new Error(`The record transaction is ${recordBytes} bytes. The limit is 1232.`);
-      }
+          sheet: sheetSlot,
+          salePage: venue,
+          soldThrough: saleVenueWords(rail),
+        }),
+        (attributes) =>
+          new Transaction().add(
+            ...recordInstruction({
+              endpoint: connection.rpcEndpoint,
+              asset: keys.record,
+              payer: payerKey,
+              vault: new PublicKey(vault),
+              name: draft.assetName,
+              uri: sheetSlot,
+              attributes,
+            }),
+          ),
+        keys.record,
+      );
+      const recordPrepared = recordFit.prepared;
+      const recordBytes = recordFit.bytes;
       const simulated = await connection.simulateTransaction(recordPrepared.transaction, undefined, [keys.record.publicKey]);
       if (simulated.value.err) throw new Error(`The record would fail: ${JSON.stringify(simulated.value.err)}`);
       const recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
 
-      const titleFacts = (sheet?: string) =>
+      const titleFit = await fitNft(
+        "title",
         titleAttributes({
           record,
           mint,
@@ -451,33 +518,28 @@ export function RecordCreate({
           program: ESCROW_PROGRAM[cluster],
           sale: draft.sale,
           shortClock: cluster === "devnet" && rail === "escrow",
-          sheet,
-        });
-      const buildTitleTx = (sheet?: string) =>
-        new Transaction().add(
-          ...titleInstructions({
-            endpoint: connection.rpcEndpoint,
-            asset: keys.title,
-            creator: payerKey,
-            name: titleName(draft.assetName),
-            uri: sheetSlot,
-            attributes: titleFacts(sheet),
-          }),
-        );
-      let titleSheet = true;
-      let titlePrepared = await prepareTransaction(connection, wallet.publicKey, buildTitleTx(sheetSlot), [keys.title]);
-      let titleBytes = titlePrepared.transaction.serialize({ requireAllSignatures: false }).length;
-      if (titleBytes > 1232) {
-        titleSheet = false;
-        titlePrepared = await prepareTransaction(connection, wallet.publicKey, buildTitleTx(), [keys.title]);
-        titleBytes = titlePrepared.transaction.serialize({ requireAllSignatures: false }).length;
-        if (titleBytes > 1232) throw new Error(`The title transaction is ${titleBytes} bytes. The limit is 1232.`);
-      }
+          sheet: sheetSlot,
+        }),
+        (attributes) =>
+          new Transaction().add(
+            ...titleInstructions({
+              endpoint: connection.rpcEndpoint,
+              asset: keys.title,
+              creator: payerKey,
+              name: titleName(draft.assetName),
+              uri: sheetSlot,
+              attributes,
+            }),
+          ),
+        keys.title,
+      );
+      const titlePrepared = titleFit.prepared;
+      const titleBytes = titleFit.bytes;
       const titleSimulated = await connection.simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey]);
       if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
       const titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
-      draftPlan.recordSheet = recordSheet;
-      draftPlan.titleSheet = titleSheet;
+      draftPlan.omitRecord = recordFit.omitted;
+      draftPlan.omitTitle = titleFit.omitted;
 
       const walletOpens = rail === "escrow" ? "nine" : "eight";
       draftPlan.lines = [
@@ -495,7 +557,7 @@ export function RecordCreate({
         rail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draft.symbol.trim().toUpperCase()}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draft.symbol.trim().toUpperCase()} only: ${SALE_BURN_PERCENT}% is burned by the escrow, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`,
-        `The wallet NFT carries the token address ${mint}. The full sheet is a readable Arweave page${recordSheet || titleSheet ? ", linked from the NFT as full sheet" : ", linked from the record file"}.`,
+        `The record and the title each carry the token address ${mint}, the sale page, and a full sheet link. That link is the readable page on Arweave.`,
         `Token link, frozen at creation: ${tokenUri}`,
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         `Par ${draft.par} ${draft.quote}. Pool price ${draft.pool} ${draft.quote}. ${curveLines}`,
@@ -549,11 +611,17 @@ export function RecordCreate({
 
       const pathLine =
         plan.rail === "escrow"
-          ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program. Token address: ${keys.baseMint.publicKey.toBase58()}`
-          : `Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program. Token address: ${keys.baseMint.publicKey.toBase58()}`;
+          ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
+          : `Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.`;
       const htmlUpload = await turbo.upload({
         data: sheetPageHtml({
           name: draft.assetName,
+          tokenName: draft.tokenName,
+          symbol: draft.symbol.trim().toUpperCase(),
+          mint: keys.baseMint.publicKey.toBase58(),
+          soldThrough: saleVenueWords(plan.rail),
+          salePage: plan.venue,
+          pool: plan.pool,
           pathLine,
           rows,
           promises: plan.promises,
@@ -640,7 +708,7 @@ export function RecordCreate({
           vault: new PublicKey(vault),
           name: draft.assetName,
           uri: sheetArweave,
-          attributes: recordAttributes({
+          attributes: keepSheet(recordAttributes({
             mint: keys.baseMint.publicKey.toBase58(),
             pool,
             vault,
@@ -658,8 +726,10 @@ export function RecordCreate({
             serial: draft.serial,
             makerName: draft.makerName,
             escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
-            sheet: plan.recordSheet ? htmlArweave : undefined,
-          }),
+            sheet: htmlArweave,
+            salePage: plan.venue,
+            soldThrough: saleVenueWords(plan.rail),
+          }), plan.omitRecord),
         }),
       );
       const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction);
@@ -672,7 +742,7 @@ export function RecordCreate({
           creator: payer,
           name: titleName(draft.assetName),
           uri: sheetArweave,
-          attributes: titleAttributes({
+          attributes: keepSheet(titleAttributes({
             record: recordAddress,
             mint,
             pool,
@@ -684,8 +754,8 @@ export function RecordCreate({
             program: ESCROW_PROGRAM[cluster],
             sale: draft.sale,
             shortClock: cluster === "devnet" && plan.rail === "escrow",
-            sheet: plan.titleSheet ? htmlArweave : undefined,
-          }),
+            sheet: htmlArweave,
+          }), plan.omitTitle),
         }),
       );
       const titleSig = await sendPrepared(connection, await prepareTransaction(connection, payer, titleTx, [keys.title]), signTransaction);

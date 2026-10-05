@@ -559,7 +559,7 @@ export function AssetDesk() {
       ],
       [
         "Curve",
-        `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} ${draft.dynamicFee ? "A volatility fee can add at most one fifth of that fee." : "No volatility fee."} Meteora keeps ${METEORA_TRADING_FEE_PERCENT}% of the trading fee. PAR keeps ${platformCut}%. The creator keeps ${creatorCut}%. ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee is put back into the pool after the lock.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}, and those shares can be claimed.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`,
+        `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%. PAR ${platformCut}%. You ${creatorCut}%. ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee goes back into the pool after the lock. Meteora still takes ${METEORA_TRADING_FEE_PERCENT}%. PAR still takes ${platformCut}% of the fee that is not put back.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}. Same split.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`,
       ],
     ],
     [draft, symbol, unit, sizeLine, curve.locked, rail, waitUnit, shortClock, tokenMint, quoteMint, poolAddress, pictureView, platformCut, creatorCut],
@@ -1098,23 +1098,11 @@ export function AssetDesk() {
           <section className="card">
             <h2>The fee on this form</h2>
             <p>
-              Buyers pay the percent you type above, on each trade while the coin is on the curve. A flat fee stays at that percent. A falling fee moves from the opening percent to the ending percent.
-            </p>
-            <p>Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of that fee. That share stays on.</p>
-            <p>
-              {platformCut === 0
-                ? `PAR keeps none of that fee. You keep the other ${creatorCut}%.`
-                : `PAR keeps ${platformCut}% of that fee. You keep ${creatorCut}%. Those shares stay on for this coin.`}
+              Buyers pay the percent you type above. Of that fee: Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%.
             </p>
             <p>
-              You keep your share the whole time the coin trades on the curve. Volatility is optional. Leave that box empty and there is no volatility fee. Checked, Meteora can add at most one fifth of the fee you typed, and the total still stops at 99%.
+              After the lock, the pool fee is the same split. Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%. If you put fees back into the pool, Meteora still takes {METEORA_TRADING_FEE_PERCENT}% and PAR still takes {platformCut}% of the fee that is not put back.
             </p>
-            <p>
-              After the lock, trades pay the pool fee below. Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of that fee too.
-              {platformCut === 0 ? " You keep the other 80%." : ` You keep ${creatorCut}% and PAR keeps ${platformCut}%.`}
-              {" "}Putting pool fees back into the pool is optional, and it can be off. Leave it off and those shares can be claimed. Turn it on and the share you type is added back into the pool. At 100%, nothing of that pool fee is left to claim. The locked tokens and quote stay in the pool either way.
-            </p>
-            <p>When the pool opens, Meteora takes 0.2% of the tokens and 0.2% of the quote. That share stays on. This form adds no second skim and charges no pool creation fee.</p>
             <p>
               {rail === "escrow"
                 ? `The title sale is separate from this trading fee. Escrow is selected, so the title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program. The program burns ${SALE_BURN_PERCENT}% of the price, keeps ${SALE_PROGRAM_FEE_PERCENT}%, and pays you ${creatorSalePercent()}%.`
@@ -1136,7 +1124,7 @@ export function AssetDesk() {
                 <input value={draft.compoundShare} onChange={(event) => patch({ compoundShare: event.target.value })} inputMode="decimal" />
               </label>
               <p className="note">
-                After the lock, trades pay this pool fee in the quote. The share you type is added back to the pool. The quote that locks does not change. The liquidity stays locked. At 100%, nothing from that pool fee is left to claim.
+                The share you type goes back into the pool. Meteora still takes {METEORA_TRADING_FEE_PERCENT}%. PAR still takes {platformCut}% of the fee that is not put back.
               </p>
             </>
           ) : (
@@ -1337,7 +1325,7 @@ export function AssetDesk() {
               : "Sale path: Tensor. These words say the title is listed through Tensor's marketplace program, because Tensor is selected on Claim."}
           </p>
           <p className="note">
-            The NFT in a wallet shows the name, the picture, and short traits: the token address, the sale path, and a link named full sheet. That link is a page on Arweave. Opening it shows this whole sheet, the promises, the token address, and the picture. The same facts are stored in the record file the NFT points at.
+            Both NFTs carry the picture, the token address, the sale page, and a link named full sheet. That link opens this sheet on Arweave. The sheet names the token and links to the sale page, where the title can be bought or bid on.
           </p>
           <ol className="beats asset-beats">
             {sheet.map(([title, body]) => (

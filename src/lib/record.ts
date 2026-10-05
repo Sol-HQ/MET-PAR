@@ -56,19 +56,24 @@ export type RecordFacts = {
   escrowProgram?: string;
   serial?: string;
   makerName?: string;
-  /** Readable sheet page. Omitted when the extra trait does not fit in the transaction. */
+  /** Readable sheet page. Written on every record. */
   sheet?: string;
+  salePage?: string;
+  soldThrough?: string;
 };
 
 /** Short fields written on chain. The full sheet sits behind the record link and is pinned by its hash here. */
 export function recordAttributes(facts: RecordFacts): RecordAttribute[] {
   return [
     { key: "record", value: RECORD_KIND },
+    ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
+    { key: "symbol", value: facts.symbol },
     { key: "mint", value: facts.mint },
+    ...(facts.soldThrough ? [{ key: "sold through", value: facts.soldThrough }] : []),
+    ...(facts.salePage ? [{ key: "sale page", value: facts.salePage }] : []),
     { key: "pool", value: facts.pool },
     { key: "vault", value: facts.vault },
     { key: "creator", value: facts.creator },
-    { key: "symbol", value: facts.symbol },
     { key: "quote", value: facts.quote },
     { key: "par", value: facts.par },
     { key: "pool price", value: facts.poolPrice },
@@ -81,7 +86,6 @@ export function recordAttributes(facts: RecordFacts): RecordAttribute[] {
     { key: "serial", value: facts.serial?.trim() || "none" },
     { key: "maker", value: facts.makerName?.trim() || "none" },
     { key: "escrow program", value: facts.escrowProgram || "none" },
-    ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
   ];
 }
 

@@ -152,7 +152,7 @@ export type TitleFacts = {
   sale?: SaleMode;
   /** Practice program only. The entered number is seconds on chain. */
   shortClock?: boolean;
-  /** Readable sheet page. Omitted when the extra trait does not fit in the transaction. */
+  /** Readable sheet page. Written on every title. */
   sheet?: string;
 };
 
@@ -161,16 +161,17 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
   const auction = escrow && facts.sale === "auction";
   const rows: RecordAttribute[] = [
     { key: "title", value: TITLE_KIND },
-    { key: "record", value: facts.record },
+    ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
     { key: "mint", value: facts.mint },
+    { key: "sold through", value: saleVenueWords(facts.rail) },
+    { key: "sale page", value: facts.venue },
+    { key: "record", value: facts.record },
     { key: "pool", value: facts.pool },
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
-    { key: "sold through", value: saleVenueWords(facts.rail) },
     { key: "sale opens", value: `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
     { key: "paid in", value: "this token only" },
     { key: "burned", value: escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
-    { key: "sale page", value: facts.venue },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
     { key: "sale", value: auction ? "auction" : escrow ? "fixed price" : "tensor" },
   ];
@@ -182,7 +183,6 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
         : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. This site finishes it.`,
     });
   }
-  if (facts.sheet) rows.push({ key: "full sheet", value: facts.sheet });
   return rows;
 }
 

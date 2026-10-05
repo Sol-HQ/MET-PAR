@@ -1013,7 +1013,7 @@ export function Desk() {
           Add a volatility fee on the curve
         </label>
         <p className="note">
-          The amount is the fee percent above. The volatility piece is at most one fifth of that percent while the price is moving, then it fades. A 25% fee can rise by up to 5 points. The two together still stop at 99%. There is no second box. It does not change how much quote locks. Meteora keeps {METEORA_TRADING_FEE_PERCENT}% of the trading fee. PAR keeps {platform.platformFeePercent}%. You keep {creatorSharePercent(platform.platformFeePercent)}%. Those shares stay on for this coin.
+          The amount is the fee percent above. The volatility piece is at most one fifth of that percent while the price is moving, then it fades. A 25% fee can rise by up to 5 points. The two together still stop at 99%. There is no second box. It does not change how much quote locks. Of that fee: Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platform.platformFeePercent}%. You {creatorSharePercent(platform.platformFeePercent)}%.
         </p>
         <label className="check">
           <input type="checkbox" checked={compoundOn} onChange={(event) => setCompoundOn(event.target.checked)} />
@@ -1149,8 +1149,7 @@ export function Desk() {
             <dt>Where the trading fee goes</dt>
             <dd>
               Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platform.platformFeePercent}%. You{" "}
-              {creatorSharePercent(platform.platformFeePercent)}%. Those shares stay on for this coin. You claim
-              your share on the token page.
+              {creatorSharePercent(platform.platformFeePercent)}%. You claim your share on the token page.
             </dd>
           </div>
           <div>
