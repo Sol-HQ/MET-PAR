@@ -1,0 +1,13 @@
+[toolchain]
+anchor_version = "0.31.0"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+par_escrow = "AGcNqaLNfR7h2bdGi39vEMTKNyfX8qLt4mgmbhmtgWvh"
+
+[provider]
+cluster = "devnet"
+wallet = "../keys/me.json"

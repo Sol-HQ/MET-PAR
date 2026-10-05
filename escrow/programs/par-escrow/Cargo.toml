@@ -1,0 +1,26 @@
+[package]
+name = "par-escrow"
+version = "0.1.0"
+description = "Holds a PAR title until its coin graduates, then sells it for the coin"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "par_escrow"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+short-days = []
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-spl = { version = "0.31.1", features = ["token", "token_2022", "associated_token"] }
+mpl-core = { version = "0.12.1", default-features = false, features = ["anchor"] }

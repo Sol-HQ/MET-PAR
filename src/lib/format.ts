@@ -27,8 +27,61 @@ export function rawToUi(raw: BN, decimals: number, maxFraction = decimals): stri
   return negative ? `-${text}` : text;
 }
 
-export function formatUsdc(raw: BN): string {
-  return rawToUi(raw, QUOTE_DECIMALS, 6);
+/** A positive number as a plain decimal. 0.0002 stays 0.0002. It does not become 2e-4. */
+export function plainDecimal(amount: number, maxFraction = 9): string {
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  const fixed = amount.toFixed(maxFraction);
+  if (!fixed.includes(".")) return fixed;
+  return fixed.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+export function formatDollars(amount: number): string {
+  if (!Number.isFinite(amount) || amount < 0) return "";
+  if (amount >= 1) return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (amount >= 0.01) return `$${amount.toLocaleString("en-US", { maximumFractionDigits: 4 })}`;
+  const text = plainDecimal(amount, 6);
+  return text ? `$${text}` : "$0";
+}
+
+/** Dollars of SOL at the live price. The pool still spends SOL. */
+export function dollarsToSol(dollars: number, usdPerSol: number): string {
+  if (!(dollars > 0) || !(usdPerSol > 0)) return "";
+  return plainDecimal(dollars / usdPerSol, 9);
+}
+
+export function formatMoney(raw: BN, decimals = QUOTE_DECIMALS): string {
+  const precise = rawToUi(raw, decimals, Math.min(9, decimals));
+  if (!precise.includes(".")) return `${precise}.00`;
+  const [whole, frac] = precise.split(".");
+  if (frac.length < 2) return `${whole}.${frac.padEnd(2, "0")}`;
+  return precise;
+}
+
+export function pricePerToken(
+  usdcRaw: BN,
+  tokenRaw: BN,
+  usdcDecimals: number,
+  tokenDecimals: number,
+): string {
+  if (tokenRaw.isZero()) return "0.00";
+  const scale = 8;
+  const scaled = usdcRaw
+    .mul(new BN(10).pow(new BN(tokenDecimals + scale)))
+    .div(tokenRaw.mul(new BN(10).pow(new BN(usdcDecimals))));
+  return formatMoney(scaled, scale);
+}
+
+export function formatTokenPrice(value: {
+  toNumber: () => number;
+  toFixed: (digits: number) => string;
+  gte: (n: number) => boolean;
+  toSignificantDigits: (digits: number) => { toString: () => string };
+}): string {
+  const compact = value.toSignificantDigits(value.gte(1) ? 6 : 6).toString();
+  if (!/[eE]/.test(compact)) return compact;
+  const amount = value.toNumber();
+  if (!Number.isFinite(amount) || amount <= 0) return compact;
+  return value.toFixed(12).replace(/0+$/, "");
 }
 
 export function formatLamports(lamports: number): string {

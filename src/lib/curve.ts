@@ -2,62 +2,86 @@ import {
   ActivationType,
   BaseFeeMode,
   CollectFeeMode,
-  DAMM_V2_MIGRATION_FEE_ADDRESS,
   MigrationFeeOption,
   MigrationOption,
   TokenAuthorityOption,
   TokenDecimal,
   TokenType,
-  buildCurveWithCustomSqrtPrices,
-  getPriceFromSqrtPrice,
-  getSqrtPriceFromPrice,
-  validateConfigParameters,
   type BuildCurveBaseParams,
-  type ConfigParameters,
+  type LockedVestingParams,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { Keypair } from "@solana/web3.js";
-import {
-  BASE_DECIMALS,
-  DAMM_V2_FEE_25_BPS,
-  END_PRICE_MULTIPLE,
-  END_PRICE_USDC,
-  FEE_SCHEDULER,
-  PRESETS,
-  QUOTE_DECIMALS,
-  START_PRICE_USDC,
-  type PresetId,
-} from "./constants";
+import { FEE_DECAY_CHOICES, FEE_SCHEDULER, QUOTE_DECIMALS } from "./constants";
+import { creatorTradingFeePercentage, lockedLiquiditySplit } from "./platform";
 
-function sharedCurveInputs(preset: PresetId): BuildCurveBaseParams {
-  const spec = PRESETS[preset];
+function migrationFeeOption(bps: number): MigrationFeeOption {
+  switch (bps) {
+    case 25:
+      return MigrationFeeOption.FixedBps25;
+    case 30:
+      return MigrationFeeOption.FixedBps30;
+    case 100:
+      return MigrationFeeOption.FixedBps100;
+    case 200:
+      return MigrationFeeOption.FixedBps200;
+    case 400:
+      return MigrationFeeOption.FixedBps400;
+    case 600:
+      return MigrationFeeOption.FixedBps600;
+    default:
+      throw new Error("That pool fee after migration is not one of the choices.");
+  }
+}
+
+export function curveBase(
+  totalTokenSupply: number,
+  leftover: number,
+  openingFeeBps: number,
+  endingFeeBps: number,
+  platformFeePercent: number,
+  feeDurationSeconds: number,
+  migrationFeeBps = 25,
+  quoteDecimals = QUOTE_DECIMALS,
+  lockedVesting: LockedVestingParams = {
+    totalLockedVestingAmount: 0,
+    numberOfVestingPeriod: 0,
+    cliffUnlockAmount: 0,
+    totalVestingDuration: 0,
+    cliffDurationFromMigrationTime: 0,
+  },
+): BuildCurveBaseParams {
+  const flat = openingFeeBps === endingFeeBps;
+  if (!flat && !FEE_DECAY_CHOICES.some((choice) => choice.seconds === feeDurationSeconds)) {
+    throw new Error("That fee timing is not one of the allowed choices.");
+  }
+  const locked = lockedLiquiditySplit(platformFeePercent);
   return {
     token: {
       tokenType: TokenType.SPLToken,
       tokenBaseDecimal: TokenDecimal.SIX,
-      tokenQuoteDecimal: QUOTE_DECIMALS,
+      tokenQuoteDecimal: quoteDecimals,
       tokenAuthorityOption: TokenAuthorityOption.Immutable,
-      totalTokenSupply: spec.totalTokenSupply,
-      leftover: spec.leftover,
+      totalTokenSupply,
+      leftover,
     },
     fee: {
       baseFeeParams: {
-        baseFeeMode: BaseFeeMode.FeeSchedulerExponential,
+        baseFeeMode: flat ? BaseFeeMode.FeeSchedulerLinear : BaseFeeMode.FeeSchedulerExponential,
         feeSchedulerParam: {
-          startingFeeBps: FEE_SCHEDULER.startingFeeBps,
-          endingFeeBps: FEE_SCHEDULER.endingFeeBps,
-          numberOfPeriod: FEE_SCHEDULER.numberOfPeriod,
-          totalDuration: FEE_SCHEDULER.totalDuration,
+          startingFeeBps: openingFeeBps,
+          endingFeeBps,
+          numberOfPeriod: flat ? 0 : FEE_SCHEDULER.numberOfPeriod,
+          totalDuration: flat ? 0 : feeDurationSeconds,
         },
       },
       dynamicFeeEnabled: false,
       collectFeeMode: CollectFeeMode.QuoteToken,
-      creatorTradingFeePercentage: 0,
+      creatorTradingFeePercentage: creatorTradingFeePercentage(platformFeePercent),
       poolCreationFee: 0,
       enableFirstSwapWithMinFee: false,
     },
     migration: {
       migrationOption: MigrationOption.MET_DAMM_V2,
-      migrationFeeOption: MigrationFeeOption.FixedBps25,
+      migrationFeeOption: migrationFeeOption(migrationFeeBps),
       migrationFee: {
         feePercentage: 0,
         creatorFeePercentage: 0,
@@ -65,91 +89,11 @@ function sharedCurveInputs(preset: PresetId): BuildCurveBaseParams {
     },
     liquidityDistribution: {
       partnerLiquidityPercentage: 0,
-      partnerPermanentLockedLiquidityPercentage: 100,
+      partnerPermanentLockedLiquidityPercentage: locked.partner,
       creatorLiquidityPercentage: 0,
-      creatorPermanentLockedLiquidityPercentage: 0,
+      creatorPermanentLockedLiquidityPercentage: locked.creator,
     },
-    lockedVesting: {
-      totalLockedVestingAmount: 0,
-      numberOfVestingPeriod: 0,
-      cliffUnlockAmount: 0,
-      totalVestingDuration: 0,
-      cliffDurationFromMigrationTime: 0,
-    },
+    lockedVesting,
     activationType: ActivationType.Timestamp,
   };
-}
-
-export function buildPresetConfig(preset: PresetId): ConfigParameters {
-  const sqrtPrices = [
-    getSqrtPriceFromPrice(START_PRICE_USDC, TokenDecimal.SIX, QUOTE_DECIMALS),
-    getSqrtPriceFromPrice(END_PRICE_USDC, TokenDecimal.SIX, QUOTE_DECIMALS),
-  ];
-  return buildCurveWithCustomSqrtPrices({
-    ...sharedCurveInputs(preset),
-    sqrtPrices,
-    liquidityWeights: [1],
-  });
-}
-
-export type CurveCheck = {
-  preset: PresetId;
-  points: number;
-  startPrice: string;
-  endPrice: string;
-  ratio: string;
-  migrationQuoteThreshold: string;
-  migrationFeeOption: number;
-  baseFeeMode: number;
-  dammConfig: string;
-};
-
-export function inspectPreset(preset: PresetId): CurveCheck {
-  const config = buildPresetConfig(preset);
-  validateConfigParameters({
-    ...config,
-    leftoverReceiver: Keypair.generate().publicKey,
-  });
-  const start = getPriceFromSqrtPrice(config.sqrtStartPrice, BASE_DECIMALS, QUOTE_DECIMALS);
-  const end = getPriceFromSqrtPrice(config.curve[0].sqrtPrice, BASE_DECIMALS, QUOTE_DECIMALS);
-  const activePoints = config.curve.filter((point) => !point.liquidity.isZero());
-  return {
-    preset,
-    points: activePoints.length,
-    startPrice: start.toSignificantDigits(8).toString(),
-    endPrice: end.toSignificantDigits(8).toString(),
-    ratio: end.div(start).toSignificantDigits(8).toString(),
-    migrationQuoteThreshold: config.migrationQuoteThreshold.toString(),
-    migrationFeeOption: config.migrationFeeOption,
-    baseFeeMode: config.poolFees.baseFee.baseFeeMode,
-    dammConfig: DAMM_V2_MIGRATION_FEE_ADDRESS[MigrationFeeOption.FixedBps25].toBase58(),
-  };
-}
-
-export function assertPreset(preset: PresetId): CurveCheck {
-  const check = inspectPreset(preset);
-  const spec = PRESETS[preset];
-  const expectedThreshold = spec.migrationQuoteThreshold;
-  const ratio = Number(check.ratio);
-  if (check.points !== 1) {
-    throw new Error(`${preset} curve has ${check.points} segments`);
-  }
-  if (check.migrationQuoteThreshold !== expectedThreshold) {
-    throw new Error(
-      `${preset} threshold is ${check.migrationQuoteThreshold}, expected ${expectedThreshold}`,
-    );
-  }
-  if (Math.abs(ratio - END_PRICE_MULTIPLE) > 0.000001) {
-    throw new Error(`${preset} price ratio is ${check.ratio}`);
-  }
-  if (check.baseFeeMode !== BaseFeeMode.FeeSchedulerExponential) {
-    throw new Error(`${preset} base fee mode is ${check.baseFeeMode}`);
-  }
-  if (check.migrationFeeOption !== MigrationFeeOption.FixedBps25) {
-    throw new Error(`${preset} migration fee option is ${check.migrationFeeOption}`);
-  }
-  if (check.dammConfig !== DAMM_V2_FEE_25_BPS) {
-    throw new Error(`${preset} DAMM v2 config is ${check.dammConfig}`);
-  }
-  return check;
 }

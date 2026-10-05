@@ -3,5 +3,13 @@ node_modules
 out
 .env
 .env.local
+.env*.local
 keys
+escrow/target
+escrow/HANDOFF.md
+fieldnotes.txt
+offlinenotes
+scripts/_*.mjs
+scripts/_*.ts
 *.tsbuildinfo
+.vercel

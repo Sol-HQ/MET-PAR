@@ -1,24 +1,24 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 export function MainnetGate({
   title,
   lines,
   confirmLabel,
   onCancel,
   onConfirm,
+  kicker = "Mainnet confirmation",
 }: {
   title: string;
   lines: string[];
   confirmLabel: string;
   onCancel: () => void;
   onConfirm: () => void;
+  kicker?: string;
 }) {
   return (
     <div className="gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
       <div className="gate-card">
-        <p className="eyebrow">Mainnet confirmation</p>
+        <p className="eyebrow">{kicker}</p>
         <h2 id="gate-title">{title}</h2>
         <p>These are the amounts this signature will use. Nothing is sent until you confirm.</p>
         <ul>
@@ -37,8 +37,4 @@ export function MainnetGate({
       </div>
     </div>
   );
-}
-
-export function Status({ children }: { children: ReactNode }) {
-  return <p className="status">{children}</p>;
 }

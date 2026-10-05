@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { Shell } from "@/components/Shell";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Inter({
   subsets: ["latin"],
   variable: "--font-display",
 });
@@ -16,8 +16,8 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PAR — Meteora DBC listing desk",
-  description: "Launch a token on a flat USDC Dynamic Bonding Curve that graduates into DAMM v2.",
+  title: "PAR",
+  description: "Buyers fill most of the sale within 10% of one price. Then the pool locks.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

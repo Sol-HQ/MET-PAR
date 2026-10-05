@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ENDS_AT, OPENS_AT } from "@/lib/constants";
+import { WSOL, type ClusterName } from "@/lib/constants";
 
-export function jupiterTradeUrl(quoteMint: string, baseMint: string): string {
+function jupiterTradeUrl(quoteMint: string, baseMint: string): string {
   return `https://jup.ag/swap/${quoteMint}-${baseMint}`;
 }
 
-export function xShareUrl(name: string, fullAt: string, pageUrl: string): string {
-  const text = `${name} opens at ${OPENS_AT}, ends at ${ENDS_AT}, full at ${fullAt}.`;
+function priced(amount: string, sol: boolean): string {
+  return sol ? `${amount} SOL` : `$${amount}`;
+}
+
+function xShareUrl(name: string, fullAt: string, pageUrl: string, sol: boolean, opensAt?: string, endsAt?: string): string {
+  const prices = opensAt && endsAt ? ` opens at ${priced(opensAt, sol)}, pool locks at ${priced(endsAt, sol)},` : "";
+  const text = `${name}${prices} full at ${fullAt}.`;
   return `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(pageUrl)}`;
 }
 
@@ -19,6 +24,10 @@ export function ListingActions({
   viewHref,
   sharePath,
   quoteMint,
+  opensAt,
+  endsAt,
+  meteoraHref,
+  cluster,
 }: {
   name: string;
   mint: string;
@@ -26,6 +35,10 @@ export function ListingActions({
   viewHref: string;
   sharePath: string;
   quoteMint: string;
+  opensAt?: string;
+  endsAt?: string;
+  meteoraHref?: string;
+  cluster: ClusterName;
 }) {
   const [copied, setCopied] = useState(false);
   const [pageUrl, setPageUrl] = useState(sharePath);
@@ -47,17 +60,22 @@ export function ListingActions({
         {copied ? "Copied" : "Copy mint"}
       </button>
       {mint ? (
-        <a href={jupiterTradeUrl(quoteMint, mint)} target="_blank" rel="noreferrer">
-          Trade on Jupiter
+        <a href={jupiterTradeUrl(quoteMint, mint)} target="_blank" rel="noreferrer" title="Opens Jupiter on the real network.">
+          {cluster === "devnet" ? "Jupiter, real network" : "Trade on Jupiter"}
         </a>
       ) : (
         <button type="button" disabled>
           Trade on Jupiter
         </button>
       )}
-      <a href={viewHref}>View pool</a>
-      <a href={xShareUrl(name, fullAt, pageUrl)} target="_blank" rel="noreferrer">
-        Share
+      <a href={viewHref}>View PAR pool</a>
+      {meteoraHref ? (
+        <a href={meteoraHref} target="_blank" rel="noreferrer" title={meteoraHref}>
+          {cluster === "devnet" ? "Meteora practice pool" : "Meteora pool"}
+        </a>
+      ) : null}
+      <a href={xShareUrl(name, fullAt, pageUrl, quoteMint === WSOL, opensAt, endsAt)} target="_blank" rel="noreferrer" title="Opens X with a link back to this token on PAR.">
+        Share on X
       </a>
     </div>
   );
