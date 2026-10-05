@@ -10,8 +10,12 @@ export function sheetLead(input: {
   mint: string;
   soldThrough: string;
   salePage: string;
+  attached: boolean;
 }): string {
-  return `${input.name}. The token ${input.tokenName} (${input.symbol}) pays for this title. Token address ${input.mint}. The title is sold through ${input.soldThrough}. The sale page is ${input.salePage}.`;
+  const token = input.attached
+    ? `The token ${input.tokenName} (${input.symbol}) pays for this title. Token address ${input.mint}.`
+    : `This title has no coin. The price is paid in ${input.tokenName} (${input.symbol}). Token address ${input.mint}.`;
+  return `${input.name}. ${token} The title is sold through ${input.soldThrough}. The sale page is ${input.salePage}.`;
 }
 
 /** The page a person reads when they open the sheet link on the NFT. */
@@ -27,6 +31,7 @@ export function sheetPageHtml(input: {
   rows: [string, string][];
   promises: string[];
   imageUrl: string;
+  attached: boolean;
 }): string {
   const sale = input.salePage.startsWith("https://")
     ? `<a href="${escapeHtml(input.salePage)}">Open the sale page</a>`
@@ -63,7 +68,7 @@ export function sheetPageHtml(input: {
 <p class="mark">PAR record</p>
 <h1>${escapeHtml(input.name)}</h1>
 ${image}
-<p>This picture is the token image and the record image.</p>
+<p>${input.attached ? "This picture is the record image. The coin keeps the image it was created with." : "This picture is the record image. This title has no coin."}</p>
 <p>${escapeHtml(sheetLead(input))}</p>
 <p>${sale}. ${escapeHtml(input.pathLine)}</p>
 <dl>

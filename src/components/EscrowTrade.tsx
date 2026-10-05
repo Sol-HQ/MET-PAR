@@ -37,6 +37,7 @@ export function EscrowTrade({
   previousBidder,
   endsAt,
   curveFull,
+  decimals = 6,
 }: {
   pageCluster: ClusterName;
   program: string;
@@ -54,6 +55,7 @@ export function EscrowTrade({
   previousBidder: string | null;
   endsAt: number;
   curveFull: boolean;
+  decimals?: number;
 }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
@@ -65,6 +67,8 @@ export function EscrowTrade({
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const [gate, setGate] = useState<{ title: string; lines: string[]; transaction: Transaction } | null>(null);
+  const showAmount = (amount: bigint) => formatTokenAmount(amount, decimals);
+  const readAmount = (text: string) => parseTokenAmount(text, decimals);
 
   const reserve = BigInt(price);
   const leading = BigInt(highBid);
@@ -134,10 +138,10 @@ export function EscrowTrade({
     );
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Buy this title", [
-      `You pay ${formatTokenAmount(reserve)} ${symbol}.`,
-      `${formatTokenAmount(parts.burned)} ${symbol} is burned.`,
-      `${formatTokenAmount(parts.paid)} ${symbol} goes to the creator.`,
-      `${formatTokenAmount(parts.fee)} ${symbol} goes to the PAR program.`,
+      `You pay ${showAmount(reserve)} ${symbol}.`,
+      `${showAmount(parts.burned)} ${symbol} is burned.`,
+      `${showAmount(parts.paid)} ${symbol} goes to the creator.`,
+      `${showAmount(parts.fee)} ${symbol} goes to the PAR program.`,
       "The title moves to your wallet.",
       `Network fee: ${formatLamports(prepared.feeLamports)}`,
     ], prepared.transaction);
@@ -145,7 +149,7 @@ export function EscrowTrade({
 
   async function changePrice() {
     if (!publicKey) return;
-    const next = parseTokenAmount(nextPrice);
+    const next = readAmount(nextPrice);
     if (!next) {
       setError("Type the new price in tokens.");
       return;
@@ -160,7 +164,7 @@ export function EscrowTrade({
     );
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Change the title price", [
-      `The price becomes ${formatTokenAmount(next)} ${symbol}.`,
+      `The price becomes ${showAmount(next)} ${symbol}.`,
       sale === "auction" ? "This is the reserve. It can change until the first bid." : "A fixed price can change until a buyer pays.",
       `Network fee: ${formatLamports(prepared.feeLamports)}`,
     ], prepared.transaction);
@@ -168,9 +172,9 @@ export function EscrowTrade({
 
   async function placeBid() {
     if (!publicKey) return;
-    const amount = parseTokenAmount(bid);
+    const amount = readAmount(bid);
     if (!amount || amount < reserve || (leading > BigInt(0) && amount <= leading)) {
-      setError(leading > BigInt(0) ? `Bid more than ${formatTokenAmount(leading)} ${symbol}.` : `Bid at least ${formatTokenAmount(reserve)} ${symbol}.`);
+      setError(leading > BigInt(0) ? `Bid more than ${showAmount(leading)} ${symbol}.` : `Bid at least ${showAmount(reserve)} ${symbol}.`);
       return;
     }
     const owner = await tokenProgram();
@@ -187,8 +191,8 @@ export function EscrowTrade({
     );
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Bid on this title", [
-      `You bid ${formatTokenAmount(amount)} ${symbol}. The coins stay in the escrow until the clock ends.`,
-      leading > BigInt(0) ? `The current bid is ${formatTokenAmount(leading)} ${symbol}. That bidder is repaid if you lead.` : "This is the first bid. It starts the clock.",
+      `You bid ${showAmount(amount)} ${symbol}. The coins stay in the escrow until the clock ends.`,
+      leading > BigInt(0) ? `The current bid is ${showAmount(leading)} ${symbol}. That bidder is repaid if you lead.` : "This is the first bid. It starts the clock.",
       `Network fee: ${formatLamports(prepared.feeLamports)}`,
     ], prepared.transaction);
   }
@@ -203,13 +207,13 @@ export function EscrowTrade({
       <p className="eyebrow">Escrow</p>
       <h2>Price on this title</h2>
       <p className="note">
-        The price now is {formatTokenAmount(reserve)} {symbol}.
+        The price now is {showAmount(reserve)} {symbol}.
         {sale === "auction"
           ? " On an auction this number is the reserve. The creator can change it until the first bid. A bid locks it."
           : " On a fixed price the creator can change it until a buyer pays."}
       </p>
       {leading > BigInt(0) ? (
-        <p className="note">A bid of {formatTokenAmount(leading)} {symbol} is in, so this price stays.</p>
+        <p className="note">A bid of {showAmount(leading)} {symbol} is in, so this price stays.</p>
       ) : publicKey?.toBase58() === creator ? (
         <label>
           New price in {symbol}
@@ -226,8 +230,8 @@ export function EscrowTrade({
       ) : open ? (
         <p className="note">
           {sale === "auction"
-            ? `The auction is open. The reserve is ${formatTokenAmount(reserve)} ${symbol}.${leading > BigInt(0) ? ` The bid is ${formatTokenAmount(leading)} ${symbol}.` : ""}`
-            : `The sale is open at ${formatTokenAmount(reserve)} ${symbol}. ${formatTokenAmount(parts.burned)} is burned, ${formatTokenAmount(parts.paid)} goes to the creator, and ${formatTokenAmount(parts.fee)} goes to the PAR program.`}
+            ? `The auction is open. The reserve is ${showAmount(reserve)} ${symbol}.${leading > BigInt(0) ? ` The bid is ${showAmount(leading)} ${symbol}.` : ""}`
+            : `The sale is open at ${showAmount(reserve)} ${symbol}. ${showAmount(parts.burned)} is burned, ${showAmount(parts.paid)} goes to the creator, and ${showAmount(parts.fee)} goes to the PAR program.`}
         </p>
       ) : (
         <p className="note">The buy stays closed until the sale wait ends.</p>
@@ -241,7 +245,7 @@ export function EscrowTrade({
         ) : null}
         {open && sale === "fixed" && !clockOver ? (
           <button type="button" className="solid" disabled={busy || !publicKey} onClick={() => void buy().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The buy was not sent."))}>
-            {busy ? "Buying…" : `Buy for ${formatTokenAmount(reserve)} ${symbol}`}
+            {busy ? "Buying…" : `Buy for ${showAmount(reserve)} ${symbol}`}
           </button>
         ) : null}
       </div>

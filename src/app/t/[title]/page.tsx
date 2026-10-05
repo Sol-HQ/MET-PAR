@@ -170,7 +170,8 @@ export default async function SalePage({
     firstSeen(connection, recordAddress),
     firstSeen(connection, address),
   ]);
-  const pool = record?.attributes.pool || "";
+  const noCoin = record?.attributes.coin === "none";
+  const pool = ADDRESS.test(record?.attributes.pool || "") ? record?.attributes.pool || "" : "";
   const sale = pool ? await poolSale(connection, pool) : null;
   const snapshot = pool ? await loadPool(connection, pool).catch(() => null) : null;
   const graduated = sale ? sale.graduated : null;
@@ -200,7 +201,9 @@ export default async function SalePage({
   const cap = snapshot ? marketCap(snapshot.price, snapshot.supply) : "";
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
-  const saleLine = !title.exists
+  const saleLine = noCoin
+    ? "The creator lists this title on this page through Tensor."
+    : !title.exists
     ? "This title is not on chain."
     : !Number.isFinite(delay) || !Number.isFinite(burn)
       ? "This title does not state its sale terms. Treat it as unverified."
@@ -223,7 +226,9 @@ export default async function SalePage({
               : `The token graduated. The sale opens ${delay} days after graduation.`;
 
   const inEscrow = Boolean(status?.rail === "escrow" && status.listing && title.owner === status.listing);
-  const tensorOpen = Boolean(status?.tensor && saleOpen);
+  const tokenDecimals = Number.parseInt(record?.attributes.decimals || "", 10);
+  const decimals = Number.isFinite(tokenDecimals) ? tokenDecimals : snapshot?.baseDecimals ?? 6;
+  const tensorOpen = noCoin ? Boolean(status?.tensor) : Boolean(status?.tensor && saleOpen);
   const creatorHolds = Boolean(
     status?.rail === "creator" && record && status.owner === record.attributes.creator && !status.tensor,
   );
@@ -270,7 +275,10 @@ export default async function SalePage({
       <h2>{objectName}</h2>
       <p className="object-status">{stateLine}</p>
       <p>
-        This token{symbol && symbol !== "the token" ? `, ${symbol},` : ""} is attached to this real-world asset. {holderLine} {saleLine}{" "}
+        {noCoin
+          ? `This title has no coin. The price is paid in ${symbol}.`
+          : `This token${symbol && symbol !== "the token" ? `, ${symbol},` : ""} is attached to this real-world asset.`}{" "}
+        {holderLine} {saleLine}{" "}
         {pool ? <Link href={`/pool/${pool}`}>Open the coin page</Link> : null}
       </p>
       <ObjectPicture src={typeof sheet.image === "string" ? sheet.image : ""} alt={objectName} />
@@ -305,6 +313,7 @@ export default async function SalePage({
             previousBidder={listing.highBidder}
             endsAt={listing.endsAt}
             curveFull={snapshot?.isMigrated === true}
+            decimals={decimals}
           />
         </>
       ) : null}
@@ -327,6 +336,8 @@ export default async function SalePage({
             finishedAt={finishedAt}
             graduated={graduated === true}
             holdsTitle={creatorHolds}
+            decimals={decimals}
+            noCoin={noCoin}
             listing={
               status.tensor
                 ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }

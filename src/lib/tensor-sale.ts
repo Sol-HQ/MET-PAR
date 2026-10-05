@@ -33,18 +33,19 @@ export function buyerTotal(price: bigint): bigint {
   return price + (price * BigInt(TENSOR_TAKER_FEE_PERCENT) + BigInt(99)) / BigInt(100);
 }
 
-export function parseTokenAmount(text: string): bigint | null {
+export function parseTokenAmount(text: string, decimals = TOKEN_DECIMALS): bigint | null {
   const trimmed = text.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  const places = Number.isInteger(decimals) && decimals >= 0 && decimals <= 9 ? decimals : TOKEN_DECIMALS;
   const [whole, fraction = ""] = trimmed.split(".");
-  if (fraction.length > TOKEN_DECIMALS) return null;
-  const amount = BigInt(whole) * BigInt(10) ** BigInt(TOKEN_DECIMALS) + BigInt(fraction.padEnd(TOKEN_DECIMALS, "0"));
+  if (fraction.length > places) return null;
+  const amount = BigInt(whole) * BigInt(10) ** BigInt(places) + BigInt(fraction.padEnd(places, "0"));
   return amount > BigInt(0) ? amount : null;
 }
 
-export function formatTokenAmount(amount: bigint): string {
-  const scale = BigInt(10) ** BigInt(TOKEN_DECIMALS);
-  const fraction = (amount % scale).toString().padStart(TOKEN_DECIMALS, "0").replace(/0+$/, "");
+export function formatTokenAmount(amount: bigint, decimals = TOKEN_DECIMALS): string {
+  const scale = BigInt(10) ** BigInt(decimals);
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
   return `${(amount / scale).toLocaleString("en-US")}${fraction ? `.${fraction}` : ""}`;
 }
 

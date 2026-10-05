@@ -32,6 +32,8 @@ export function SaleTrade({
   graduated,
   holdsTitle,
   listing,
+  decimals = 6,
+  noCoin = false,
 }: {
   pageCluster: ClusterName;
   title: string;
@@ -44,6 +46,8 @@ export function SaleTrade({
   graduated: boolean;
   holdsTitle: boolean;
   listing: Listing | null;
+  decimals?: number;
+  noCoin?: boolean;
 }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
@@ -56,7 +60,7 @@ export function SaleTrade({
   const [gate, setGate] = useState<{ title: string; lines: string[]; transaction: Transaction } | null>(null);
 
   const opensAt = finishedAt > 0 ? finishedAt + delayDays * 86_400 : 0;
-  const open = graduated && opensAt > 0 && Math.floor(Date.now() / 1000) >= opensAt;
+  const open = noCoin || (graduated && opensAt > 0 && Math.floor(Date.now() / 1000) >= opensAt);
   const wallet = publicKey?.toBase58() ?? "";
   const isCreator = wallet === creator;
   const pricedInCoin = Boolean(listing) && listing?.currency === mint;
@@ -89,7 +93,7 @@ export function SaleTrade({
   }
 
   function list() {
-    const amount = parseTokenAmount(price);
+    const amount = parseTokenAmount(price, decimals);
     if (!amount || !publicKey) {
       setError("Enter the price in the token.");
       return;
@@ -100,7 +104,7 @@ export function SaleTrade({
     confirm(
       "List this title",
       [
-        `Price: ${formatTokenAmount(amount)} ${symbol}, paid to your wallet.`,
+        `Price: ${formatTokenAmount(amount, decimals)} ${symbol}, paid to your wallet.`,
         `The buyer pays about ${TENSOR_TAKER_FEE_PERCENT}% more. That fee goes to Tensor.`,
         `You burn ${burn}% of what you receive, within ${CREATOR_BURN_DAYS} days.`,
         "The title moves into Tensor's listing until it sells or you take it down.",
@@ -122,8 +126,8 @@ export function SaleTrade({
     confirm(
       "Buy this title",
       [
-        `You pay ${formatTokenAmount(buyerTotal(amount))} ${symbol}.`,
-        `${formatTokenAmount(amount)} ${symbol} goes to the creator. The rest is Tensor's fee.`,
+        `You pay ${formatTokenAmount(buyerTotal(amount), decimals)} ${symbol}.`,
+        `${formatTokenAmount(amount, decimals)} ${symbol} goes to the creator. The rest is Tensor's fee.`,
         "The title moves to your wallet.",
       ],
       transaction,
@@ -145,7 +149,7 @@ export function SaleTrade({
       <p className="eyebrow">This page</p>
       {listing && pricedInCoin ? (
         <p className="note">
-          Listed for {formatTokenAmount(BigInt(listing.amount))} {symbol}. A buyer pays {formatTokenAmount(buyerTotal(BigInt(listing.amount)))}{" "}
+          Listed for {formatTokenAmount(BigInt(listing.amount), decimals)} {symbol}. A buyer pays {formatTokenAmount(buyerTotal(BigInt(listing.amount)), decimals)}{" "}
           {symbol}. Tensor keeps the extra {TENSOR_TAKER_FEE_PERCENT}%.
         </p>
       ) : listing ? (
@@ -171,7 +175,7 @@ export function SaleTrade({
         ) : null}
         {canBuy && wallet !== creator ? (
           <button type="button" className="solid" disabled={busy || !wallet} onClick={buy}>
-            {busy ? "Buying…" : `Buy for ${formatTokenAmount(buyerTotal(BigInt(listing?.amount || "0")))} ${symbol}`}
+            {busy ? "Buying…" : `Buy for ${formatTokenAmount(buyerTotal(BigInt(listing?.amount || "0")), decimals)} ${symbol}`}
           </button>
         ) : null}
         {listing && isCreator && listing.seller === creator ? (

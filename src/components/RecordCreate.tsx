@@ -1,18 +1,14 @@
 "use client";
 
-import { deriveDbcPoolAddress, DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { launchChoice, type Draft } from "@/components/AssetDesk";
-import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
+import { type Draft } from "@/components/AssetDesk";
 import { useCluster } from "@/lib/cluster";
-import { DEFAULT_FEE_DECAY_SECONDS, explorerAccount, explorerTx, quoteMintAddress } from "@/lib/constants";
-import { readCurveShape, type CurveShape } from "@/lib/curve";
+import { explorerAccount, explorerTx } from "@/lib/constants";
 import { bpsToPercent, formatLamports } from "@/lib/format";
-import { buildLaunchConfig } from "@/lib/launch";
-import { METEORA_TRADING_FEE_PERCENT, assertCurveFee, creatorSharePercent, parseFeePercent, type PlatformSettings } from "@/lib/platform";
+import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import {
   FREE_UPLOAD_BYTES,
   PUBLIC_ORIGIN,
@@ -21,10 +17,10 @@ import {
   arweaveUrl,
   recordAttributes,
   recordInstruction,
-  recordTokenUri,
   sha256Hex,
 } from "@/lib/record";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
+import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import {
@@ -52,17 +48,31 @@ import {
   type TitleRail,
 } from "@/lib/title";
 
-type Keys = { baseMint: Keypair; config: Keypair; record: Keypair; title: Keypair };
+type Keys = { record: Keypair; title: Keypair };
 
 type Plan = {
   keys: Keys;
+  mint: string;
   pool: string;
+  tokenName: string;
+  symbol: string;
+  par: string;
+  poolPrice: string;
+  wholeAtPar: string;
+  supply: string;
+  decimals: number;
+  feeDecaySeconds: number;
+  creatorFeePercent: number;
+  config: string;
+  noCoin: boolean;
+  quoteSymbol: string;
+  compoundingFeeBps: number;
   tokenUri: string;
   openingBps: number;
   endingBps: number;
   migrationFeeBps: number;
-  shape: CurveShape;
   platformFeePercent: number;
+  quoteMint: string;
   rail: TitleRail;
   venue: string;
   promises: string[];
@@ -96,9 +106,6 @@ const DROP_BEFORE_SHEET = [
   "maker",
   "declared",
   "handoff days",
-  "par",
-  "pool price",
-  "quote",
   "escrow program",
   "sale opens",
   "paid in",
@@ -134,19 +141,20 @@ function sheetJson(input: {
   htmlUrl: string;
 }): string {
   const { draft, plan } = input;
-  const mint = plan.keys.baseMint.publicKey.toBase58();
-  const symbol = draft.symbol.trim().toUpperCase();
+  const mint = plan.mint;
+  const symbol = plan.symbol;
   const saleKind = plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor";
   return JSON.stringify(
     {
       name: draft.assetName,
       description: `${sheetLead({
         name: draft.assetName,
-        tokenName: draft.tokenName,
+        tokenName: plan.tokenName,
         symbol,
         mint,
         soldThrough: saleVenueWords(plan.rail),
         salePage: plan.venue,
+        attached: !plan.noCoin,
       })}\n\n${draft.story}\n\nFull sheet: ${input.htmlUrl}`,
       image: input.image.arweave,
       external_url: input.htmlUrl,
@@ -159,7 +167,7 @@ function sheetJson(input: {
         { trait_type: "Sale", value: saleKind },
         { trait_type: "Record", value: RECORD_KIND },
         { trait_type: "Title", value: plan.keys.title.publicKey.toBase58() },
-        { trait_type: "Declared value", value: `${draft.declared} ${draft.quote}` },
+        { trait_type: "Declared value", value: `${draft.declared} ${plan.quoteSymbol}` },
       ],
       properties: {
         category: "image",
@@ -175,17 +183,17 @@ function sheetJson(input: {
         vault: input.vault,
         creator: input.creator,
         token: {
-          mint: plan.keys.baseMint.publicKey.toBase58(),
-          name: draft.tokenName,
+          mint,
+          name: plan.tokenName,
           symbol,
-          decimals: 6,
-          supply: "1000000000",
+          decimals: plan.decimals,
+          supply: plan.supply,
           uri: plan.tokenUri,
           image: input.image.arweave,
           pool: plan.pool,
-          poolPage: `${PUBLIC_ORIGIN}/pool/${plan.pool}`,
-          config: plan.keys.config.publicKey.toBase58(),
-          quote: draft.quote,
+          poolPage: plan.noCoin ? "" : `${PUBLIC_ORIGIN}/pool/${plan.pool}`,
+          config: plan.config,
+          quote: plan.quoteSymbol,
           quoteMint: input.quoteMint,
         },
         object: {
@@ -204,25 +212,26 @@ function sheetJson(input: {
           handoffDays: draft.shipDays,
           handoff: draft.shipping,
           declaredValue: draft.declared,
-          declaredUnit: draft.quote,
+          declaredUnit: plan.quoteSymbol,
           ifClaimGoesWrong: draft.terms,
         },
-        curve: {
-          par: draft.par,
-          poolPrice: draft.pool,
-          supply: "1000000000",
-          valueAtPar: `${draft.value} ${draft.quote}`,
-          locked: input.curveLines,
-          openingFee: bpsToPercent(plan.openingBps),
-          endingFee: bpsToPercent(plan.endingBps),
-          feeDecaySeconds: plan.openingBps === plan.endingBps ? 0 : DEFAULT_FEE_DECAY_SECONDS,
-          migrationFeeBps: plan.shape.compound ? plan.shape.compound.poolFeeBps : plan.migrationFeeBps,
-          volatility: draft.dynamicFee,
-          compound: Boolean(plan.shape.compound),
-          meteoraFeePercent: METEORA_TRADING_FEE_PERCENT,
-          platformFeePercent: plan.platformFeePercent,
-          creatorFeePercent: creatorSharePercent(plan.platformFeePercent),
-        },
+        curve: plan.noCoin
+          ? { coin: "none" }
+          : {
+              par: plan.par,
+              poolPrice: plan.poolPrice,
+              supply: plan.supply,
+              valueAtPar: `${plan.wholeAtPar} ${plan.quoteSymbol}`,
+              locked: input.curveLines,
+              openingFee: bpsToPercent(plan.openingBps),
+              endingFee: bpsToPercent(plan.endingBps),
+              feeDecaySeconds: plan.feeDecaySeconds,
+              migrationFeeBps: plan.migrationFeeBps,
+              compound: plan.compoundingFeeBps > 0,
+              meteoraFeePercent: METEORA_TRADING_FEE_PERCENT,
+              platformFeePercent: plan.platformFeePercent,
+              creatorFeePercent: plan.creatorFeePercent,
+            },
         title: {
           kind: TITLE_KIND,
           address: plan.keys.title.publicKey.toBase58(),
@@ -234,7 +243,7 @@ function sheetJson(input: {
             soldThrough: saleVenueWords(plan.rail),
             soldThroughProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[input.cluster === "devnet" ? "devnet" : "mainnet-beta"] : TENSOR_MARKETPLACE,
             payIn: mint,
-            opensDaysAfterGraduation: Number(draft.saleDays),
+            opensDaysAfterGraduation: plan.noCoin ? null : Number(draft.saleDays),
             burnPercent: SALE_BURN_PERCENT,
             creatorPercent: plan.rail === "escrow" ? creatorSalePercent() : 100 - SALE_BURN_PERCENT,
             programPercent: plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
@@ -271,18 +280,20 @@ export function RecordCreate({
   picture,
   pictureCopy,
   problem,
-  platform,
   curveLines,
   preparedKeys,
+  coin,
+  pay,
 }: {
   draft: Draft;
   rows: [string, string][];
   picture: Blob | null;
   pictureCopy: string;
   problem: string;
-  platform: PlatformSettings;
   curveLines: string;
   preparedKeys: Keys;
+  coin: CoinFacts | null;
+  pay: PayFacts | null;
 }) {
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -303,12 +314,14 @@ export function RecordCreate({
     venue: "the sale page named on this record sheet",
     sale: draft.sale,
     shortClock: cluster === "devnet" && rail === "escrow",
+    attached: Boolean(coin),
+    paySymbol: coin?.symbol || pay?.symbol || draft.symbol,
   });
 
   useEffect(() => {
     setPlan(null);
     setAgreed(false);
-  }, [draft, picture, cluster, platform]);
+  }, [draft, picture, cluster, coin, pay]);
 
   function mark(label: string, link?: string) {
     setProgress((current) => [...current, { label, done: true, link }]);
@@ -340,66 +353,61 @@ export function RecordCreate({
     }
     setBusy(true);
     try {
-      const openingBps = parseFeePercent(draft.feeOpen);
-      assertCurveFee(openingBps);
-      const endingBps = draft.fee === "flat" ? openingBps : parseFeePercent(draft.feeEnd);
-      if (endingBps > openingBps) throw new Error("The ending fee has to be at or under the opening fee.");
-      const shapeRead = readCurveShape({
-        straightFall: draft.straightFall,
-        dynamicFee: draft.dynamicFee,
-        compoundOn: draft.compoundOn,
-        poolFeePercent: draft.poolFee,
-        compoundPercent: draft.compoundShare,
-      });
-      if (shapeRead.error) throw new Error(shapeRead.error);
-      const migrationFeeBps = draft.poolFeeBps;
-      const platformFeePercent = platform.platformFeePercent ?? 20;
-      const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
-      const quoteMint = quoteMintAddress(cluster, quoteKind);
-      buildLaunchConfig(
-        launchChoice(draft),
-        openingBps,
-        endingBps,
-        platformFeePercent,
-        DEFAULT_FEE_DECAY_SECONDS,
-        migrationFeeBps,
-        quoteKind,
-        undefined,
-        undefined,
-        shapeRead.shape,
-      );
+      if (!coin && !pay) throw new Error("Paste the token address and read it before creating the title.");
+      if (!coin && rail === "escrow") throw new Error("The escrow sells a title only in its own coin.");
+      const read = coin ? await readCoin(connection, coin.mint) : null;
+      const paid = read ? null : pay ? await readPayToken(connection, pay.mint) : null;
+      if (!read && !paid) throw new Error("Paste the token address and read it before creating the title.");
+      if (read && (read.mint !== coin?.mint || read.pool !== coin.pool)) {
+        throw new Error("That token address is not the coin you read. Press Read this coin again.");
+      }
       const keys: Keys = preparedKeys;
-      const mint = keys.baseMint.publicKey.toBase58();
+      const mint = read?.mint || paid?.mint || "";
+      const pool = read?.pool || "none";
       const record = keys.record.publicKey.toBase58();
       const title = keys.title.publicKey.toBase58();
       const payerKey = wallet.publicKey;
       const creator = payerKey.toBase58();
-      const pool = deriveDbcPoolAddress(quoteMint, keys.baseMint.publicKey, keys.config.publicKey).toBase58();
-      const tokenUri = recordTokenUri(record, mint, cluster);
-      if (tokenUri.length > 200) throw new Error("The token link is over 200 characters.");
       const venue = saleUrl(title, cluster);
+      const attached = Boolean(read);
       const promises = creatorPromises({
-        rail,
+        rail: attached ? rail : "creator",
         delayDays: Number(draft.saleDays),
         burnPercent: SALE_BURN_PERCENT,
         handoffDays: draft.shipDays,
         venue,
         sale: draft.sale,
         shortClock: cluster === "devnet" && rail === "escrow",
+        attached,
+        paySymbol: read?.symbol || paid?.symbol,
       });
-      const titlePrice = rail === "escrow" ? parseTokenAmount(draft.titlePrice) : null;
-      if (rail === "escrow" && !titlePrice) throw new Error("Type the title price in the token on the Claim step.");
+      const titlePrice = attached && rail === "escrow" ? parseTokenAmount(draft.titlePrice, read?.decimals) : null;
+      if (attached && rail === "escrow" && !titlePrice) throw new Error("Type the title price in the token on the Claim step.");
 
       const draftPlan: Plan = {
         keys,
+        mint,
         pool,
-        tokenUri,
-        openingBps,
-        endingBps,
-        migrationFeeBps,
-        shape: shapeRead.shape,
-        platformFeePercent,
-        rail,
+        tokenName: read?.name || paid?.name || "",
+        symbol: read?.symbol || paid?.symbol || "",
+        par: read?.startPrice || "none",
+        poolPrice: read?.endPrice || "none",
+        wholeAtPar: read?.wholeAtPar || "none",
+        supply: read ? read.supply.replace(/,/g, "") : "none",
+        decimals: read?.decimals ?? paid?.decimals ?? 6,
+        feeDecaySeconds: read?.feeDecaySeconds ?? 0,
+        creatorFeePercent: read?.creatorFeePercent ?? 0,
+        config: read?.config || "none",
+        noCoin: !read,
+        quoteSymbol: read?.quoteSymbol || paid?.symbol || "",
+        quoteMint: read?.quoteMint || paid?.mint || "",
+        compoundingFeeBps: read?.compoundingFeeBps ?? 0,
+        tokenUri: read?.uri || "",
+        openingBps: read?.openingFeeBps ?? 0,
+        endingBps: read?.endingFeeBps ?? 0,
+        migrationFeeBps: read?.migrationFeeBps ?? 0,
+        platformFeePercent: read?.platformFeePercent ?? 0,
+        rail: attached ? rail : "creator",
         venue,
         promises,
         lines: [],
@@ -416,7 +424,7 @@ export function RecordCreate({
         cluster,
         creator: wallet.publicKey.toBase58(),
         vault,
-        quoteMint: quoteMint.toBase58(),
+        quoteMint: draftPlan.quoteMint,
         curveLines,
         image: { arweave: sheetSlot, copy: pictureCopy, sha256: "0".repeat(64) },
         htmlUrl: sheetSlot,
@@ -426,16 +434,17 @@ export function RecordCreate({
       const htmlBytes = new TextEncoder().encode(
         sheetPageHtml({
           name: draft.assetName,
-          tokenName: draft.tokenName,
-          symbol: draft.symbol.trim().toUpperCase(),
+          tokenName: draftPlan.tokenName,
+          symbol: draftPlan.symbol,
           mint,
-          soldThrough: saleVenueWords(rail),
+          soldThrough: saleVenueWords(draftPlan.rail),
           salePage: venue,
           pool,
-          pathLine: `${rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
+          pathLine: `${draftPlan.rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
           rows,
           promises,
           imageUrl: sheetSlot,
+          attached: !draftPlan.noCoin,
         }),
       ).length;
       if (htmlBytes > FREE_UPLOAD_BYTES) throw new Error("The readable sheet is over 105 KiB. Shorten the longest fields.");
@@ -467,10 +476,12 @@ export function RecordCreate({
           pool,
           vault,
           creator: payerKey.toBase58(),
-          symbol: draft.symbol.trim().toUpperCase(),
-          quote: draft.quote,
-          par: draft.par,
-          poolPrice: draft.pool,
+          symbol: draftPlan.symbol,
+          supply: draftPlan.supply,
+          decimals: String(draftPlan.decimals),
+          quote: draftPlan.quoteSymbol,
+          par: draftPlan.par,
+          poolPrice: draftPlan.poolPrice,
           handoffDays: draft.shipDays,
           declared: draft.declared,
           sheetSha256: "0".repeat(64),
@@ -482,7 +493,8 @@ export function RecordCreate({
           escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
           sheet: sheetSlot,
           salePage: venue,
-          soldThrough: saleVenueWords(rail),
+          soldThrough: saleVenueWords(coin ? rail : "creator"),
+          coin: coin ? "attached" : "none",
         }),
         (attributes) =>
           new Transaction().add(
@@ -511,14 +523,15 @@ export function RecordCreate({
           mint,
           pool,
           creator,
-          rail,
+          rail: draftPlan.rail,
           delayDays: Number(draft.saleDays),
           burnPercent: SALE_BURN_PERCENT,
           venue,
           program: ESCROW_PROGRAM[cluster],
           sale: draft.sale,
-          shortClock: cluster === "devnet" && rail === "escrow",
+          shortClock: cluster === "devnet" && draftPlan.rail === "escrow",
           sheet: sheetSlot,
+          noCoin: draftPlan.noCoin,
         }),
         (attributes) =>
           new Transaction().add(
@@ -541,29 +554,34 @@ export function RecordCreate({
       draftPlan.omitRecord = recordFit.omitted;
       draftPlan.omitTitle = titleFit.omitted;
 
-      const walletOpens = rail === "escrow" ? "nine" : "eight";
+      const useRail = draftPlan.rail;
+      const walletOpens = useRail === "escrow" ? "six" : "five";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
-        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the template, the token, the record, and the title${rail === "escrow" ? ", then the title goes into the escrow" : ""}.`,
-        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the template, the token, the record, the title${rail === "escrow" ? ", and the escrow deposit" : ""}.`,
-        `Token: ${draft.tokenName} (${draft.symbol.trim().toUpperCase()})`,
+        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}. The coin is not created here.`,
+        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
+        `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
+        `Supply: ${draftPlan.supply}. Decimals: ${draftPlan.decimals}.`,
         `Pool: ${pool}`,
-        `Template: ${keys.config.publicKey.toBase58()}`,
         `Record: ${record}`,
         `Title: ${title}`,
         `Platform vault: ${vault}`,
-        `The title goes to the ${railWords(rail)}${rail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(rail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
-        rail === "escrow"
-          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draft.symbol.trim().toUpperCase()}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draft.symbol.trim().toUpperCase()} only: ${SALE_BURN_PERCENT}% is burned by the escrow, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-          : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`,
+        `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
+        useRail === "escrow"
+          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${SALE_BURN_PERCENT}% is burned by the escrow, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+          : draftPlan.noCoin
+            ? `No coin. The creator lists the title on the sale page through Tensor, priced in ${draftPlan.symbol}. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`
+            : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`,
         `The record and the title each carry the token address ${mint}, the sale page, and a full sheet link. That link is the readable page on Arweave.`,
-        `Token link, frozen at creation: ${tokenUri}`,
+        draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : "This title has no coin.",
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
-        `Par ${draft.par} ${draft.quote}. Pool price ${draft.pool} ${draft.quote}. ${curveLines}`,
-        `Curve fee: ${openingBps === endingBps ? `${bpsToPercent(openingBps)} until graduation` : `${bpsToPercent(openingBps)} falling to ${bpsToPercent(endingBps)}`}.`,
-        "Template rent: about 0.005984 SOL.",
-        "Token rent for the mint, metadata, pool, and vaults: about 0.021 SOL. The wallet shows the exact amount.",
+        draftPlan.noCoin
+          ? "No coin. There is no curve."
+          : `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
+        draftPlan.noCoin
+          ? "No curve fee. There is no coin."
+          : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
         `Record rent: ${formatLamports(recordRent)}. Record network fee: ${formatLamports(recordPrepared.feeLamports)}. Record transaction: ${recordBytes} of 1232 bytes.`,
         `Title rent: ${formatLamports(titleRent)}. Title network fee: ${formatLamports(titlePrepared.feeLamports)}. Title transaction: ${titleBytes} of 1232 bytes.`,
         "The record locks at creation. Its name, link, and attributes cannot be changed, and no plugin can be added. The vault never burns it.",
@@ -579,7 +597,7 @@ export function RecordCreate({
 
   async function run() {
     if (!plan || !picture || !wallet.publicKey || !wallet.signTransaction || !wallet.signMessage) return;
-    const { keys, pool, tokenUri } = plan;
+    const { keys, pool } = plan;
     const payer = wallet.publicKey;
     const signTransaction = wallet.signTransaction;
     const signMessage = wallet.signMessage;
@@ -587,9 +605,39 @@ export function RecordCreate({
     setError("");
     setProgress([]);
     try {
+      if (plan.noCoin) {
+        const again = await readPayToken(connection, plan.mint);
+        if (again.mint !== plan.mint || again.symbol !== plan.symbol || again.name !== plan.tokenName || again.decimals !== plan.decimals) {
+          throw new Error("The price token on chain does not match the review. Press Review create again.");
+        }
+      } else {
+        const again = await readCoin(connection, plan.mint);
+        const supply = again.supply.replace(/,/g, "");
+        if (
+          again.mint !== plan.mint ||
+          again.pool !== plan.pool ||
+          again.config !== plan.config ||
+          supply !== plan.supply ||
+          again.startPrice !== plan.par ||
+          again.endPrice !== plan.poolPrice ||
+          again.symbol !== plan.symbol ||
+          again.name !== plan.tokenName ||
+          again.decimals !== plan.decimals ||
+          again.quoteSymbol !== plan.quoteSymbol ||
+          again.quoteMint !== plan.quoteMint ||
+          again.openingFeeBps !== plan.openingBps ||
+          again.endingFeeBps !== plan.endingBps ||
+          again.migrationFeeBps !== plan.migrationFeeBps ||
+          again.feeDecaySeconds !== plan.feeDecaySeconds ||
+          again.creatorFeePercent !== plan.creatorFeePercent ||
+          again.platformFeePercent !== plan.platformFeePercent
+        ) {
+          throw new Error("The coin on chain does not match the review. Press Review create again.");
+        }
+      }
       const recordAddress = keys.record.publicKey.toBase58();
       const titleAddress = keys.title.publicKey.toBase58();
-      const mint = keys.baseMint.publicKey.toBase58();
+      const mint = plan.mint;
       const message = promiseMessage({ promises: plan.promises, record: recordAddress, title: titleAddress, mint, creator: payer.toBase58() });
       const signed = await signMessage(new TextEncoder().encode(message));
       const promise: Promise_ = { message, signature: Buffer.from(signed).toString("base64") };
@@ -616,9 +664,9 @@ export function RecordCreate({
       const htmlUpload = await turbo.upload({
         data: sheetPageHtml({
           name: draft.assetName,
-          tokenName: draft.tokenName,
-          symbol: draft.symbol.trim().toUpperCase(),
-          mint: keys.baseMint.publicKey.toBase58(),
+          tokenName: plan.tokenName,
+          symbol: plan.symbol,
+          mint,
           soldThrough: saleVenueWords(plan.rail),
           salePage: plan.venue,
           pool: plan.pool,
@@ -626,14 +674,13 @@ export function RecordCreate({
           rows,
           promises: plan.promises,
           imageUrl: imageArweave,
+          attached: !plan.noCoin,
         }),
         dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
       });
       const htmlArweave = arweaveUrl(htmlUpload.id);
       mark("Readable sheet stored on Arweave", htmlArweave);
 
-      const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
-      const quoteMint = quoteMintAddress(cluster, quoteKind);
       const sheet = sheetJson({
         draft,
         rows,
@@ -641,7 +688,7 @@ export function RecordCreate({
         cluster,
         creator: payer.toBase58(),
         vault,
-        quoteMint: quoteMint.toBase58(),
+        quoteMint: plan.quoteMint,
         curveLines,
         image: { arweave: imageArweave, copy: pictureCopy, sha256: imageSha256 },
         promise,
@@ -655,50 +702,7 @@ export function RecordCreate({
       const sheetArweave = arweaveUrl(sheetUpload.id);
       mark("Record sheet stored on Arweave", sheetArweave);
 
-      const client = DynamicBondingCurveClient.create(connection, "confirmed");
-      const configTx = await client.partner.createConfig({
-        ...buildLaunchConfig(
-          launchChoice(draft),
-          plan.openingBps,
-          plan.endingBps,
-          plan.platformFeePercent,
-          DEFAULT_FEE_DECAY_SECONDS,
-          plan.migrationFeeBps,
-          quoteKind,
-          undefined,
-          undefined,
-          plan.shape,
-        ),
-        config: keys.config.publicKey,
-        feeClaimer: new PublicKey(PLATFORM_FEE_CLAIMER),
-        leftoverReceiver: new PublicKey(PLATFORM_FEE_CLAIMER),
-        payer,
-        quoteMint,
-      });
-      const configSig = await sendPrepared(connection, await prepareTransaction(connection, payer, configTx, [keys.config]), signTransaction);
-      mark("Template created", explorerTx(configSig, cluster));
-      await waitForAccount(connection, keys.config.publicKey);
-
-      let poolTx: Transaction | null = null;
-      for (let attempt = 0; attempt < 8 && !poolTx; attempt += 1) {
-        try {
-          poolTx = await client.creator.createPool({
-            baseMint: keys.baseMint.publicKey,
-            config: keys.config.publicKey,
-            name: draft.tokenName,
-            symbol: draft.symbol.trim().toUpperCase(),
-            uri: tokenUri,
-            payer,
-            poolCreator: payer,
-          });
-        } catch (cause) {
-          if (!/config not found/i.test(cause instanceof Error ? cause.message : "")) throw cause;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-      if (!poolTx) throw new Error("The new template was not visible yet.");
-      const poolSig = await sendPrepared(connection, await prepareTransaction(connection, payer, poolTx, [keys.baseMint]), signTransaction);
-      mark("Token created. Its link names the record.", explorerTx(poolSig, cluster));
+      mark(coin ? "Using the coin already on chain" : "No coin. The title is priced in the token you read.");
 
       const recordTx = new Transaction().add(
         ...recordInstruction({
@@ -709,14 +713,16 @@ export function RecordCreate({
           name: draft.assetName,
           uri: sheetArweave,
           attributes: keepSheet(recordAttributes({
-            mint: keys.baseMint.publicKey.toBase58(),
+            mint,
             pool,
             vault,
             creator: payer.toBase58(),
-            symbol: draft.symbol.trim().toUpperCase(),
-            quote: draft.quote,
-            par: draft.par,
-            poolPrice: draft.pool,
+            symbol: plan.symbol,
+            supply: plan.supply,
+            decimals: String(plan.decimals),
+            quote: plan.quoteSymbol,
+            par: plan.par,
+            poolPrice: plan.poolPrice,
             handoffDays: draft.shipDays,
             declared: draft.declared,
             sheetSha256,
@@ -729,6 +735,7 @@ export function RecordCreate({
             sheet: htmlArweave,
             salePage: plan.venue,
             soldThrough: saleVenueWords(plan.rail),
+            coin: plan.noCoin ? "none" : "attached",
           }), plan.omitRecord),
         }),
       );
@@ -755,6 +762,7 @@ export function RecordCreate({
             sale: draft.sale,
             shortClock: cluster === "devnet" && plan.rail === "escrow",
             sheet: htmlArweave,
+            noCoin: plan.noCoin,
           }), plan.omitTitle),
         }),
       );
@@ -767,7 +775,7 @@ export function RecordCreate({
           throw new Error("The escrow path is not available on this network.");
         }
         await waitForAccount(connection, keys.title.publicKey);
-        const typedPrice = parseTokenAmount(draft.titlePrice);
+        const typedPrice = parseTokenAmount(draft.titlePrice, plan.decimals);
         if (!typedPrice) throw new Error("Type the title price in the token on the Claim step.");
         const depositTx = new Transaction().add(
           escrowDepositInstruction({
@@ -775,7 +783,7 @@ export function RecordCreate({
             creator: payer,
             title: keys.title.publicKey,
             record: keys.record.publicKey,
-            mint: keys.baseMint.publicKey,
+            mint: new PublicKey(mint),
             pool: new PublicKey(pool),
             price: typedPrice,
             delayDays: Number(draft.saleDays),
@@ -801,11 +809,13 @@ export function RecordCreate({
         .catch(() => ({ saved: false, error: "The PAR copy did not save." }));
       if (copy.saved) mark("PAR copy saved");
       else setError(`${copy.error || "The PAR copy did not save."} The Arweave copy and the record are already on chain.`);
-      void fetch("/api/listings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pool, cluster }),
-      }).catch(() => undefined);
+      if (coin) {
+        void fetch("/api/listings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pool, cluster }),
+        }).catch(() => undefined);
+      }
       setFinished({ pool, record: recordAddress, title: titleAddress });
       setPlan(null);
     } catch (cause) {

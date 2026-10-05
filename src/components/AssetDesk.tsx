@@ -1,29 +1,22 @@
 "use client";
 
-import { deriveDbcPoolAddress } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair } from "@solana/web3.js";
 import { signedPictureHeaders } from "@/lib/picture";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { BASE_DECIMALS, DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, MIGRATION_FEE_CHOICES, migrationFeeLabel, quoteMintAddress } from "@/lib/constants";
-import { readCurveShape } from "@/lib/curve";
+import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { DEFAULT_MIGRATION_FEE_BPS, USDC_DEVNET, USDC_MAINNET, WSOL } from "@/lib/constants";
 import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
-import { BILLION_SUPPLY, checkParPrices, type LaunchChoice } from "@/lib/launch";
-import { DEFAULT_PLATFORM_SETTINGS, METEORA_TRADING_FEE_PERCENT, assertCurveFee, creatorSharePercent, parseFeePercent, type PlatformSettings } from "@/lib/platform";
+import { BILLION_SUPPLY, type LaunchChoice } from "@/lib/launch";
+import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import { FREE_UPLOAD_BYTES } from "@/lib/record";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
-
-/** What the whole supply is priced at, at par. The creator picks it. It is not an appraisal. */
-const VALUES: Record<"USDC" | "SOL", number[]> = {
-  USDC: [100, 500, 1_000, 2_500, 5_000, 10_000, 20_000, 25_000, 50_000, 100_000],
-  SOL: [1, 5, 10, 25, 50, 100, 250, 500],
-};
 
 /** The pool price sits 20% above par, inside the PAR rule of at most twice par. */
 const POOL_LIFT = 1.2;
@@ -38,17 +31,9 @@ function pricesFor(value: string): { value: string; par: string; pool: string } 
   return { value, par: decimal(amount / BILLION_SUPPLY), pool: decimal((amount * POOL_LIFT) / BILLION_SUPPLY) };
 }
 
-const STEPS = [
-  "Object",
-  "Maker",
-  "Claim",
-  "Redemption",
-  "Names",
-  "Curve",
-  "Pitch",
-  "Buyer page",
-  "Sheet",
-] as const;
+const COIN_STEPS = ["Object", "Maker", "Coin", "Names", "Claim", "Redemption", "Pitch", "Buyer page", "Sheet"] as const;
+const PLAIN_STEPS = ["Object", "Maker", "Price", "Names", "Claim", "Redemption", "Pitch", "Buyer page", "Sheet"] as const;
+const STEPS = [...COIN_STEPS, "Price"] as const;
 
 type Step = (typeof STEPS)[number];
 
@@ -138,7 +123,7 @@ const EXAMPLES = {
     holder: "The painter",
     where: "In the painter's studio",
     story: "One painting, finished and signed by the painter. It is in the studio now.",
-    pitch: "One signed painting, still in the studio. The coin is the only way to buy the title to it.",
+    pitch: "One signed painting, still in the studio.",
     makerName: "Mara Ellison",
     maker: "The painter",
     role: "Painter",
@@ -161,7 +146,7 @@ const EXAMPLES = {
     where: "With the maker",
     story:
       "A kite the maker still holds. The cloth is the maker's own art about the Meteora ecosystem. It has been flown. The official Meteora logo is not on the cloth.",
-    pitch: "The kite on this page stays with the maker. The coin buys a sister kite, built the same way.",
+    pitch: "The kite on this page stays with the maker. The title is a claim to a sister kite, built the same way.",
     makerName: "Jonah Reed",
     maker: "The maker",
     role: "LP Army member",
@@ -183,7 +168,7 @@ const EXAMPLES = {
     holder: "The collector",
     where: "In a sleeve, with the collector",
     story: "One physical card, already in hand. The print is the card's own.",
-    pitch: "One card, in a sleeve, with the number on this sheet. The coin is the only way to buy the title.",
+    pitch: "One card, in a sleeve, with the number on this sheet.",
     makerName: "Sam Carter",
     maker: "The collector",
     role: "Collector",
@@ -204,7 +189,7 @@ const EXAMPLES = {
     holder: "The artist",
     where: "In the studio",
     story: "One piece. The work is the artist's own. It exists now.",
-    pitch: "One piece in the studio. The coin is the only way to buy the title to it.",
+    pitch: "One piece in the studio.",
     makerName: "Priya Shah",
     maker: "The artist",
     role: "Artist",
@@ -227,7 +212,7 @@ const EXAMPLES = {
     holder: "The owner",
     where: "With the owner",
     story: "One watch, already in hand. The serial number identifies it.",
-    pitch: "One watch, serial on this sheet. The coin is the only way to buy the title.",
+    pitch: "One watch, serial on this sheet.",
     makerName: "Owen Blake",
     maker: "The owner",
     role: "Owner",
@@ -249,7 +234,7 @@ const EXAMPLES = {
     holder: "The owner",
     where: "With the owner",
     story: "One vehicle, already titled. The identification number names it.",
-    pitch: "One vehicle, identification number on this sheet. The coin buys the title. The handoff is the papers and the keys.",
+    pitch: "One vehicle, identification number on this sheet. The handoff is the papers and the keys.",
     makerName: "Luis Ortega",
     maker: "The owner",
     role: "Owner",
@@ -271,7 +256,7 @@ const EXAMPLES = {
     holder: "The owner",
     where: "In a named vault",
     story: "One bar, already cast and numbered. It sits in the vault named here.",
-    pitch: "One numbered bar in the vault named here. The coin is the only way to buy the title.",
+    pitch: "One numbered bar in the vault named here.",
     makerName: "Helen Cho",
     maker: "The owner",
     role: "Owner",
@@ -304,9 +289,10 @@ function positive(value: string) {
   return number;
 }
 
-type Checks = { hasPicture: boolean; curveError: string };
+type Checks = { hasPicture: boolean; withCoin: boolean | null; coin: boolean; pay: boolean; decimals: number };
 
 function problemFor(step: Step, draft: Draft, checks: Checks) {
+  if (checks.withCoin === null) return "Choose whether a coin goes with this title.";
   if (step === "Object") {
     if (!draft.objectName.trim() || !draft.kind.trim() || !draft.holder.trim() || !draft.where.trim() || !draft.story.trim()) {
       return "Name the object, what it is, who holds it, where it is, and the story.";
@@ -327,8 +313,8 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
   }
   if (step === "Claim") {
     if (!draft.claim.trim()) return "Write what the holder of the title can claim.";
-    if (wholeDays(draft.saleDays) === null) return "The days after graduation before the title sale are a whole number from 1 to 365.";
-    if (draft.hold === "escrow" && !parseTokenAmount(draft.titlePrice)) {
+    if (checks.withCoin && wholeDays(draft.saleDays) === null) return "The days after graduation before the title sale are a whole number from 1 to 365.";
+    if (checks.withCoin && draft.hold === "escrow" && !parseTokenAmount(draft.titlePrice, checks.decimals)) {
       return draft.sale === "auction" ? "Type the reserve in this token. A bid has to reach it." : "Type the price in this token. The buyer pays that amount.";
     }
   }
@@ -343,25 +329,14 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
     }
   }
   if (step === "Names") {
-    if (!draft.assetName.trim() || !draft.tokenName.trim()) return "The object and the token each need a name.";
-    if (draft.assetName.length > 32 || draft.tokenName.length > 32) return "The asset name and the token name are 32 characters or fewer.";
-    if (!/^[A-Z0-9]{2,8}$/.test(draft.symbol.trim().toUpperCase())) {
-      return "The symbol is 2 to 8 letters or numbers.";
-    }
+    if (!draft.assetName.trim()) return "The object needs a name.";
+    if (draft.assetName.length > 32) return "The asset name is 32 characters or fewer.";
   }
-  if (step === "Curve") {
-    const par = positive(draft.par);
-    const pool = positive(draft.pool);
-    const fee = positive(draft.feeOpen);
-    if (par === null || pool === null) return "Pick or type what the whole supply is worth at par. It is a number above zero.";
-    if (pool <= par) return "The pool price sits above par. The last slice of the sale walks up to it.";
-    if (fee === null || fee < 0.25 || fee > 99) return "The opening fee is from 0.25% to 99%.";
-    if (draft.fee === "fall") {
-      const ending = positive(draft.feeEnd);
-      if (ending === null || ending < 0.25 || ending > 99) return "The ending fee is from 0.25% to 99%.";
-      if (ending > fee) return "The ending fee has to be at or under the opening fee.";
-    }
-    if (checks.curveError) return checks.curveError;
+  if (step === "Coin") {
+    if (!checks.coin) return "Paste the token address and read the coin. This page will not create a title until that coin is read.";
+  }
+  if (step === "Price") {
+    if (!checks.pay) return "Paste the token the buyer pays with, and read it. This page will not create a title until that token is read.";
   }
   return "";
 }
@@ -383,7 +358,8 @@ function firstProblem(draft: Draft, checks: Checks) {
   if (word) {
     return `Take out "${word}". This page sells a claim to one object. It cannot promise profit, a rising price, or any return.`;
   }
-  for (const step of STEPS) {
+  const list = checks.withCoin === false ? PLAIN_STEPS : COIN_STEPS;
+  for (const step of list) {
     const problem = problemFor(step, draft, checks);
     if (problem) return `${step}: ${problem}`;
   }
@@ -396,39 +372,34 @@ export function AssetDesk() {
   const [example, setExample] = useState<ExampleId>("painting");
   const [draft, setDraft] = useState<Draft>(EXAMPLES.painting);
   const [tried, setTried] = useState(false);
-  const [platform, setPlatform] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [picture, setPicture] = useState<Blob | null>(null);
   const [pictureCopy, setPictureCopy] = useState("");
   const [pictureView, setPictureView] = useState("");
   const [pictureNote, setPictureNote] = useState("");
-  const symbol = draft.symbol.trim().toUpperCase();
   const { cluster } = useCluster();
+  const { connection } = useConnection();
   const { publicKey, signMessage } = useWallet();
+  const [withCoin, setWithCoin] = useState<boolean | null>(null);
+  const [coinInput, setCoinInput] = useState("");
+  const [coin, setCoin] = useState<CoinFacts | null>(null);
+  const [coinNote, setCoinNote] = useState("");
+  const [payInput, setPayInput] = useState("");
+  const [pay, setPay] = useState<PayFacts | null>(null);
+  const [payNote, setPayNote] = useState("");
+  const symbol = (coin?.symbol || pay?.symbol || draft.symbol).trim().toUpperCase();
   const escrowLive = escrowDepositAllowed(cluster, publicKey?.toBase58());
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
-  const unit = draft.quote;
+  const unit = coin?.quoteSymbol || pay?.symbol || "";
   const [escrowHint, setEscrowHint] = useState("");
   const [preparedKeys] = useState(() => ({
-    baseMint: Keypair.generate(),
-    config: Keypair.generate(),
     record: Keypair.generate(),
     title: Keypair.generate(),
   }));
-  const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
-  const quoteMintKey = quoteMintAddress(cluster, quoteKind);
-  const quoteMint = quoteMintKey.toBase58();
-  const tokenMint = preparedKeys.baseMint.publicKey.toBase58();
-  const poolAddress = deriveDbcPoolAddress(quoteMintKey, preparedKeys.baseMint.publicKey, preparedKeys.config.publicKey).toBase58();
-  const platformCut = platform.platformFeePercent;
-  const creatorCut = creatorSharePercent(platformCut);
+  const tokenMint = coin?.mint || pay?.mint || "";
+  const poolAddress = coin?.pool || "";
+  const steps: Step[] = withCoin === false ? [...PLAIN_STEPS] : [...COIN_STEPS];
   const shortClock = cluster === "devnet" && rail === "escrow";
   const waitUnit = shortClock ? "seconds" : "days";
-
-  useEffect(() => {
-    void fetch("/api/platform")
-      .then(async (response) => (response.ok ? setPlatform((await response.json()) as PlatformSettings) : undefined))
-      .catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     if (escrowLive) {
@@ -438,60 +409,21 @@ export function AssetDesk() {
     setDraft((current) => (current.hold === "escrow" ? { ...current, hold: "wallet" } : current));
   }, [escrowLive]);
 
-  const curve = useMemo(() => {
-    let openingBps = 0;
-    try {
-      openingBps = parseFeePercent(draft.feeOpen);
-      assertCurveFee(openingBps);
-    } catch {
-      return { error: "", parCap: "", locked: "" };
-    }
-    const shapeRead = readCurveShape({
-      straightFall: draft.straightFall,
-      dynamicFee: draft.dynamicFee,
-      compoundOn: draft.compoundOn,
-      poolFeePercent: draft.poolFee,
-      compoundPercent: draft.compoundShare,
-    });
-    if (shapeRead.error) return { error: shapeRead.error, parCap: "", locked: "" };
-    let endingBps = openingBps;
-    if (draft.fee === "fall") {
-      try {
-        endingBps = parseFeePercent(draft.feeEnd);
-      } catch (cause) {
-        return { error: cause instanceof Error ? cause.message : "That ending fee is not allowed.", parCap: "", locked: "" };
-      }
-      if (endingBps > openingBps) return { error: "The ending fee has to be at or under the opening fee.", parCap: "", locked: "" };
-    }
-    const marks = checkParPrices(
-      draft.par,
-      draft.pool,
-      String(BILLION_SUPPLY),
-      null,
-      "",
-      openingBps,
-      endingBps,
-      platform.platformFeePercent ?? 20,
-      DEFAULT_FEE_DECAY_SECONDS,
-      draft.poolFeeBps,
-      draft.quote === "SOL" ? "sol" : "usdc",
-      undefined,
-      undefined,
-      shapeRead.shape,
-    );
-    if (marks.picture.ok) return { error: "", parCap: marks.picture.parMarketCap, locked: marks.picture.locked };
-    return { error: marks.supply || marks.par || marks.pool || marks.picture.error || "That curve does not fit.", parCap: "", locked: "" };
-  }, [draft.feeOpen, draft.fee, draft.feeEnd, draft.straightFall, draft.dynamicFee, draft.compoundOn, draft.poolFee, draft.compoundShare, draft.poolFeeBps, draft.par, draft.pool, draft.quote, platform]);
-
-  const checks: Checks = { hasPicture: Boolean(picture && pictureCopy), curveError: curve.error };
+  const checks: Checks = {
+    hasPicture: Boolean(picture && pictureCopy),
+    withCoin,
+    coin: Boolean(coin),
+    pay: Boolean(pay),
+    decimals: coin?.decimals ?? pay?.decimals ?? 6,
+  };
   const word = profitWord(draft);
   const problem =
     problemFor(step, draft, checks) ||
     (word ? `Take out "${word}". This page sells a claim to one object. It cannot promise profit, a rising price, or any return.` : "");
-  const sizeLine = curve.parCap
-    ? `At par, all ${symbol || "tokens"} together are priced at ${curve.parCap}. The declared value of ${draft.assetName || "the object"} is ${unit === "USDC" ? `$${draft.declared}` : `${draft.declared} SOL`}. A buyer sees both numbers.`
+  const sizeLine = coin
+    ? `At the opening price, all ${coin.supply} ${coin.symbol} together are priced at ${coin.wholeAtPar} ${coin.quoteSymbol}. The declared value of ${draft.assetName || "the object"} is ${draft.declared}. A buyer sees both numbers. Later trading can price the same supply at a different number.`
     : "";
-  const index = STEPS.indexOf(step);
+  const index = steps.indexOf(step);
 
   async function addPicture(file: File) {
     setPictureNote("Shrinking and saving the picture…");
@@ -545,24 +477,34 @@ export function AssetDesk() {
                   } `
                 : `The price is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. The first person to pay it gets the title. `
             }${SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent()}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-          : `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${symbol || "the token"}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`,
+          : coin
+            ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`
+            : `No coin. Tensor is the sale path. The title is listed from the PAR sale page through Tensor's marketplace program, priced in ${pay?.symbol || "the token you read"}. There is no graduation wait. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`,
       ],
       [
         "Token",
-        `${draft.tokenName} (${symbol}). Token address ${tokenMint}. ${BASE_DECIMALS} decimals. Supply 1,000,000,000. Quoted in ${unit}. Quote mint ${quoteMint}. Pool ${poolAddress}. ${COIN_WORDS} The picture on the Object step is the token image and the record image.`,
+        coin
+          ? `${coin.name} (${coin.symbol}). Token address ${coin.mint}. ${coin.decimals} decimals. Supply ${coin.supply}. Quoted in ${coin.quoteSymbol}. Quote mint ${coin.quoteMint}. Pool ${coin.pool}. These facts are read from the coin and cannot be changed. ${COIN_WORDS} The picture on the Object step is the record image.`
+          : pay
+            ? `No coin. The price is paid in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals. The picture on the Object step is the record image.`
+            : "No token has been read yet.",
       ],
       [
         "Picture",
         pictureView
-          ? "The picture on this sheet is the token image and the record image."
-          : "No picture yet. Add one on the Object step. That picture is the token image and the record image.",
+          ? coin
+            ? "The picture on this sheet is the record image. The coin keeps the image it was created with."
+            : "The picture on this sheet is the record image. This title has no coin."
+          : "No picture yet. Add one on the Object step. That picture is the record image.",
       ],
       [
         "Curve",
-        `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%. PAR ${platformCut}%. You ${creatorCut}%. ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee goes back into the pool after the lock. Meteora still takes ${METEORA_TRADING_FEE_PERCENT}%. PAR still takes ${platformCut}% of the fee that is not put back.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}. Same split.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`,
+        coin
+          ? `Read from the coin. Supply ${coin.supply}. Opening price ${coin.startPrice} ${coin.quoteSymbol}. Pool price ${coin.endPrice} ${coin.quoteSymbol}. At the opening price the whole supply is priced at ${coin.wholeAtPar} ${coin.quoteSymbol}. Fee ${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${coin.platformFeePercent}%, creator ${coin.creatorFeePercent}%. ${coin.isMigrated ? "The coin has graduated." : "The coin has not graduated."} ${sizeLine}`
+          : "No coin. There is no curve.",
       ],
     ],
-    [draft, symbol, unit, sizeLine, curve.locked, rail, waitUnit, shortClock, tokenMint, quoteMint, poolAddress, pictureView, platformCut, creatorCut],
+    [draft, symbol, rail, waitUnit, shortClock, pictureView, coin, pay, sizeLine],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -572,12 +514,52 @@ export function AssetDesk() {
   function load(next: ExampleId) {
     setExample(next);
     setDraft(EXAMPLES[next]);
+    setCoin(null);
+    setPay(null);
     setTried(false);
   }
 
+  function chooseCoin(yes: boolean) {
+    setWithCoin(yes);
+    setTried(false);
+    if (!yes) {
+      setCoin(null);
+      setDraft((current) => (current.hold === "escrow" ? { ...current, hold: "wallet" } : current));
+    } else {
+      setPay(null);
+    }
+    setStep("Object");
+  }
+
+  async function loadCoin() {
+    setCoin(null);
+    setCoinNote("Reading the coin…");
+    try {
+      const read = await readCoin(connection, coinInput);
+      setCoin(read);
+      setCoinNote("Read from the coin. These fields stay as the coin has them.");
+    } catch (cause) {
+      setCoinNote(cause instanceof Error ? cause.message : "Could not read that coin.");
+    }
+  }
+
+  async function loadPay(mint = payInput) {
+    setPay(null);
+    setPayNote("Reading the token…");
+    try {
+      const read = await readPayToken(connection, mint);
+      setPay(read);
+      setPayInput(read.mint);
+      setPayNote(`${read.name} (${read.symbol}). ${read.decimals} decimals. This is the token the buyer pays.`);
+    } catch (cause) {
+      setPayNote(cause instanceof Error ? cause.message : "Could not read that token.");
+    }
+  }
+
   function go(next: Step) {
-    const nextIndex = STEPS.indexOf(next);
-    const redemptionIndex = STEPS.indexOf("Redemption");
+    if (!steps.includes(next)) return;
+    const nextIndex = steps.indexOf(next);
+    const redemptionIndex = steps.indexOf("Redemption");
     if (nextIndex > redemptionIndex && problemFor("Redemption", draft, checks)) {
       setTried(true);
       setStep("Redemption");
@@ -592,7 +574,7 @@ export function AssetDesk() {
       setTried(true);
       return;
     }
-    const next = STEPS[index + 1];
+    const next = steps[index + 1];
     if (next) go(next);
   }
 
@@ -601,24 +583,36 @@ export function AssetDesk() {
       <section className="lede">
         <p className="eyebrow">Template</p>
         <h1>Real-world asset</h1>
-        <p className="tagline">One object. One title. One payment token and meme.</p>
+        <p className="tagline">One object. One title.</p>
         <p>
-          This page creates one object with PAR. The coin on this page is always created on PAR. A token whose price rises from the first buy is a plain token, and that token is created on the home page.
+          Create the coin on the home page first, when this title has a coin. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve. With no coin, this page makes the title only, and Tensor sells it in a token you name.
         </p>
-        <p>
-          The lock is graduation. When the curve is full, the {unit} raised on the sale and the tokens still left move into a Meteora DAMM v2 pool. That pool is locked. The {unit} and those tokens stay in it.
+        <div className="segmented" role="group" aria-label="Does a coin go with this title">
+          <button type="button" aria-pressed={withCoin === true} onClick={() => chooseCoin(true)}>
+            A coin goes with this
+          </button>
+          <button type="button" aria-pressed={withCoin === false} onClick={() => chooseCoin(false)}>
+            No coin
+          </button>
+        </div>
+        <p className="note">
+          {withCoin === null
+            ? "Choose one before the steps. A title that says it has a coin cannot be created until that coin's token address is read."
+            : withCoin
+              ? "The Coin step asks for the token address. Leave it empty and the title cannot be created."
+              : "There is no curve step. The Price step asks for the token the buyer pays. The PAR escrow sells a title only in its own coin, so an auction needs a coin."}
         </p>
-        <div className="beats">
+        {withCoin === true ? <div className="beats">
           <article>
             <strong>1. The climb</strong>
             <span>
-              PAR is on. The climb is almost flat. Most tokens buyers receive stay within 10% of the price you set, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price.
+              The climb is the one already on the coin you paste. This page does not write a new supply or a new price.
             </span>
           </article>
           <article>
             <strong>2. The lock</strong>
             <span>
-              The lock is graduation. The climb ends when the sale is full. Meteora moves the {unit} raised on the sale and the tokens still left into a DAMM v2 pool. DAMM v2 is the Meteora pool this page uses. The pool is locked, so the {unit} and those tokens cannot be withdrawn.
+              The lock is graduation, already set on that coin. When the sale is full, Meteora moves the quote raised on the sale and the tokens still left into a DAMM v2 pool. The pool is locked, so that quote and those tokens cannot be withdrawn.
             </span>
           </article>
           <article>
@@ -639,13 +633,13 @@ export function AssetDesk() {
               The creator then lists the title through Tensor. The coin pays for the title. The title can go into the escrow, and that program sells it. {ESCROW_COMING}
             </span>
           </article>
-        </div>
+        </div> : null}
         <p>
           {COIN_WORDS} The steps name the object, the person, the handoff, and the pitch. They fit any one object: a painting, a card, a kite, a ball, a photograph, or something else. One example is filled in.
           The other examples use the same steps. A plain token is created on the home page and has no title.
         </p>
         <p>
-          The last step creates the coin on PAR, then the master, then one edition. The master is sent to the
+          The last step creates the master, then one edition. It does not create the coin. The master is sent to the
           program vault and stays frozen. That one edition is the title, and it is sent to the creator wallet.
           The NFT on the chain is the proof. PAR keeps a copy of those proofs. Both NFTs hold the record sheet, the meta sheet.
         </p>
@@ -690,7 +684,7 @@ export function AssetDesk() {
       </section>
 
       <ol className="asset-steps">
-        {STEPS.map((name, item) => (
+        {steps.map((name, item) => (
           <li key={name}>
             <button
               type="button"
@@ -801,11 +795,15 @@ export function AssetDesk() {
             <textarea value={draft.claim} onChange={(event) => patch({ claim: event.target.value })} rows={4} />
           </label>
           <p className="note">
-            There is one asset and one title. {COIN_WORDS} The title can be bought {draft.saleDays || "some"} {waitUnit} after graduation.{" "}
-            {rail === "escrow"
+            There is one asset and one title.{" "}
+            {withCoin
+              ? `${COIN_WORDS} The title can be bought ${draft.saleDays || "some"} ${waitUnit} after graduation. `
+              : "This title has no coin. Tensor sells it in the token named on the Price step. "}
+            {withCoin && rail === "escrow"
               ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${SALE_BURN_PERCENT}%, pays you ${creatorSalePercent()}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
-              : `Tensor is selected. The title stays in your wallet. When the sale opens, you list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`}
+              : `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`}
           </p>
+          {withCoin ? <>
           <div className="segmented" role="group" aria-label="Title path">
             <button type="button" aria-pressed={rail !== "escrow"} onClick={() => patch({ hold: "wallet" })}>
               Tensor
@@ -949,6 +947,7 @@ export function AssetDesk() {
               </dl>
             </>
           ) : null}
+          </> : <p className="note">The PAR escrow sells a title only in its own coin. An auction needs a coin.</p>}
         </form>
       ) : null}
 
@@ -963,7 +962,7 @@ export function AssetDesk() {
             <textarea value={draft.shipping} onChange={(event) => patch({ shipping: event.target.value })} rows={2} />
           </label>
           <label>
-            Declared value if the object cannot be delivered, {unit}
+            Declared value if the object cannot be delivered{unit ? `, ${unit}` : ""}
             <input value={draft.declared} onChange={(event) => patch({ declared: event.target.value })} inputMode="decimal" />
           </label>
           <label>
@@ -994,154 +993,82 @@ export function AssetDesk() {
             <input value={draft.assetName} onChange={(event) => patch({ assetName: event.target.value })} />
             <span className="note">The object. This is the title of the buyer page.</span>
           </label>
-          <label>
-            Token name
-            <input value={draft.tokenName} onChange={(event) => patch({ tokenName: event.target.value })} />
-            <span className="note">What the wallet holds. This is the claim to the object.</span>
-          </label>
-          <label>
-            Symbol
-            <input
-              value={draft.symbol}
-              onChange={(event) => patch({ symbol: event.target.value.toUpperCase() })}
-              maxLength={8}
-            />
-          </label>
+          <p className="note">
+            {withCoin
+              ? coin
+                ? `The coin is ${coin.name} (${coin.symbol}). Token address ${coin.mint}. Supply ${coin.supply}. That name is read from the coin.`
+                : "The token name is read on the Coin step. Paste the token address there."
+              : pay
+                ? `The price is paid in ${pay.name} (${pay.symbol}). Token address ${pay.mint}.`
+                : "The price token is read on the Price step."}
+          </p>
         </form>
       ) : null}
 
-      {step === "Curve" ? (
+      {step === "Coin" ? (
         <form>
           <p className="note">
-            The coin on this page is created on PAR. You set one price for the shelf. Most tokens buyers receive
-            stay within 10% of it, then the last slice walks to the pool price. The curve sells {draft.tokenName || "the token"}.
-            It does not appraise {draft.assetName || "the object"}. Graduation opens a DAMM v2 pool for the token.
-            The redemption rule stays on this page. A token whose price climbs from the first buy is created on the home page.
+            Paste the token address of a coin that already exists. This page reads the supply, the opening price, the pool price, and the fee from that coin. Those facts cannot be typed over.
           </p>
-          <div className="segmented" role="group" aria-label="Quote">
-            <button type="button" aria-pressed={draft.quote === "USDC"} onClick={() => patch({ quote: "USDC", ...pricesFor("1000") })}>
-              USDC
-            </button>
-            <button type="button" aria-pressed={draft.quote === "SOL"} onClick={() => patch({ quote: "SOL", ...pricesFor("10") })}>
-              SOL
-            </button>
-          </div>
-          <p className="note">
-            What is the whole supply worth at par? Pick a number or type one. It is your price for the start of the
-            sale, not an appraisal. There are always one billion tokens. After graduation the token trades in its
-            pool, and the price there is set by buyers and sellers.
-          </p>
-          <div className="segmented asset-values" role="group" aria-label="Whole supply at par">
-            {VALUES[draft.quote].map((amount) => (
-              <button
-                key={amount}
-                type="button"
-                aria-pressed={Number(draft.value) === amount}
-                onClick={() => patch(pricesFor(String(amount)))}
-              >
-                {draft.quote === "USDC" ? `$${amount.toLocaleString("en-US")}` : `${amount.toLocaleString("en-US")} SOL`}
-              </button>
-            ))}
-          </div>
           <label>
-            Whole supply at par, {unit}
-            <input
-              value={draft.value}
-              onChange={(event) => patch(pricesFor(event.target.value.replace(/[^\d.]/g, "")))}
-              inputMode="decimal"
-            />
-            <span className="note">
-              Par {draft.par || "unset"} {unit} per token. Pool price {draft.pool || "unset"} {unit} per token, 20% above par.
-            </span>
+            Token address
+            <input value={coinInput} onChange={(event) => { setCoinInput(event.target.value.trim()); setCoin(null); setCoinNote(""); }} spellCheck={false} />
           </label>
-          {curve.locked ? <p className="note">{curve.locked}</p> : null}
-          <div className="segmented" role="group" aria-label="Curve fee">
-            <button type="button" aria-pressed={draft.fee === "fall"} onClick={() => patch({ fee: "fall" })}>
-              Fee falls
-            </button>
-            <button type="button" aria-pressed={draft.fee === "flat"} onClick={() => patch({ fee: "flat" })}>
-              Fee stays flat
-            </button>
-          </div>
-          <label>
-            {draft.fee === "flat" ? "Fee until graduation, percent" : "Trading fee at the open, percent"}
-            <input value={draft.feeOpen} onChange={(event) => patch({ feeOpen: event.target.value })} inputMode="decimal" />
-          </label>
-          {draft.fee === "fall" ? (
+          <button type="button" className="solid" onClick={() => void loadCoin()}>
+            Read this coin
+          </button>
+          {coinNote ? <p className="note">{coinNote}</p> : null}
+          {coin ? (
             <>
-              <label>
-                Ending fee, percent
-                <input value={draft.feeEnd} onChange={(event) => patch({ feeEnd: event.target.value })} inputMode="decimal" />
-              </label>
-              <div className="segmented" role="group" aria-label="How the fee falls">
-                <button type="button" aria-pressed={!draft.straightFall} onClick={() => patch({ straightFall: false })}>
-                  Curved fall
-                </button>
-                <button type="button" aria-pressed={draft.straightFall} onClick={() => patch({ straightFall: true })}>
-                  Straight fall
-                </button>
-              </div>
-              <p className="note">
-                {draft.straightFall
-                  ? "A straight fall drops by the same amount on each step of the 12 hour clock."
-                  : "A curved fall drops faster at the start, then slows as it nears the ending fee. The clock is 12 hours."}
-              </p>
+              <p className="note">Read from the coin. These fields cannot be edited.</p>
+              <label>Name<input value={coin.name} readOnly /></label>
+              <label>Symbol<input value={coin.symbol} readOnly /></label>
+              <label>Token address<input value={coin.mint} readOnly /></label>
+              <label>Supply<input value={coin.supply} readOnly /></label>
+              <label>Decimals<input value={String(coin.decimals)} readOnly /></label>
+              <label>Quote<input value={coin.quoteSymbol} readOnly /></label>
+              <label>Quote mint<input value={coin.quoteMint} readOnly /></label>
+              <label>Opening price<input value={`${coin.startPrice} ${coin.quoteSymbol}`} readOnly /></label>
+              <label>Pool price<input value={`${coin.endPrice} ${coin.quoteSymbol}`} readOnly /></label>
+              <label>Whole supply at the opening price<input value={`${coin.wholeAtPar} ${coin.quoteSymbol}`} readOnly /></label>
+              <label>Pool<input value={coin.pool} readOnly /></label>
+              <label>Fee<input value={`${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}`} readOnly /></label>
+              <label>Fee split<input value={`Meteora ${METEORA_TRADING_FEE_PERCENT}%. PAR ${coin.platformFeePercent}%. Creator ${coin.creatorFeePercent}%.`} readOnly /></label>
+              <label>Graduated<input value={coin.isMigrated ? "Yes" : "Not yet"} readOnly /></label>
             </>
           ) : null}
-          <label className="check">
-            <input type="checkbox" checked={draft.dynamicFee} onChange={(event) => patch({ dynamicFee: event.target.checked })} />
-            Add a volatility fee on the curve
-          </label>
-          <p className="note">
-            The amount is the fee percent above. Meteora can add a volatility piece on top of that percent while the price is moving fast. The piece is at most one fifth of the fee you typed, so a 25% fee can rise by up to 5 points, then it fades when the price is calm. The two together still stop at 99%. There is no second box: the ceiling is one fifth of the fee already typed. It does not change the lock.
-          </p>
-          <section className="card">
-            <h2>The fee on this form</h2>
-            <p>
-              Buyers pay the percent you type above. Of that fee: Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%.
-            </p>
-            <p>
-              After the lock, the pool fee is the same split. Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%. If you put fees back into the pool, Meteora still takes {METEORA_TRADING_FEE_PERCENT}% and PAR still takes {platformCut}% of the fee that is not put back.
-            </p>
-            <p>
-              {rail === "escrow"
-                ? `The title sale is separate from this trading fee. Escrow is selected, so the title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program. The program burns ${SALE_BURN_PERCENT}% of the price, keeps ${SALE_PROGRAM_FEE_PERCENT}%, and pays you ${creatorSalePercent()}%.`
-                : `The title sale is separate from this trading fee. Tensor is selected, so the title is listed through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of the price and keep the rest.`}
-            </p>
-          </section>
-          <label className="check">
-            <input type="checkbox" checked={draft.compoundOn} onChange={(event) => patch({ compoundOn: event.target.checked })} />
-            Put pool fees back into the pool after the lock
-          </label>
-          {draft.compoundOn ? (
-            <>
-              <label>
-                Pool fee after the lock, percent
-                <input value={draft.poolFee} onChange={(event) => patch({ poolFee: event.target.value })} inputMode="decimal" />
-              </label>
-              <label>
-                Share of that fee put back into the pool, percent
-                <input value={draft.compoundShare} onChange={(event) => patch({ compoundShare: event.target.value })} inputMode="decimal" />
-              </label>
-              <p className="note">
-                The share you type goes back into the pool. Meteora still takes {METEORA_TRADING_FEE_PERCENT}%. PAR still takes {platformCut}% of the fee that is not put back.
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="choices" role="group" aria-label="Pool fee after the lock">
-                {MIGRATION_FEE_CHOICES.map((choice) => (
-                  <button key={choice.bps} type="button" aria-pressed={draft.poolFeeBps === choice.bps} onClick={() => patch({ poolFeeBps: choice.bps })}>
-                    {choice.label}
-                  </button>
-                ))}
-              </div>
-              <p className="note">After the lock, every swap pays {migrationFeeLabel(draft.poolFeeBps)}. The liquidity stays locked.</p>
-            </>
-          )}
-          {sizeLine ? <p className="note">{sizeLine}</p> : null}
         </form>
       ) : null}
+
+      {step === "Price" ? (
+        <form>
+          <p className="note">
+            There is no coin and no curve. Paste the token the buyer pays. USDC and SOL fill the known address. Any other token address can be read the same way.
+          </p>
+          <div className="segmented" role="group" aria-label="Price token">
+            <button type="button" onClick={() => void loadPay(cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>
+            <button type="button" onClick={() => void loadPay(WSOL)}>SOL</button>
+          </div>
+          <label>
+            Token address
+            <input value={payInput} onChange={(event) => { setPayInput(event.target.value.trim()); setPay(null); setPayNote(""); }} spellCheck={false} />
+          </label>
+          <button type="button" className="solid" onClick={() => void loadPay()}>
+            Read this token
+          </button>
+          {payNote ? <p className="note">{payNote}</p> : null}
+          {pay ? (
+            <>
+              <p className="note">Read from the token. These fields cannot be edited.</p>
+              <label>Name<input value={pay.name} readOnly /></label>
+              <label>Symbol<input value={pay.symbol} readOnly /></label>
+              <label>Token address<input value={pay.mint} readOnly /></label>
+              <label>Decimals<input value={String(pay.decimals)} readOnly /></label>
+            </>
+          ) : null}
+        </form>
+      ) : null}
+
 
       {step === "Pitch" ? (
         <form>
@@ -1219,23 +1146,23 @@ export function AssetDesk() {
             </p>
           </article>
           <article className="card">
-            <p className="eyebrow">Trade and pool</p>
+            <p className="eyebrow">{coin ? "The coin" : "The price token"}</p>
             <h2>
-              {draft.tokenName || "Token"} <span>{symbol}</span>
+              {coin?.name || pay?.name || "Token"} <span>{symbol}</span>
             </h2>
             {pictureView ? (
-              <img className="asset-picture" src={pictureView} alt={draft.tokenName || "Token"} />
+              <img className="asset-picture" src={pictureView} alt={coin?.name || pay?.name || "Record"} />
             ) : (
-              <p className="note">No picture yet. The picture from the Object step is the token image and the record image.</p>
+              <p className="note">No picture yet. The picture from the Object step is the record image.</p>
             )}
             <dl>
               <div>
                 <dt>Token address</dt>
-                <dd>{tokenMint}</dd>
+                <dd>{tokenMint || "Unread"}</dd>
               </div>
               <div>
                 <dt>Name</dt>
-                <dd>{draft.tokenName || "Token"}</dd>
+                <dd>{coin?.name || pay?.name || "Unread"}</dd>
               </div>
               <div>
                 <dt>Symbol</dt>
@@ -1243,72 +1170,51 @@ export function AssetDesk() {
               </div>
               <div>
                 <dt>Decimals</dt>
-                <dd>{BASE_DECIMALS}</dd>
+                <dd>{coin?.decimals ?? pay?.decimals ?? "Unread"}</dd>
               </div>
               <div>
                 <dt>Supply</dt>
-                <dd>1,000,000,000</dd>
+                <dd>{coin ? coin.supply : "No coin"}</dd>
               </div>
               <div>
                 <dt>Quote</dt>
-                <dd>{unit}</dd>
+                <dd>{coin ? coin.quoteSymbol : pay ? "The price token is not a quote" : "Unread"}</dd>
               </div>
               <div>
                 <dt>Quote mint</dt>
-                <dd>{quoteMint}</dd>
+                <dd>{coin ? coin.quoteMint : "No coin"}</dd>
               </div>
               <div>
                 <dt>Pool</dt>
-                <dd>{poolAddress}</dd>
+                <dd>{coin ? poolAddress : pay ? "No coin" : "Unread"}</dd>
               </div>
               <div>
-                <dt>Par</dt>
-                <dd>
-                  {draft.par} {unit}
-                </dd>
+                <dt>Opening price</dt>
+                <dd>{coin ? `${coin.startPrice} ${coin.quoteSymbol}` : "No coin"}</dd>
               </div>
               <div>
                 <dt>Pool price</dt>
-                <dd>
-                  {draft.pool} {unit}
-                </dd>
+                <dd>{coin ? `${coin.endPrice} ${coin.quoteSymbol}` : "No coin"}</dd>
               </div>
               <div>
                 <dt>Fee</dt>
-                <dd>
-                  {draft.fee === "flat"
-                    ? `${draft.feeOpen}% until graduation`
-                    : `${draft.feeOpen}% falling ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%`}
-                  {draft.dynamicFee ? " Volatility can add at most one fifth of that fee." : " No volatility fee."}
-                </dd>
-              </div>
-              <div>
-                <dt>Fee split</dt>
-                <dd>
-                  Meteora {METEORA_TRADING_FEE_PERCENT}%. PAR {platformCut}%. You {creatorCut}%.
-                </dd>
+                <dd>{coin ? `${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}` : "No coin"}</dd>
               </div>
               <div>
                 <dt>Sale path</dt>
                 <dd>
-                  {rail === "escrow"
+                  {coin && rail === "escrow"
                     ? `PAR escrow. ${draft.sale === "auction" ? "Auction" : "Fixed price"} at ${draft.titlePrice.trim() || "unset"} ${symbol || "tokens"}. Opens ${draft.saleDays} ${waitUnit} after graduation.`
-                    : `Tensor. Opens ${draft.saleDays} days after graduation. Listed from the PAR sale page.`}
-                </dd>
-              </div>
-              <div>
-                <dt>After graduation</dt>
-                <dd>
-                  A DAMM v2 pool. The quote raised on the curve and the remaining tokens lock there.
-                  {draft.compoundOn
-                    ? ` ${draft.compoundShare}% of the ${draft.poolFee}% pool fee is put back into the pool.`
-                    : ` The pool fee is ${bpsToPercent(draft.poolFeeBps)}.`}
+                    : coin
+                      ? `Tensor. Opens ${draft.saleDays} days after graduation. Listed from the PAR sale page. Paid in ${symbol}.`
+                      : `Tensor. Paid in ${symbol || "the token you read"}. There is no graduation wait.`}
                 </dd>
               </div>
             </dl>
             <p className="note">
-              The trading price is what buyers pay for {symbol || "the token"}. The redemption rule is the other
-              panel. One does not set the other.
+              {coin
+                ? `The trading price is what buyers pay for ${coin.symbol}. The redemption rule is the other panel. One does not set the other.`
+                : "There is no coin to trade. The redemption rule is the other panel."}
             </p>
             {sizeLine ? <p className="note">{sizeLine}</p> : null}
           </article>
@@ -1344,9 +1250,10 @@ export function AssetDesk() {
             picture={picture}
             pictureCopy={pictureCopy}
             problem={firstProblem(draft, checks)}
-            platform={platform}
-            curveLines={[curve.locked, sizeLine].filter(Boolean).join(" ")}
+            curveLines={sizeLine}
             preparedKeys={preparedKeys}
+            coin={coin}
+            pay={pay}
           />
         </div>
       ) : null}
@@ -1354,10 +1261,10 @@ export function AssetDesk() {
       {tried && problem ? <p className="error">{problem}</p> : null}
 
       <div className="asset-nav">
-        <button type="button" disabled={index === 0} onClick={() => go(STEPS[index - 1])}>
+        <button type="button" disabled={index <= 0} onClick={() => go(steps[index - 1])}>
           Back
         </button>
-        {index < STEPS.length - 1 ? (
+        {index < steps.length - 1 ? (
           <button type="button" className="solid" onClick={forward}>
             Next
           </button>

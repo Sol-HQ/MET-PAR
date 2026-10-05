@@ -44,6 +44,8 @@ export type RecordFacts = {
   vault: string;
   creator: string;
   symbol: string;
+  supply?: string;
+  decimals?: string;
   quote: string;
   par: string;
   poolPrice: string;
@@ -60,14 +62,19 @@ export type RecordFacts = {
   sheet?: string;
   salePage?: string;
   soldThrough?: string;
+  /** attached when this record names a coin. none when the mint is only the price token. */
+  coin?: "attached" | "none";
 };
 
 /** Short fields written on chain. The full sheet sits behind the record link and is pinned by its hash here. */
 export function recordAttributes(facts: RecordFacts): RecordAttribute[] {
   return [
     { key: "record", value: RECORD_KIND },
+    { key: "coin", value: facts.coin || "attached" },
     ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
     { key: "symbol", value: facts.symbol },
+    ...(facts.supply ? [{ key: "supply", value: facts.supply }] : []),
+    ...(facts.decimals ? [{ key: "decimals", value: facts.decimals }] : []),
     { key: "mint", value: facts.mint },
     ...(facts.soldThrough ? [{ key: "sold through", value: facts.soldThrough }] : []),
     ...(facts.salePage ? [{ key: "sale page", value: facts.salePage }] : []),

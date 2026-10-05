@@ -97,9 +97,14 @@ export function creatorPromises(input: {
   sale?: SaleMode;
   /** Practice program only. Each entered day is one second on chain. */
   shortClock?: boolean;
+  /** False when this title has no coin. The price token is named in paySymbol. */
+  attached?: boolean;
+  paySymbol?: string;
 }): string[] {
   const escrow = input.rail === "escrow";
   const auction = escrow && input.sale === "auction";
+  const attached = input.attached !== false;
+  const pay = input.paySymbol || "this token";
   const waitUnit = input.shortClock ? "seconds" : "days";
   const bidClock = input.shortClock ? "72-second" : `${AUCTION_HOURS}-hour`;
   const extend = input.shortClock ? "1 second" : `${AUCTION_EXTEND_HOURS} hour`;
@@ -112,7 +117,9 @@ export function creatorPromises(input: {
       ? auction
         ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. This site finishes it when the clock ends.`
         : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
-      : `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in this token, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`,
+      : attached
+        ? `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
+        : `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}. This title has no coin.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`,
@@ -122,7 +129,9 @@ export function creatorPromises(input: {
         ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
         : `The title waits in the PAR escrow program until it is sold. If it never sells, it returns to me ${reclaim} after the sale could open.`
       : "Until the sale, the title stays in my wallet or in my Tensor listing. I will not sell, move, lend, or burn it any other way. Doing so breaks my word.",
-    "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing.",
+    attached
+      ? "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing."
+      : `There is no coin with this title. The price is paid in ${pay}. That payment is not a share of the item, and this title pays nothing.`,
     "If I break these promises, I alone am responsible. PAR is software. It does not hold, insure, or guarantee the item. The NFT on the chain is the proof. PAR keeps a copy of the proofs.",
   ];
 }
@@ -154,6 +163,8 @@ export type TitleFacts = {
   shortClock?: boolean;
   /** Readable sheet page. Written on every title. */
   sheet?: string;
+  /** False when the title has no coin and the mint is only the price token. */
+  noCoin?: boolean;
 };
 
 export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
@@ -162,6 +173,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
   const rows: RecordAttribute[] = [
     { key: "title", value: TITLE_KIND },
     ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
+    { key: "coin", value: facts.noCoin ? "none" : "attached" },
     { key: "mint", value: facts.mint },
     { key: "sold through", value: saleVenueWords(facts.rail) },
     { key: "sale page", value: facts.venue },
@@ -169,7 +181,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "pool", value: facts.pool },
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
-    { key: "sale opens", value: `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
+    { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
     { key: "paid in", value: "this token only" },
     { key: "burned", value: escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
