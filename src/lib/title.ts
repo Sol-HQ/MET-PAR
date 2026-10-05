@@ -20,9 +20,9 @@ export const TITLE_RAIL: Record<ClusterName, TitleRail> = {
   "mainnet-beta": "creator",
 };
 
-/** The escrow program. Empty until it is deployed on that network. */
+/** The escrow program. The practice program uses a one-second day so a test can finish. The real network is empty until its own program is deployed. */
 export const ESCROW_PROGRAM: Record<ClusterName, string> = {
-  devnet: "AGcNqaLNfR7h2bdGi39vEMTKNyfX8qLt4mgmbhmtgWvh",
+  devnet: "FASTUQ11TbpbpQL1LitzgwjLcpqRPgQrHXmuk584hypF",
   "mainnet-beta": "",
 };
 
@@ -94,16 +94,23 @@ export function creatorPromises(input: {
   handoffDays: string;
   venue: string;
   sale?: SaleMode;
+  /** Practice program only. Each entered day is one second on chain. */
+  shortClock?: boolean;
 }): string[] {
   const escrow = input.rail === "escrow";
   const auction = escrow && input.sale === "auction";
+  const waitUnit = input.shortClock ? "seconds" : "days";
+  const bidClock = input.shortClock ? "72-second" : `${AUCTION_HOURS}-hour`;
+  const extend = input.shortClock ? "1 second" : `${AUCTION_EXTEND_HOURS} hour`;
+  const sit = input.shortClock ? "60 seconds" : `${AUCTION_SIT_DAYS} days`;
+  const reclaim = input.shortClock ? "365 seconds" : "a year";
   return [
     "I own the item on this record sheet, or I have the right to sell it, and it is as described.",
     "The title is the one claim to the item. Whoever holds the title can claim the item from me.",
     escrow
       ? auction
-        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} days after the token graduates. The first bid at or above the reserve starts a ${AUCTION_HOURS}-hour clock. A bid in the last hour moves the end to ${AUCTION_EXTEND_HOURS} hour after that bid. The PAR watcher finishes it when the clock ends.`
-        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} days after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
+        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. The PAR watcher finishes it when the clock ends.`
+        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
       : `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in this token, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
@@ -111,8 +118,8 @@ export function creatorPromises(input: {
     `I will hand the item to the holder of the title within ${input.handoffDays} days of their claim, as the handoff terms say.`,
     escrow
       ? auction
-        ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${AUCTION_SIT_DAYS} days after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
-        : "The title waits in the PAR escrow program until it is sold. If it never sells, it returns to me a year after the sale could open."
+        ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
+        : `The title waits in the PAR escrow program until it is sold. If it never sells, it returns to me ${reclaim} after the sale could open.`
       : "Until the sale, the title stays in my wallet or in my Tensor listing. I will not sell, move, lend, or burn it any other way. Doing so breaks my word.",
     "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing.",
     "If I break these promises, I alone am responsible. PAR is software. It does not hold, insure, or guarantee the item. The NFT on the chain is the proof. PAR keeps a copy of the proofs.",
@@ -142,6 +149,8 @@ export type TitleFacts = {
   /** Set on the escrow path. The program address is written on the title. */
   program?: string;
   sale?: SaleMode;
+  /** Practice program only. The entered number is seconds on chain. */
+  shortClock?: boolean;
 };
 
 export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
@@ -155,7 +164,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
     { key: "sold through", value: saleVenueWords(facts.rail) },
-    { key: "sale opens", value: `${facts.delayDays} days after graduation` },
+    { key: "sale opens", value: `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
     { key: "paid in", value: "this token only" },
     { key: "burned", value: `${facts.burnPercent}%` },
     { key: "sale page", value: facts.venue },
@@ -165,7 +174,9 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
   if (auction) {
     rows.push({
       key: "auction",
-      value: `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. The PAR watcher finishes it.`,
+      value: facts.shortClock
+        ? "72 seconds after the first bid at the reserve. A bid in the last second extends 1 second. Sits 60 seconds if no bid. The PAR watcher finishes it."
+        : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. The PAR watcher finishes it.`,
     });
   }
   return rows;

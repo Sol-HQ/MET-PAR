@@ -4,6 +4,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { acceptedQuoteMints, HIDDEN_POOLS, rpcUrl, type ClusterName } from "@/lib/constants";
 import { checkQuoteMint } from "@/lib/quote-gate";
+import { readTokenName } from "@/lib/load-pool";
 import { hasIndex, listPools, savePool } from "@/lib/store";
 
 const PATH = "platform/listings.json";
@@ -12,6 +13,11 @@ type Listing = {
   pool: string;
   cluster: ClusterName;
   config: string;
+  creator?: string;
+  mint?: string;
+  name?: string;
+  symbol?: string;
+  uri?: string;
 };
 
 async function readListings(): Promise<Listing[]> {
@@ -65,10 +71,20 @@ export async function POST(request: Request) {
       return Response.json({ error: quote.message }, { status: 400 });
     }
   }
+  const names = await readTokenName(connection, pool.poolState.baseMint).catch(() => ({
+    name: "",
+    symbol: "",
+    uri: "",
+  }));
   const listing: Listing = {
     pool: poolKey.toBase58(),
     cluster: body.cluster,
     config: pool.poolState.config.toBase58(),
+    creator: pool.poolState.creator.toBase58(),
+    mint: pool.poolState.baseMint.toBase58(),
+    name: names.name,
+    symbol: names.symbol,
+    uri: names.uri,
   };
   if (hasIndex()) {
     if (!HIDDEN_POOLS.has(listing.pool)) await savePool(listing);

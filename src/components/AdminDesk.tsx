@@ -66,8 +66,28 @@ export function AdminDesk() {
   const [leftovers, setLeftovers] = useState<LeftoverRow[]>([]);
   const [rowsReady, setRowsReady] = useState(false);
   const [pending, setPending] = useState<{ prepared: PreparedTransaction; lines: string[]; title: string } | null>(null);
+  const [records, setRecords] = useState<{
+    index: boolean;
+    objects: { record: string; title: string; mint: string; name: string; symbol: string; creator: string; rail: string; status: string; created_at: string }[];
+    coins: { pool: string; name?: string | null; symbol?: string | null; creator?: string | null; mint?: string | null; created_at?: string }[];
+    watcher: { last_at: string | null; ok: boolean; note: string; watched: number; marked: number; settled: number; cluster: string } | null;
+  } | null>(null);
   const admin = isAdminWallet(publicKey?.toBase58());
   const platformSigner = publicKey?.toBase58() === PLATFORM_FEE_CLAIMER;
+
+  useEffect(() => {
+    if (!admin) return;
+    let cancelled = false;
+    void fetch(`/api/admin/status?cluster=${cluster}`)
+      .then(async (response) => {
+        if (!response.ok || cancelled) return;
+        setRecords(await response.json());
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [admin, cluster, status]);
 
   useEffect(() => {
     void fetch("/api/platform")
@@ -281,6 +301,25 @@ export function AdminDesk() {
     setSettings(body);
   }
 
+  async function askWatcher() {
+    if (!publicKey || !signMessage) throw new Error("This wallet cannot sign the admin message.");
+    const issuedAt = Date.now();
+    const message = ["PAR watcher pass", `cluster=${cluster}`, `issuedAt=${issuedAt}`].join("\n");
+    const signature = await signMessage(new TextEncoder().encode(message));
+    const response = await fetch("/api/admin/status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        publicKey: publicKey.toBase58(),
+        signature: bytesToBase64(signature),
+        issuedAt,
+        cluster,
+      }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) throw new Error(body.error || "The watcher was not asked.");
+  }
+
   async function onPublish() {
     setError("");
     setStatus("");
@@ -384,6 +423,76 @@ export function AdminDesk() {
             </button>
             <p className="note">One signature on this message. SOL spent is 0. The quote token spent is 0.</p>
           </form>
+          <section className="rows">
+            <h2>Records</h2>
+            <p>
+              {cluster === "devnet" ? "Practice network" : "Real network"} only. A create on the other network is a
+              different list. Each object row keeps the creator wallet, the coin, the master, the title, and the
+              sheet. Each coin row keeps the wallet that created it and the token metadata. Pictures saved from a
+              signed wallet are stored with that wallet.
+            </p>
+            {!records?.index ? <p className="note">The record store is not configured on this site yet.</p> : null}
+            {records?.index && records.objects.length === 0 && records.coins.length === 0 ? (
+              <p className="note">Nothing has been recorded on this network yet.</p>
+            ) : null}
+            <div className="card-grid">
+              {(records?.objects || []).map((row) => (
+                <article key={row.record} className="migrate">
+                  <h3>
+                    {row.name} {row.symbol}
+                  </h3>
+                  <p>
+                    Object. {row.rail}. {row.status}. Creator {shortAddress(row.creator)}.
+                  </p>
+                  <p className="note">
+                    Coin {shortAddress(row.mint)}. Master {shortAddress(row.record)}. Title {shortAddress(row.title)}.
+                  </p>
+                </article>
+              ))}
+              {(records?.coins || []).map((row) => (
+                <article key={row.pool} className="migrate">
+                  <h3>
+                    {row.name || "Coin"} {row.symbol || ""}
+                  </h3>
+                  <p>Coin. Creator {row.creator ? shortAddress(row.creator) : "unknown"}.</p>
+                  <p className="note">
+                    <Link href={`/pool/${row.pool}`}>Pool {shortAddress(row.pool)}</Link>
+                    {row.mint ? `. Mint ${shortAddress(row.mint)}` : ""}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="rows">
+            <h2>Watcher</h2>
+            <p>
+              The watcher runs on this computer, on the practice network. About every 15 minutes it marks graduation
+              and finishes an auction whose clock has ended. This page cannot start it, and it cannot spend from a
+              key. If the last pass is old, start the watcher again on this computer.
+            </p>
+            <p className="note">
+              {records?.watcher?.last_at
+                ? `Last pass ${new Date(records.watcher.last_at).toUTCString()}. Watching ${records.watcher.watched}. Marked ${records.watcher.marked}. Finished ${records.watcher.settled}. ${records.watcher.ok ? "The last pass completed." : records.watcher.note || "The last pass failed."}`
+                : "No pass has been reported."}
+            </p>
+            <button
+              type="button"
+              disabled={busy || cluster !== "devnet"}
+              onClick={() => {
+                setError("");
+                setBusy(true);
+                askWatcher()
+                  .then(() => setStatus("Asked the watcher for a pass. It runs on the next look, if it is already going."))
+                  .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The watcher was not asked."))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Ask for a pass
+            </button>
+            {cluster !== "devnet" ? (
+              <p className="note">The watcher is a practice-network job. The real network does not use it.</p>
+            ) : null}
+          </section>
           <section className="rows">
             <h2>Platform curve fees</h2>
             <p>

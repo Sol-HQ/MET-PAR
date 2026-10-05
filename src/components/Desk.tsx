@@ -33,6 +33,7 @@ import {
 } from "@/lib/launch";
 import { bpsToPercent, formatDollars, formatLamports, formatMoney, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
+import { signedPictureHeaders } from "@/lib/picture";
 import { loadPool } from "@/lib/load-pool";
 import { metadataUriForChain } from "@/lib/metadata";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
@@ -172,7 +173,7 @@ async function waitForAccount(connection: Connection, key: PublicKey) {
 export function Desk() {
   const { cluster } = useCluster();
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction, signMessage } = useWallet();
   const [preset, setPreset] = useState<"starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
   const [onPar, setOnPar] = useState(false);
   const [supplyText, setSupplyText] = useState(String(BILLION_SUPPLY));
@@ -435,9 +436,10 @@ export function Desk() {
     setBusy(true);
     try {
       const jpeg = await shrinkImage(file);
+      if (!publicKey || !signMessage) throw new Error("Connect a wallet to save the picture.");
       const response = await fetch("/api/image", {
         method: "POST",
-        headers: { "content-type": "image/jpeg" },
+        headers: await signedPictureHeaders(jpeg, publicKey.toBase58(), signMessage),
         body: jpeg,
       });
       const body = (await response.json()) as { url?: string; error?: string };

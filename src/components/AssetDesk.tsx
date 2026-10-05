@@ -1,6 +1,7 @@
 "use client";
 
 import { useWallet } from "@solana/wallet-adapter-react";
+import { signedPictureHeaders } from "@/lib/picture";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
@@ -372,7 +373,7 @@ export function AssetDesk() {
   const [pictureNote, setPictureNote] = useState("");
   const symbol = draft.symbol.trim().toUpperCase();
   const { cluster } = useCluster();
-  const { publicKey } = useWallet();
+  const { publicKey, signMessage } = useWallet();
   const escrowLive = escrowDepositAllowed(cluster, publicKey?.toBase58());
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
   const unit = draft.quote;
@@ -432,7 +433,12 @@ export function AssetDesk() {
     setPictureNote("Shrinking and saving the picture…");
     try {
       const jpeg = await shrinkImageUnder(file, FREE_UPLOAD_BYTES - 4096);
-      const response = await fetch("/api/image", { method: "POST", headers: { "content-type": "image/jpeg" }, body: jpeg });
+      if (!publicKey || !signMessage) throw new Error("Connect a wallet to save the picture.");
+      const response = await fetch("/api/image", {
+        method: "POST",
+        headers: await signedPictureHeaders(jpeg, publicKey.toBase58(), signMessage),
+        body: jpeg,
+      });
       const body = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !body.url) throw new Error(body.error || "Could not save that picture.");
       if (pictureView) URL.revokeObjectURL(pictureView);
@@ -716,6 +722,9 @@ export function AssetDesk() {
             />
             <span className="note">
               Pick one above, or type any whole number from 1 to 365. After graduation the coin trades for this many days. The title can be sold when those days end. The day is set when the coin graduates, and it locks into the title.
+              {cluster === "devnet"
+                ? " On the practice network, the escrow program counts each of these as one second, so a test can finish. The Tensor path still counts them as days."
+                : ""}
             </span>
           </label>
           {rail === "escrow" ? (

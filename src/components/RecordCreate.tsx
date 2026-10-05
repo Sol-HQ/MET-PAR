@@ -245,6 +245,7 @@ export function RecordCreate({
     handoffDays: draft.shipDays,
     venue: "the sale page named on this record sheet",
     sale: draft.sale,
+    shortClock: cluster === "devnet" && rail === "escrow",
   });
 
   useEffect(() => {
@@ -318,6 +319,7 @@ export function RecordCreate({
         handoffDays: draft.shipDays,
         venue,
         sale: draft.sale,
+        shortClock: cluster === "devnet" && rail === "escrow",
       });
       if (rail === "escrow") openingEscrowPrice(draft.declared, draft.par);
 
@@ -380,7 +382,7 @@ export function RecordCreate({
           creator: wallet.publicKey,
           name: titleName(draft.assetName),
           uri: arweaveUrl("x".repeat(43)),
-          attributes: titleAttributes({ record, mint, pool, creator, rail, delayDays: Number(draft.saleDays), burnPercent: SALE_BURN_PERCENT, venue, program: ESCROW_PROGRAM[cluster], sale: draft.sale }),
+          attributes: titleAttributes({ record, mint, pool, creator, rail, delayDays: Number(draft.saleDays), burnPercent: SALE_BURN_PERCENT, venue, program: ESCROW_PROGRAM[cluster], sale: draft.sale, shortClock: cluster === "devnet" && rail === "escrow" }),
         }),
       );
       const titlePrepared = await prepareTransaction(connection, wallet.publicKey, titleTx, [keys.title]);
@@ -570,6 +572,7 @@ export function RecordCreate({
             venue: plan.venue,
             program: ESCROW_PROGRAM[cluster],
             sale: draft.sale,
+            shortClock: cluster === "devnet" && plan.rail === "escrow",
           }),
         }),
       );

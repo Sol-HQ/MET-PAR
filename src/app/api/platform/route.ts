@@ -2,6 +2,7 @@ import { head, put } from "@vercel/blob";
 import nacl from "tweetnacl";
 import { PublicKey } from "@solana/web3.js";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
+import { hasIndex, readPlatformRow, writePlatformRow } from "@/lib/store";
 import {
   assertPlatformFeePercent,
   DEFAULT_PLATFORM_FEE_PERCENT,
@@ -34,7 +35,7 @@ function clean(value: unknown): PlatformSettings {
   };
 }
 
-async function readSettings(): Promise<PlatformSettings> {
+async function readBlobSettings(): Promise<PlatformSettings> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return DEFAULT_PLATFORM_SETTINGS;
   try {
     const meta = await head(PATH);
@@ -44,6 +45,15 @@ async function readSettings(): Promise<PlatformSettings> {
   } catch {
     return DEFAULT_PLATFORM_SETTINGS;
   }
+}
+
+async function readSettings(): Promise<PlatformSettings> {
+  if (!hasIndex()) return readBlobSettings();
+  const stored = await readPlatformRow().catch(() => null);
+  if (stored) return clean(stored);
+  const older = await readBlobSettings();
+  if (older.updatedAt) await writePlatformRow(older).catch(() => undefined);
+  return older;
 }
 
 export async function GET() {
@@ -105,6 +115,10 @@ export async function POST(request: Request) {
     updatedAt: new Date(issuedAt).toISOString(),
     updatedBy: body.publicKey,
   };
+  if (hasIndex()) {
+    await writePlatformRow(settings);
+    return Response.json(settings);
+  }
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     return Response.json({ error: "Platform storage is not configured." }, { status: 503 });
   }

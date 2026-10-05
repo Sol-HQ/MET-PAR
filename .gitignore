@@ -6,6 +6,7 @@ out
 .env*.local
 keys
 escrow/target
+supabase/.temp
 escrow/HANDOFF.md
 fieldnotes.txt
 offlinenotes

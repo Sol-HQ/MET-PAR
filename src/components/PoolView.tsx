@@ -957,6 +957,11 @@ export function PoolView({ address }: { address: string }) {
                   <div className="meter" aria-hidden="true">
                     <span style={{ width: `${snapshot.percent}%` }} />
                   </div>
+                  <p className="note">
+                    {snapshot.percent >= 40 && snapshot.percent < 60
+                      ? "About halfway to graduation."
+                      : "How full the curve is. At 100% the trading pool can open."}
+                  </p>
                 </article>
               </>
             )}

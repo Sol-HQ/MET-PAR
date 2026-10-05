@@ -6,7 +6,8 @@ use mpl_core::instructions::TransferV1CpiBuilder;
 use mpl_core::types::{PluginAuthority, PluginType, UpdateAuthority};
 use mpl_core::{DataBlob, PluginRegistryV1Safe};
 
-declare_id!("AGcNqaLNfR7h2bdGi39vEMTKNyfX8qLt4mgmbhmtgWvh");
+/// Practice program. One day is one second. The older program on the practice network was not upgraded.
+declare_id!("FASTUQ11TbpbpQL1LitzgwjLcpqRPgQrHXmuk584hypF");
 
 pub const DBC_PROGRAM: Pubkey = pubkey!("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
 const POOL_DISCRIMINATOR: [u8; 8] = [213, 224, 5, 209, 98, 69, 119, 92];

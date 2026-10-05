@@ -11,7 +11,7 @@ import { Connection, Keypair, PublicKey, SystemProgram, Transaction, Transaction
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { needsGraduationMark, needsSettle, readListingData } from "./escrow-clock.mjs";
 
-const PROGRAM = new PublicKey("AGcNqaLNfR7h2bdGi39vEMTKNyfX8qLt4mgmbhmtgWvh");
+const PROGRAM = new PublicKey("FASTUQ11TbpbpQL1LitzgwjLcpqRPgQrHXmuk584hypF");
 const TREASURY = new PublicKey("pa1Tt6RjP5YLbxjqDtKhFCmwRdtQvscxPrwfopWX18u");
 const CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 const LISTING_DISC = Buffer.from([218, 32, 50, 73, 43, 134, 26, 58]);
@@ -22,17 +22,66 @@ const GRADUATION_RETRY_MS = 10 * 60_000;
 const LOCK = new URL("../keys/escrow-watch.lock", import.meta.url);
 const KEY = new URL("../keys/me.json", import.meta.url);
 
-function envRpc() {
+function envValue(prefix) {
   for (const name of [".env.local", ".env"]) {
     const path = new URL(`../${name}`, import.meta.url);
     if (!existsSync(path)) continue;
     const line = readFileSync(path, "utf8")
       .split(/\r?\n/)
-      .find((item) => item.startsWith("NEXT_PUBLIC_DEVNET_RPC_URL="));
-    const value = line?.slice("NEXT_PUBLIC_DEVNET_RPC_URL=".length).trim();
+      .find((item) => item.startsWith(prefix));
+    const value = line?.slice(prefix.length).trim();
     if (value) return value;
   }
-  return "https://api.devnet.solana.com";
+  return "";
+}
+
+function envRpc() {
+  return envValue("NEXT_PUBLIC_DEVNET_RPC_URL=") || "https://api.devnet.solana.com";
+}
+
+function indexDb() {
+  const url = envValue("SUPABASE_URL=").replace(/\/$/, "");
+  const key = envValue("SUPABASE_SERVICE_ROLE_KEY=");
+  return url && key ? { url, key } : null;
+}
+
+async function indexRest(path, init = {}) {
+  const db = indexDb();
+  if (!db) return null;
+  const headers = {
+    apikey: db.key,
+    authorization: `Bearer ${db.key}`,
+    "content-type": "application/json",
+  };
+  if (init.prefer) headers.prefer = init.prefer;
+  const response = await fetch(`${db.url}/rest/v1/${path}`, { ...init, headers });
+  if (!response.ok) throw new Error(`The record store answered ${response.status}.`);
+  return response;
+}
+
+async function writeBeat(result) {
+  await indexRest("jobs?on_conflict=name", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: JSON.stringify({
+      name: "escrow-watch",
+      cluster: "devnet",
+      last_at: new Date().toISOString(),
+      ok: result.ok,
+      note: result.note.slice(0, 180),
+      watched: result.watched,
+      marked: result.marked,
+      settled: result.settled,
+      wake_at: null,
+    }),
+  });
+}
+
+async function wakeWaiting() {
+  const response = await indexRest("jobs?select=wake_at&name=eq.escrow-watch&limit=1");
+  if (!response) return false;
+  const rows = await response.json();
+  return Boolean(rows[0]?.wake_at);
 }
 
 function takeLock() {
@@ -151,6 +200,7 @@ async function pass(connection, payer, graduationTried) {
     }
   }
   console.log(`watching ${real.length} listings, marked ${marked}, finished ${settled}`);
+  return { watched: real.length, marked, settled };
 }
 
 async function main() {
@@ -161,12 +211,33 @@ async function main() {
   console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`);
   const graduationTried = new Map();
   for (;;) {
+    const result = { ok: true, note: "", watched: 0, marked: 0, settled: 0 };
     try {
-      await pass(connection, payer, graduationTried);
+      const counts = await pass(connection, payer, graduationTried);
+      result.watched = counts.watched;
+      result.marked = counts.marked;
+      result.settled = counts.settled;
     } catch (error) {
-      console.log(`pass failed, will try again: ${error instanceof Error ? error.message : "unknown"}`);
+      result.ok = false;
+      result.note = error instanceof Error ? error.message : "pass failed";
+      console.log(`pass failed, will try again: ${result.note}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
+    try {
+      await writeBeat(result);
+    } catch (error) {
+      console.log(`the record of this pass did not save: ${error instanceof Error ? error.message : "unknown"}`);
+    }
+    const until = Date.now() + INTERVAL_MS;
+    while (Date.now() < until) {
+      let wake = false;
+      try {
+        wake = await wakeWaiting();
+      } catch {
+        wake = false;
+      }
+      if (wake) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(15_000, until - Date.now())));
+    }
   }
 }
 

@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-par_escrow = "AGcNqaLNfR7h2bdGi39vEMTKNyfX8qLt4mgmbhmtgWvh"
+par_escrow = "FASTUQ11TbpbpQL1LitzgwjLcpqRPgQrHXmuk584hypF"
 
 [provider]
 cluster = "devnet"

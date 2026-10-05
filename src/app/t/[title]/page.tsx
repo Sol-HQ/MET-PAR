@@ -1,6 +1,8 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
 import { DBC_PROGRAM_ID, explorerAccount, rpcUrl, type ClusterName } from "@/lib/constants";
+import { formatMoney } from "@/lib/format";
+import { loadPool } from "@/lib/load-pool";
 import { readRecord } from "@/lib/record";
 import { SaleTrade } from "@/components/SaleTrade";
 import { creatorSalePercent, ESCROW_PROGRAM, readListing, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
@@ -41,6 +43,21 @@ function day(seconds: number): string {
   return new Date(seconds * 1000).toUTCString().replace(/:\d\d GMT$/, " UTC");
 }
 
+function marketCap(price: string, supply: string): string {
+  const cap = Number(price) * Number(supply);
+  if (!Number.isFinite(cap) || cap <= 0) return "";
+  return cap.toLocaleString("en-US", { maximumFractionDigits: cap >= 1 ? 2 : 6 });
+}
+
+function leftWords(seconds: number): string {
+  if (seconds <= 0) return "The wait is over.";
+  if (seconds < 90) return `${seconds} seconds left.`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 90) return `${minutes} minutes left.`;
+  const days = Math.ceil(seconds / 86_400);
+  return days === 1 ? "1 day left." : `${days} days left.`;
+}
+
 export default async function SalePage({
   params,
   searchParams,
@@ -75,6 +92,7 @@ export default async function SalePage({
   }
   const pool = record?.attributes.pool || "";
   const sale = pool ? await poolSale(connection, pool) : null;
+  const snapshot = pool ? await loadPool(connection, pool).catch(() => null) : null;
   const graduated = sale ? sale.graduated : null;
   const finishedAt = sale?.finishedAt ?? 0;
   const delay = Number.parseInt(title.attributes["sale opens"] || "", 10);
@@ -86,6 +104,13 @@ export default async function SalePage({
       : null;
   const opensAt = listing && listing.graduatedAt > 0 ? listing.graduatedAt + listing.delaySeconds : 0;
   const curveOpensAt = finishedAt > 0 ? finishedAt + delay * 86_400 : 0;
+  const waitSeconds = listing && listing.delaySeconds > 0 ? listing.delaySeconds : Number.isFinite(delay) ? delay * 86_400 : 0;
+  const waitStart = listing && listing.graduatedAt > 0 ? listing.graduatedAt : finishedAt;
+  const now = Math.floor(Date.now() / 1000);
+  const waitGone = waitStart > 0 ? Math.min(waitSeconds, Math.max(0, now - waitStart)) : 0;
+  const waitPercent = waitSeconds > 0 && waitStart > 0 ? Math.min(100, (waitGone / waitSeconds) * 100) : 0;
+  const fill = snapshot && !snapshot.isMigrated ? Math.max(0, Math.min(100, snapshot.percent)) : snapshot?.isMigrated ? 100 : 0;
+  const cap = snapshot ? marketCap(snapshot.price, snapshot.supply) : "";
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
   const saleLine = !title.exists
@@ -95,7 +120,7 @@ export default async function SalePage({
     : graduated === null
       ? "The pool could not be read."
       : !graduated
-        ? `The token has not graduated. The sale opens ${delay} days after it does.`
+        ? `The token has not graduated. The sale opens ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} after it does.`
         : opensAt
           ? `The token graduated. The sale opens ${day(opensAt)}.`
           : saleOpen
@@ -123,6 +148,60 @@ export default async function SalePage({
           : ""}
         {saleLine}
       </p>
+      {snapshot ? (
+        <section className="quotes" aria-label="This coin">
+          <article>
+            <h2>Price</h2>
+            <p className="figure">
+              {snapshot.price} <span>{snapshot.quoteSymbol}</span>
+            </p>
+            <p className="note">The live curve price. The pool page is the full coin page.</p>
+          </article>
+          {cap ? (
+            <article>
+              <h2>Market cap</h2>
+              <p className="figure">
+                {cap} <span>{snapshot.quoteSymbol}</span>
+              </p>
+              <p className="note">Price times the whole supply.</p>
+            </article>
+          ) : null}
+          <article>
+            <h2>{snapshot.isMigrated ? "Graduated" : "Graduation"}</h2>
+            <p className="figure">
+              {fill.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+              <span>%</span>
+            </p>
+            <div className="meter" aria-hidden="true">
+              <span style={{ width: `${fill}%` }} />
+            </div>
+            <p className="note">
+              {snapshot.isMigrated
+                ? "The curve is full and the trading pool is open."
+                : fill >= 40 && fill < 60
+                  ? `About halfway. ${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`
+                  : `${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`}
+            </p>
+          </article>
+          {waitSeconds > 0 ? (
+            <article>
+              <h2>Sale wait</h2>
+              <p className="figure">
+                {waitStart > 0 ? waitPercent.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "0"}
+                <span>%</span>
+              </p>
+              <div className="meter" aria-hidden="true">
+                <span style={{ width: `${waitStart > 0 ? waitPercent : 0}%` }} />
+              </div>
+              <p className="note">
+                {waitStart > 0
+                  ? leftWords(waitSeconds - waitGone)
+                  : `These ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} start when the coin graduates. The title stays where it is until then.`}
+              </p>
+            </article>
+          ) : null}
+        </section>
+      ) : null}
       {status?.tensor ? (
         <p className="note">
           Listed on Tensor for {formatUnits(status.tensor.amount, TOKEN_DECIMALS)}{" "}
