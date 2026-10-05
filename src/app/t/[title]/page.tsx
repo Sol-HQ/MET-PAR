@@ -4,6 +4,7 @@ import { DBC_PROGRAM_ID, explorerAccount, rpcUrl, type ClusterName } from "@/lib
 import { formatMoney } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { readRecord } from "@/lib/record";
+import { EscrowTrade } from "@/components/EscrowTrade";
 import { SaleTrade } from "@/components/SaleTrade";
 import { creatorSalePercent, ESCROW_PROGRAM, readListing, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
@@ -226,6 +227,26 @@ export default async function SalePage({
       ) : (
         <p className="error">No master in the program vault names this title. Treat it as unverified.</p>
       )}
+      {status?.rail === "escrow" && listing && record?.attributes.mint && ESCROW_PROGRAM[cluster] ? (
+        <EscrowTrade
+          pageCluster={cluster}
+          program={ESCROW_PROGRAM[cluster]}
+          title={address}
+          mint={record.attributes.mint}
+          creator={listing.creator}
+          pool={listing.pool}
+          symbol={symbol}
+          price={listing.price.toString()}
+          burnPercent={listing.burnPercent}
+          sale={listing.sale}
+          graduatedAt={listing.graduatedAt}
+          delaySeconds={listing.delaySeconds}
+          highBid={listing.highBid.toString()}
+          previousBidder={listing.highBidder}
+          endsAt={listing.endsAt}
+          curveFull={snapshot?.isMigrated === true}
+        />
+      ) : null}
       {status?.rail === "creator" && record?.attributes.mint ? (
         <SaleTrade
           pageCluster={cluster}
@@ -257,7 +278,7 @@ export default async function SalePage({
       ) : null}
       <p className="note">
         {status?.rail === "escrow"
-          ? "A buyer calls the PAR escrow program. The buy button is not on this page yet. "
+          ? "A buyer calls the PAR escrow program from this page. "
           : "Listing and buying on this page both go through Tensor's program. "}
         {pool ? <Link href={`/pool/${pool}`}>Open the pool page</Link> : null}
         {pool ? " · " : null}

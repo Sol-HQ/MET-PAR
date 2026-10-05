@@ -2,8 +2,9 @@ import { create, fetchAsset, mplCore, updateV2 } from "@metaplex-foundation/mpl-
 import { createNoopSigner, createSignerFromKeypair, publicKey as umiKey, signerIdentity } from "@metaplex-foundation/umi";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi-web3js-adapters";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, PublicKey, SystemProgram, TransactionInstruction, type Keypair } from "@solana/web3.js";
-import { isAdminWallet } from "./admins";
+import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "./admins";
 import type { ClusterName } from "./constants";
 import { CORE_PROGRAM_ID, PUBLIC_ORIGIN, type RecordAttribute } from "./record";
 
@@ -221,6 +222,14 @@ export function titleInstructions(input: {
 
 const DEPOSIT = Uint8Array.from([242, 35, 198, 137, 82, 225, 242, 182]);
 const MARK_GRADUATED = Uint8Array.from([125, 72, 57, 129, 59, 15, 247, 251]);
+const BUY = Uint8Array.from([102, 6, 61, 18, 1, 218, 235, 234]);
+const BID = Uint8Array.from([199, 56, 85, 38, 146, 243, 37, 158]);
+
+function requirePracticeProgram(program: PublicKey) {
+  if (!ESCROW_PROGRAM.devnet || program.toBase58() !== ESCROW_PROGRAM.devnet) {
+    throw new Error("The escrow path is not available on this network.");
+  }
+}
 
 export function listingAddress(title: PublicKey, program: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([new TextEncoder().encode("listing"), title.toBuffer()], program)[0];
@@ -239,9 +248,7 @@ export function escrowDepositInstruction(input: {
   burnPercent: number;
   sale?: SaleMode;
 }): TransactionInstruction {
-  if (!ESCROW_PROGRAM.devnet || input.program.toBase58() !== ESCROW_PROGRAM.devnet) {
-    throw new Error("The escrow path is not available on this network.");
-  }
+  requirePracticeProgram(input.program);
   if (!Number.isInteger(input.burnPercent) || input.burnPercent < 0 || input.burnPercent > 98) {
     throw new Error("The burn has to be a whole percent from 0 to 98.");
   }
@@ -269,12 +276,84 @@ export function escrowDepositInstruction(input: {
 }
 
 export function markGraduatedInstruction(program: PublicKey, title: PublicKey, pool: PublicKey): TransactionInstruction {
+  requirePracticeProgram(program);
   return new TransactionInstruction({
     programId: program,
     data: Buffer.from(MARK_GRADUATED),
     keys: [
       { pubkey: listingAddress(title, program), isSigner: false, isWritable: true },
       { pubkey: pool, isSigner: false, isWritable: false },
+    ],
+  });
+}
+
+function escrowAmount(disc: Uint8Array, amount: bigint): Buffer {
+  const data = new Uint8Array(16);
+  data.set(disc, 0);
+  new DataView(data.buffer).setBigUint64(8, amount, true);
+  return Buffer.from(data);
+}
+
+/** Pays the listed price. The program burns the listing's share, keeps 2%, and sends the title to the buyer. */
+export function escrowBuyInstruction(input: {
+  program: PublicKey;
+  buyer: PublicKey;
+  creator: PublicKey;
+  title: PublicKey;
+  mint: PublicKey;
+  tokenProgram: PublicKey;
+  price: bigint;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
+  const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(input.mint, owner, true, input.tokenProgram);
+  return new TransactionInstruction({
+    programId: input.program,
+    data: escrowAmount(BUY, input.price),
+    keys: [
+      { pubkey: input.buyer, isSigner: true, isWritable: true },
+      { pubkey: input.creator, isSigner: false, isWritable: true },
+      { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
+      { pubkey: input.title, isSigner: false, isWritable: true },
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: ata(input.buyer), isSigner: false, isWritable: true },
+      { pubkey: ata(input.creator), isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: false },
+      { pubkey: ata(treasury), isSigner: false, isWritable: true },
+      { pubkey: input.tokenProgram, isSigner: false, isWritable: false },
+      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+  });
+}
+
+/** Bids at or above the reserve. The coins stay in the escrow until the clock ends. */
+export function escrowBidInstruction(input: {
+  program: PublicKey;
+  bidder: PublicKey;
+  title: PublicKey;
+  mint: PublicKey;
+  tokenProgram: PublicKey;
+  amount: bigint;
+  previousBidder: PublicKey | null;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  const listing = listingAddress(input.title, input.program);
+  const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(input.mint, owner, true, input.tokenProgram);
+  return new TransactionInstruction({
+    programId: input.program,
+    data: escrowAmount(BID, input.amount),
+    keys: [
+      { pubkey: input.bidder, isSigner: true, isWritable: true },
+      { pubkey: listing, isSigner: false, isWritable: true },
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: ata(input.bidder), isSigner: false, isWritable: true },
+      { pubkey: ata(listing), isSigner: false, isWritable: true },
+      { pubkey: ata(input.previousBidder ?? input.bidder), isSigner: false, isWritable: true },
+      { pubkey: input.tokenProgram, isSigner: false, isWritable: false },
+      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
   });
 }
