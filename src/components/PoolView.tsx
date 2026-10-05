@@ -1507,7 +1507,7 @@ export function PoolView({ address }: { address: string }) {
               </p>
               <h2>Creator supply</h2>
               {reserved.isZero() ? (
-                <p>No creator supply was reserved. Buyers and the pool use the whole supply. The 1-token holdback does not apply, because there is no handover.</p>
+                <p>No creator supply was reserved. Buyers and the pool use the whole supply.</p>
               ) : (
                 <>
                   <p>

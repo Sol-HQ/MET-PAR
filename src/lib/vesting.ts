@@ -147,26 +147,32 @@ function beats(cliffUnlock: BN, perPeriod: BN, periods: number, frequency: numbe
 
 function claimLines(rows: Beat[]): string {
   return rows
-    .map((row, index) => `Claim ${index + 1} is ${groupedRaw(row.raw)} ${tokenWord(row.raw)} ${dayMark(row.at)}.`)
+    .map((row, index) => `Claim ${index + 1} unlocks ${groupedRaw(row.raw)} ${tokenWord(row.raw)} ${dayMark(row.at)}.`)
     .join(" ");
 }
 
 const CLOCK =
   "The clock starts when the creator supply is locked. That signature comes after the curve fills and before the trading pool opens. It does not start when the token is created, and it does not start when the trading pool opens.";
 
-function heldBack(cliffUnlock: BN, perPeriod: BN, periods: number, frequency: number, cliffSeconds: number): string {
-  if (perPeriod.eq(RAW_TOKEN) && periods === 1 && frequency === 1) {
-    return "The 1-token holdback applies. The program stores one handover as the reserved amount minus 1 token, then that 1 token one second later.";
-  }
+function isSingleHold(perPeriod: BN, periods: number, frequency: number): boolean {
+  return perPeriod.eq(RAW_TOKEN) && periods === 1 && frequency === 1;
+}
+
+function oneClaim(cliffUnlock: BN, cliffSeconds: number): string {
+  return `This is one claim, ${dayMark(cliffSeconds)}. ${groupedRaw(cliffUnlock)} ${tokenWord(cliffUnlock)} unlock then, and 1 token unlocks one second later. The program holds that 1 token for one second so it can store a single claim. The creator still receives the full amount.`;
+}
+
+function splitNote(cliffUnlock: BN, perPeriod: BN, periods: number, frequency: number, cliffSeconds: number): string {
+  const equal = "The claims release their full share at each time. They do not hold 1 token back. That one-second hold is only for a single claim.";
   const rows = beats(cliffUnlock, perPeriod, periods, frequency, cliffSeconds);
   if (rows.length >= 2 && rows[0].raw.gt(rows[1].raw)) {
     const extra = rows[0].raw.sub(rows[1].raw);
     const sameRest = rows.slice(1).every((row) => row.raw.eq(rows[1].raw));
     if (sameRest) {
-      return `${groupedRaw(extra)} extra ${tokenWord(extra)} sit on claim 1 because the reserved amount does not divide into equal whole tokens. The 1-token holdback does not apply.`;
+      return `${groupedRaw(extra)} extra ${tokenWord(extra)} sit on claim 1 because the reserved tokens do not divide into equal whole tokens. The other claims are equal. ${equal}`;
     }
   }
-  return "The 1-token holdback does not apply. That holdback is only for a single handover.";
+  return `The claims are equal whole tokens. ${equal}`;
 }
 
 /** Sentence for the schedule the program will actually store. */
@@ -184,11 +190,10 @@ export function storyFromRaw(
   const percent = supply > 0 ? (tokens / supply) * 100 : 0;
   const percentText = percent.toLocaleString("en-US", { maximumFractionDigits: 2 });
   const head = `${groupedRaw(total)} tokens are reserved for the creator. That is ${percentText}% of the supply. Buyers cannot buy them, and they do not go into the pool.`;
-  const oneToken = perPeriod.eq(RAW_TOKEN) && periods === 1 && frequency === 1;
-  const claims = oneToken
-    ? `This is one handover ${dayMark(cliffSeconds)}. ${groupedRaw(cliffUnlock)} ${tokenWord(cliffUnlock)} unlock then, and 1 token unlocks one second later.`
-    : claimLines(beats(cliffUnlock, perPeriod, periods, frequency, cliffSeconds));
-  return [head, claims, heldBack(cliffUnlock, perPeriod, periods, frequency, cliffSeconds), CLOCK].join(" ");
+  const single = isSingleHold(perPeriod, periods, frequency);
+  const claims = single ? oneClaim(cliffUnlock, cliffSeconds) : claimLines(beats(cliffUnlock, perPeriod, periods, frequency, cliffSeconds));
+  const split = single ? "" : splitNote(cliffUnlock, perPeriod, periods, frequency, cliffSeconds);
+  return [head, claims, split, CLOCK].filter((line) => line.length > 0).join(" ");
 }
 
 /** On-chain schedule, as facts a buyer can read. */
@@ -205,15 +210,13 @@ export function publicSchedule(
   const tokens = Number(total.toString()) / 1_000_000;
   const percent = supply > 0 ? (tokens / supply) * 100 : 0;
   const percentText = percent.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  const oneToken = perPeriod.eq(RAW_TOKEN) && periods === 1 && frequency === 1;
+  const single = isSingleHold(perPeriod, periods, frequency);
   const lines = [
     `${groupedRaw(total)} tokens, ${percentText}% of the supply, are reserved for the creator. They are not for sale and they are not in the pool.`,
-    oneToken
-      ? `One handover ${dayMark(cliffSeconds)}. ${groupedRaw(cliffUnlock)} ${tokenWord(cliffUnlock)} unlock then, and 1 token unlocks one second later.`
-      : claimLines(beats(cliffUnlock, perPeriod, periods, frequency, cliffSeconds)),
-    heldBack(cliffUnlock, perPeriod, periods, frequency, cliffSeconds),
+    single ? oneClaim(cliffUnlock, cliffSeconds) : claimLines(beats(cliffUnlock, perPeriod, periods, frequency, cliffSeconds)),
+    single ? "" : splitNote(cliffUnlock, perPeriod, periods, frequency, cliffSeconds),
   ];
-  return lines;
+  return lines.filter((line) => line.length > 0);
 }
 
 /** Next unlock time in unix seconds. Null when the schedule is finished or has not been locked. */

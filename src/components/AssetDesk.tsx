@@ -510,21 +510,61 @@ export function AssetDesk() {
         <h1>Real-world asset</h1>
         <p className="tagline">One object. One title. One payment token and meme.</p>
         <p>
+          This page creates one object with PAR. The coin on this page is always created on PAR. A token whose price rises from the first buy is a plain token, and that token is created on the home page.
+        </p>
+        <div className="beats">
+          <article>
+            <strong>1. The climb</strong>
+            <span>
+              PAR is on. The climb is almost flat. Most tokens buyers receive stay within 10% of the price you set, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price.
+            </span>
+          </article>
+          <article>
+            <strong>2. The lock</strong>
+            <span>
+              This is the end of the climb. The sale is full. The remaining tokens and the {unit} lock into a trading pool. They cannot be withdrawn. That is graduation.
+            </span>
+          </article>
+          <article>
+            <strong>3. After the lock</strong>
+            <span>
+              The coin trades from the pool price. Later buys can move it up, and later sells can move it down. The curve fee stops. Every trade pays the pool fee.
+            </span>
+          </article>
+          <article>
+            <strong>4. The days</strong>
+            <span>
+              After graduation the coin trades for the days set on the Claim step. The title can be sold when those days end. The day is set when the coin graduates, and it locks into the title.
+            </span>
+          </article>
+          <article>
+            <strong>5. The title</strong>
+            <span>
+              The creator then lists the title through Tensor. The coin pays for the title. The title can go into the escrow, and that program sells it. {ESCROW_COMING}
+            </span>
+          </article>
+        </div>
+        <p>
           {COIN_WORDS} The steps name the object, the person, the handoff, and the pitch. They fit any one object: a painting, a card, a kite, a ball, a photograph, or something else. One example is filled in.
-          The other examples use the same steps. A plain PAR token is created on the home page and has no title.
-          Here, the last step creates the coin, then the master, then one edition. The master is sent to the
+          The other examples use the same steps. A plain token is created on the home page and has no title.
+        </p>
+        <p>
+          The last step creates the coin on PAR, then the master, then one edition. The master is sent to the
           program vault and stays frozen. That one edition is the title, and it is sent to the creator wallet.
-          The NFT on the chain is the proof. PAR keeps a copy of those proofs. After graduation the coin trades for the days set
-          on the Claim step, and then the creator lists the title through Tensor. The title can go into the escrow,
-          and that program sells it. Both NFTs hold the record sheet, the meta sheet. {ESCROW_COMING}
+          The NFT on the chain is the proof. PAR keeps a copy of those proofs. Both NFTs hold the record sheet, the meta sheet.
         </p>
         <button type="button" aria-pressed={lawOpen} onClick={() => setLawOpen((open) => !open)}>
           {lawOpen ? "Close the structure and the law" : "Structure and the law"}
         </button>
         {lawOpen ? <LawRecord /> : null}
-        <Link href="/" className="asset-link">
-          Back to PAR
-        </Link>
+        <div className="asset-nav">
+          <Link href="/" className="asset-link">
+            PAR
+          </Link>
+          <Link href="/pools" className="asset-link">
+            Pools
+          </Link>
+        </div>
         <div className="asset-examples">
           <p className="eyebrow">Examples</p>
           <div className="segmented" role="group" aria-label="Filled example">
@@ -808,9 +848,10 @@ export function AssetDesk() {
       {step === "Curve" ? (
         <form>
           <p className="note">
-            The curve sells {draft.tokenName || "the token"}. It does not appraise {draft.assetName || "the object"}.
-            Buyers come in near one price, then the last slice walks to the pool price. Graduation opens a DAMM v2
-            pool for the token. The redemption rule stays on the asset page.
+            The coin on this page is created on PAR. You set one price for the shelf. Most tokens buyers receive
+            stay within 10% of it, then the last slice walks to the pool price. The curve sells {draft.tokenName || "the token"}.
+            It does not appraise {draft.assetName || "the object"}. Graduation opens a DAMM v2 pool for the token.
+            The redemption rule stays on this page. A token whose price climbs from the first buy is created on the home page.
           </p>
           <div className="segmented" role="group" aria-label="Quote">
             <button type="button" aria-pressed={draft.quote === "USDC"} onClick={() => patch({ quote: "USDC", ...pricesFor("1000") })}>

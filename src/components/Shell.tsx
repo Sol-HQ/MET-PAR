@@ -37,6 +37,9 @@ export function Shell({ children }: { children: ReactNode }) {
               Mainnet
             </button>
           </div>
+          <Link href="/pools" className="admin-link">
+            Pools
+          </Link>
           {admin ? (
             <Link href="/admin" className="admin-link">
               Admin
@@ -57,7 +60,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <main>{children}</main>
       <footer>
         <span>DBC program {DBC_PROGRAM_ID}</span>
-        <a href="https://superteam.fun/earn/listing/meteora-dbc/">Superteam listing</a>
+        <a href="https://app.meteora.ag">Meteora</a>
       </footer>
     </div>
   );

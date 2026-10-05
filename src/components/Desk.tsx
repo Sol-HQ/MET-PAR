@@ -1,16 +1,15 @@
-"use client";
+﻿"use client";
 
 import { deriveDbcPoolAddress, DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
-import BN from "bn.js";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ListingActions } from "@/components/ListingActions";
 import { MainnetGate } from "@/components/MainnetGate";
+import { PoolBoard } from "@/components/PoolBoard";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
-import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, FEE_DECAY_CHOICES, HIDDEN_POOLS, MIGRATION_FEE_CHOICES, feeDecayLabel, meteoraPoolUrl, migrationFeeLabel, quoteLabel, quoteMintAddress, type ClusterName, type QuoteKind } from "@/lib/constants";
+import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, FEE_DECAY_CHOICES, HIDDEN_POOLS, MIGRATION_FEE_CHOICES, feeDecayLabel, migrationFeeLabel, quoteLabel, quoteMintAddress, type ClusterName, type QuoteKind } from "@/lib/constants";
 import {
   BILLION_SUPPLY,
   CLIMB_PRESETS,
@@ -31,10 +30,9 @@ import {
   type LaunchChoice,
   type RaiseChoice,
 } from "@/lib/launch";
-import { bpsToPercent, formatDollars, formatLamports, formatMoney, plainDecimal } from "@/lib/format";
+import { bpsToPercent, formatDollars, formatLamports, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
-import { loadPool } from "@/lib/load-pool";
 import { metadataUriForChain } from "@/lib/metadata";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
@@ -94,23 +92,6 @@ type PaidTemplate = {
   baseMint: Keypair;
 };
 
-type CardListing = {
-  pool: string;
-  name: string;
-  symbol: string;
-  mint: string;
-  image: string;
-  filling: boolean;
-  percent: number;
-  fullAt: string;
-  supply: string;
-  opens: string;
-  ends: string;
-  dammPool: string | null;
-  quoteMint: string;
-  quoteSymbol: string;
-};
-
 const STORAGE_KEY = "par.listings.v1";
 
 function readRemembered(): Remembered[] {
@@ -136,10 +117,6 @@ function symbolFromName(name: string): string {
   return compact.slice(0, 10) || "TOKEN";
 }
 
-function fullAtFor(threshold: BN, decimals: number, symbol: string): string {
-  return `${formatMoney(threshold, decimals)} ${symbol}`;
-}
-
 function percentField(percent: number): string {
   const rounded = Math.round(percent * 10) / 10;
   return String(rounded);
@@ -147,12 +124,6 @@ function percentField(percent: number): string {
 
 function grouped(value: number): string {
   return value.toLocaleString("en-US");
-}
-
-function solNote(text: string, usdPerSol: number): string {
-  const amount = Number(text);
-  if (!(usdPerSol > 0) || !(amount > 0)) return "";
-  return ` (about ${formatDollars(amount * usdPerSol)})`;
 }
 
 function solDollarHint(text: string, usdPerSol: number): string {
@@ -175,7 +146,7 @@ export function Desk() {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signMessage } = useWallet();
   const [preset, setPreset] = useState<"starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
-  const [onPar, setOnPar] = useState(false);
+  const [onPar, setOnPar] = useState(true);
   const [supplyText, setSupplyText] = useState(String(BILLION_SUPPLY));
   const [openText, setOpenText] = useState("0.00001");
   const [endText, setEndText] = useState("0.00002");
@@ -207,7 +178,6 @@ export function Desk() {
   const [quoteCheck, setQuoteCheck] = useState<QuoteCheck | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [solUsd, setSolUsd] = useState(0);
-  const [cards, setCards] = useState<CardListing[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -452,80 +422,6 @@ export function Desk() {
     }
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    const remembered = readRemembered().filter((item) => item.cluster === cluster);
-
-    async function load() {
-      const seeds = new Map<string, { preset?: string; name: string; symbol: string; mint: string }>();
-      for (const item of remembered) {
-        seeds.set(item.pool, {
-          preset: item.preset,
-          name: item.name,
-          symbol: item.symbol,
-          mint: item.mint || "",
-        });
-      }
-      const listed = await fetch(`/api/listings?cluster=${cluster}`)
-        .then(async (response) => {
-          if (!response.ok) return [] as string[];
-          const body = (await response.json()) as { pools?: { pool?: string }[] };
-          return (body.pools || []).map((item) => item.pool).filter((pool): pool is string => typeof pool === "string" && !HIDDEN_POOLS.has(pool));
-        })
-        .catch(() => [] as string[]);
-      for (const pool of listed) {
-        if (!seeds.has(pool)) seeds.set(pool, { name: "Listing", symbol: "", mint: "" });
-      }
-
-      const loaded = await Promise.all(
-        [...seeds.entries()].slice(0, 24).map(async ([pool, seed]) => {
-          try {
-            const snapshot = await loadPool(connection, pool);
-            return {
-              pool,
-              name: snapshot.name || seed.name,
-              symbol: snapshot.symbol || seed.symbol,
-              mint: snapshot.baseMint,
-              image: snapshot.image,
-              filling: !snapshot.isMigrated,
-              percent: snapshot.percent,
-              fullAt: fullAtFor(snapshot.threshold, snapshot.quoteDecimals, snapshot.quoteSymbol),
-              supply: snapshot.supply,
-              opens: snapshot.startPrice,
-              ends: snapshot.endPrice,
-              dammPool: snapshot.dammPool,
-              quoteMint: snapshot.quoteMint,
-              quoteSymbol: snapshot.quoteSymbol,
-            } satisfies CardListing;
-          } catch {
-            return {
-              pool,
-              name: seed.name,
-              symbol: seed.symbol,
-              mint: seed.mint,
-              image: "",
-              filling: true,
-              percent: 0,
-              fullAt: "",
-              supply: "",
-              opens: "",
-              ends: "",
-              dammPool: null,
-              quoteMint: "",
-              quoteSymbol: "USDC",
-            } satisfies CardListing;
-          }
-        }),
-      );
-      if (!cancelled) setCards(loaded);
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [cluster, connection, message]);
-
   async function finish(next: PendingCreate): Promise<"created" | "paused"> {
     if (!publicKey || !signTransaction) throw new Error("This wallet cannot sign transactions.");
     const sentTemplate = Boolean(next.configPrepared);
@@ -539,7 +435,7 @@ export function Desk() {
           baseMint: next.poolDraft.baseMint,
         });
         templateSaved = true;
-        setMessage("Template confirmed. Building the token…");
+        setMessage("Template confirmed. Building the tokenâ€¦");
         await waitForAccount(connection, next.poolDraft.config);
       }
       let prepared = next.prepared;
@@ -820,9 +716,6 @@ export function Desk() {
         : writtenStart === writtenEnd
           ? `The fee stays at ${bpsToPercent(writtenStart)} because that number is already at the settled fee.`
           : `The fee starts at ${bpsToPercent(writtenStart)} and falls to ${bpsToPercent(writtenEnd)} over ${feeDecayLabel(feeDecaySeconds)}.`;
-  const filling = cards.filter((card) => card.filling);
-  const trading = cards.filter((card) => !card.filling);
-
   return (
     <div className="desk">
       <section className="lede">
@@ -875,62 +768,36 @@ export function Desk() {
             <p>The prices and the fee are written into the template. They cannot be edited later.</p>
           </div>
         </details>
-        <Link href="/asset" className="asset-link">
-          Real-world asset
-        </Link>
-        <p>
-          A plain PAR token is created on this page. A real-world asset is a separate page. It adds one master,
-          sent to the program vault, and one edition, which is the title. The coin there is a payment token and a meme: it pays for the title, and the meme is the joy
-          and heart of the object. After graduation the coin trades for a set number of days, and then the creator
-          lists the title through Tensor. The title can go into the escrow, and that program sells it. (The escrow
-          path is not a mainnet option yet. Coming soon.)
-        </p>
-        <p>
-          PAR runs on Meteora. The curve, the pool, and the graduation are Meteora&apos;s. You set par, and
-          most of the tokens sold to buyers stay within 10% of it, so a buyer now and a buyer later can pay
-          nearly the same price. That shelf is a share of the sale. It lasts until those tokens are bought.
-          The fee can fall over the time you choose, from one hour to a week, so a rush at the open costs more
-          while the price is still near par. The last slice of the sale walks the price up to the pool you
-          set. The pool locks there, and later buys can move the price higher.
-        </p>
-        <p>
-          Turn PAR on for that opening. Leave it off and the price climbs from the first token to the last.
-          Starter, Solid, Deep, and Thin then lock the {unit} printed on the card. The fee below can fall to{" "}
-          {bpsToPercent(settledBps)}, or stay at the percent you type until migration. After the pool locks, you
-          choose that pool fee. The default is 0.25%.
-        </p>
+        <div className="asset-nav">
+          <Link href="/pools" className="asset-link">
+            Pools
+          </Link>
+          <Link href="/asset" className="asset-link">
+            Real-world asset
+          </Link>
+        </div>
+        <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
+        <p>PAR is the main way to create the token. You set one price. The climb, the lock, and the trading after it are below.</p>
         <div className="beats">
-          {onPar || preset === "fixed" ? (
-            <>
-              <article>
-                <strong>1. At par</strong>
-                <span>Most tokens buyers receive are sold inside a 10% band around the price you set. The sheet names that band and the pool price it walks to.</span>
-              </article>
-              <article>
-                <strong>2. The walk</strong>
-                <span>The rest of the sale moves the price from that band to the pool. Both prices are on the sheet before anyone buys.</span>
-              </article>
-              <article>
-                <strong>3. The lock</strong>
-                <span>The remaining tokens and the {unit} lock together. They cannot be withdrawn. Trading continues from the pool price, and later buys can move it higher.</span>
-              </article>
-            </>
-          ) : (
-            <>
-              <article>
-                <strong>1. The climb</strong>
-                <span>PAR is off. The price rises from the first token to the last. The sheet names the open and the pool.</span>
-              </article>
-              <article>
-                <strong>2. The lock</strong>
-                <span>Tokens and {unit} lock together at the end of the climb. The sheet names both amounts.</span>
-              </article>
-              <article>
-                <strong>3. After the lock</strong>
-                <span>Trading continues from the pool price. Later buys can move it higher, and later sells can move it lower.</span>
-              </article>
-            </>
-          )}
+          <article>
+            <strong>1. The climb</strong>
+            <span>
+              {onPar || preset === "fixed" ? "PAR is on. " : "PAR is off on this create. "}
+              With PAR on, the climb is almost flat. Most tokens buyers receive stay within 10% of the price you set, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price. With PAR off, the price rises from the first token to the last.
+            </span>
+          </article>
+          <article>
+            <strong>2. The lock</strong>
+            <span>
+              This is the end of the climb, with PAR on and with PAR off. The sale is full. The remaining tokens and the {unit} lock into a trading pool. They cannot be withdrawn. That is graduation.
+            </span>
+          </article>
+          <article>
+            <strong>3. After the lock</strong>
+            <span>
+              The coin trades from the pool price. Later buys can move it up, and later sells can move it down. The curve fee stops, even if time is left on its clock. Every trade pays the pool fee you set. The default is 0.25%, and it stays there.
+            </span>
+          </article>
         </div>
         <div className="seen">
           <h2>How it gets seen</h2>
@@ -1250,7 +1117,7 @@ export function Desk() {
                   .finally(() => setQuoteBusy(false));
               }}
             >
-              {quoteBusy ? "Checking…" : "Check this mint"}
+              {quoteBusy ? "Checkingâ€¦" : "Check this mint"}
             </button>
             <p className={quoteCheck && !quoteCheck.ok ? "error" : "note"}>
               {quoteCheck?.message ||
@@ -1361,7 +1228,7 @@ export function Desk() {
           <button type="button" className={preset === "custom" ? "preset selected" : "preset"} aria-pressed={preset === "custom"} onClick={() => setPreset("custom")}>
             <span className="preset-kicker">Custom</span>
             <strong>Your supply and your prices</strong>
-            <span>Turn PAR on for the shelf. A rejected number turns red.</span>
+            <span>{onPar ? "PAR is on. Type the supply and the two prices. A rejected number turns red." : "PAR is off. The price climbs from your opening price to your graduation price."}</span>
           </button>
         </div>
         {preset === "fixed" ? (
@@ -1584,6 +1451,15 @@ export function Desk() {
           </p>
         ) : (
           <>
+            <p className="note">
+              You can release this supply in one claim, or split it across several claims. You also set the span between claims.
+            </p>
+            <p className="note">
+              A single claim releases the bag at one time. The program holds 1 token of that bag for one second after the rest. The rest arrives at the claim time. That 1 token arrives one second later. The creator still receives every reserved token. This is how a single claim is stored.
+            </p>
+            <p className="note">
+              Two or more claims divide the bag into equal whole tokens. Those claims release their full share at each time. They do not hold 1 token back. Claim 1 is the first release, after the wait you set. Each later claim comes one span after the claim before it. If the bag does not divide evenly, the extra whole tokens sit on claim 1.
+            </p>
             {reservePercent === "custom" ? (
               <label>
                 Creator tokens
@@ -1602,10 +1478,6 @@ export function Desk() {
                 {reserveSupply.toLocaleString("en-US")}.
               </p>
             )}
-            <p className="note">
-              A single handover holds 1 token back for one second. That is how the program stores one claim. Two or more
-              claims do not use that holdback. The wait is claim 1. Each later claim comes one span after the claim before it.
-            </p>
             <div className="choices" role="group" aria-label="When the creator claims">
               <button type="button" aria-pressed={reserveWhen === "open"} onClick={() => setReserveWhen("open")}>
                 When it locks
@@ -1669,7 +1541,7 @@ export function Desk() {
           type="submit"
           disabled={busy || !picture.ok || feeProblem.length > 0 || name.trim().length === 0}
         >
-          {busy ? "Building…" : "Review create"}
+          {busy ? "Buildingâ€¦" : "Review create"}
         </button>
         {picture.ok && paid?.fingerprint === formFingerprint ? (
           <p className="note">
@@ -1685,31 +1557,10 @@ export function Desk() {
         ) : null}
       </form>
 
-      <section className="rows">
-        <p className="note">
-          Every token created on this network is listed below. Click one to buy or sell it on this page. A
-          practice token does not show on Jupiter. The Meteora trading pool opens after the curve fills, and
-          that link appears on the card.
-        </p>
-        <div>
-          <h2>Filling</h2>
-          {filling.length === 0 ? <p className="note">No curve is filling.</p> : null}
-          <div className="card-grid">
-            {filling.map((card) => (
-              <ListingCard key={card.pool} card={card} cluster={cluster} solUsd={solUsd} />
-            ))}
-          </div>
-        </div>
-        <div>
-          <h2>Trading</h2>
-          {trading.length === 0 ? <p className="note">No trading pool is open yet.</p> : null}
-          <div className="card-grid">
-            {trading.map((card) => (
-              <ListingCard key={card.pool} card={card} cluster={cluster} solUsd={solUsd} />
-            ))}
-          </div>
-        </div>
-      </section>
+      <p className="note">
+        The tokens on this network are also on the <Link href="/pools">Pools</Link> page. Open one there to buy or sell it.
+      </p>
+      <PoolBoard watch={message} limit={24} />
 
       {error ? (
         <p className="error" role="alert">
@@ -1759,48 +1610,5 @@ export function Desk() {
         />
       ) : null}
     </div>
-  );
-}
-
-function ListingCard({ card, cluster, solUsd }: { card: CardListing; cluster: ClusterName; solUsd: number }) {
-  const sharePath = `/pool/${card.pool}`;
-  return (
-    <article className="card">
-      {card.image ? <img className="token-preview" src={card.image} alt="" /> : null}
-      <Link href={`/pool/${card.pool}`} className="card-link">
-        <h3>
-          {card.name} {card.symbol ? <span>{card.symbol}</span> : null}
-        </h3>
-      </Link>
-      <p className="rule">
-        {card.supply ? `${Number(card.supply).toLocaleString("en-US")} supply. ` : ""}
-        {card.opens
-          ? card.quoteSymbol === "SOL"
-            ? `par ${card.opens} SOL${solNote(card.opens, solUsd)}, pool locks at ${card.ends} SOL${solNote(card.ends, solUsd)}, `
-            : `par $${card.opens}, pool locks at $${card.ends}, `
-          : ""}
-        full at {card.fullAt}
-        {card.quoteSymbol === "SOL" ? solNote(String(parseFloat(card.fullAt)), solUsd) : ""}
-      </p>
-      <p className="note">
-        {card.filling
-          ? "Still on the curve. View PAR pool stays on this site. The Meteora pool is not open yet."
-          : cluster === "devnet"
-            ? "The curve is full. View PAR pool stays on this site. Meteora practice pool opens the practice site."
-            : "The curve is full. View PAR pool stays on this site. Meteora pool opens Meteora on the real network."}
-      </p>
-      <ListingActions
-        name={card.name}
-        mint={card.mint}
-        fullAt={card.fullAt}
-        viewHref={sharePath}
-        sharePath={sharePath}
-        quoteMint={card.quoteMint}
-        opensAt={card.opens}
-        endsAt={card.ends}
-        cluster={cluster}
-        meteoraHref={card.dammPool ? meteoraPoolUrl(card.dammPool, cluster) : undefined}
-      />
-    </article>
   );
 }

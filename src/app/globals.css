@@ -761,6 +761,10 @@ code {
   font-size: 0.85em;
 }
 
+.asset-nav .asset-link {
+  margin: 0;
+}
+
 .asset-link {
   display: inline-flex;
   width: fit-content;

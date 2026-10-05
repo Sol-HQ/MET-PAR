@@ -4,7 +4,7 @@ PAR is a Meteora Dynamic Bonding Curve launch where most tokens sold to buyers s
 
 Leave PAR off and the price climbs from the first token to the last.
 
-The curve program is `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`. The listing is [Superteam Earn](https://superteam.fun/earn/listing/meteora-dbc/). The curve is [Meteora DBC](https://docs.meteora.ag/core-products/dbc/what-is-dbc).
+The curve program is `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`. The app is [Meteora](https://app.meteora.ag). The curve docs are [Meteora DBC](https://docs.meteora.ag/core-products/dbc/what-is-dbc).
 
 A real-world asset is a separate page. It adds one master, sent to the program vault, and one edition, which is the title. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. After graduation the coin trades for a set number of days, and the creator lists the title through Tensor. PAR keeps a copy of the proofs. The NFT on the chain is the proof. The escrow path can be tested on the practice network by the platform wallets. It is not a mainnet option.
 
