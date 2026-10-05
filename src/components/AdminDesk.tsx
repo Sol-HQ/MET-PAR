@@ -550,10 +550,9 @@ export function AdminDesk() {
           <section className="rows">
             <h2>Watcher</h2>
             <p>
-              The watcher is a daily job on this site, on the practice network. The free plan can run that job once
-              a day, in the 8 o’clock hour in the morning Eastern. It marks graduation and finishes an auction whose
-              clock has ended. A practice clock can end in about a minute, so use Run a pass while you are testing.
-              The real network does not use this job.
+              The watcher is a job on cron-job.org. About every minute it calls this site, on the practice network.
+              It marks graduation and finishes an auction whose clock has ended. The real network does not use this
+              job. Run a pass does the same call once, when you press it.
             </p>
             <p className="note">
               {records?.watcher?.last_at

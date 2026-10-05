@@ -1,8 +1,7 @@
 /**
  * PAR escrow watcher.
  *
- * The site runs one pass from /api/cron/escrow once a day. That is the fastest schedule the free
- * Vercel plan allows. An admin can also run a pass from the admin page.
+ * cron-job.org calls /api/cron/escrow about every minute. An admin can also run a pass from the admin page.
  * A pass reads the escrow program, marks graduation when a pool has migrated, and finishes any
  * auction whose clock has ended. A missed pass still finishes the same auctions on the next run.
  */
