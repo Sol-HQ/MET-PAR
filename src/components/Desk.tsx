@@ -777,40 +777,32 @@ export function Desk() {
           </Link>
         </div>
         <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
-        <p>PAR is the main way to create the token. You set one price. The climb, the lock, and the trading after it are below.</p>
-        <div className="beats">
+        <p>PAR on keeps buyers near one price. PAR off lets the price rise the whole way. Both end at the same lock.</p>
+        <div className="beats pair">
           <article>
-            <strong>1. The climb</strong>
+            <strong>1. The climb, PAR on</strong>
             <span>
-              {onPar || preset === "fixed" ? "PAR is on. " : "PAR is off on this create. "}
-              With PAR on, the climb is almost flat. Most tokens buyers receive stay within 10% of the price you set, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price. With PAR off, the price rises from the first token to the last.
+              You set one price. Most tokens buyers receive stay within 10% of it, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price. Both prices are on the sheet before anyone buys.
             </span>
           </article>
           <article>
-            <strong>2. The lock</strong>
+            <strong>2. The climb, PAR off</strong>
             <span>
-              This is the end of the climb, with PAR on and with PAR off. The sale is full. The remaining tokens and the {unit} lock into a trading pool. They cannot be withdrawn. That is graduation.
+              The price rises from the first token to the last. The opening price and the pool price are on the sheet, and that rise is the whole sale. Starter, Solid, Deep, and Thin then lock the {unit} printed on the card.
             </span>
           </article>
           <article>
-            <strong>3. After the lock</strong>
+            <strong>3. The lock</strong>
             <span>
-              The coin trades from the pool price. Later buys can move it up, and later sells can move it down. The curve fee stops, even if time is left on its clock. Every trade pays the pool fee you set. The default is 0.25%, and it stays there.
+              The lock is graduation. It happens when the curve is full, with PAR on and with PAR off. Meteora moves the remaining tokens and the {unit} into a trading pool. They cannot be withdrawn. The pool opens at the pool price on the sheet.
             </span>
           </article>
-        </div>
-        <div className="seen">
-          <h2>How it gets seen</h2>
-          <p>
-            This page is the shop from the first minute. Share the token page and the mint. That link is how
-            a buyer gets in before any list ranks the coin.
-          </p>
-          <p>
-            Meteora&apos;s curve is a market Jupiter, Axiom, and Photon can pick up before the pool opens.
-            Those screens rank coins that have real buys. A quiet coin stays here until someone buys. After
-            the curve fills, the Meteora pool is the market that stays on those screens. A public name, symbol,
-            and image are what let them draw the card.
-          </p>
+          <article>
+            <strong>4. After the lock</strong>
+            <span>
+              Trading continues from that pool price. A buy can move it up. A sell can move it down. Buy and sell here, on Meteora, and on Jupiter, Axiom, and Photon. Those screens trade this Meteora pool. The curve fee has stopped. Every trade pays the pool fee you set. The default is 0.25%.
+            </span>
+          </article>
         </div>
       </section>
 

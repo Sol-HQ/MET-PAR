@@ -299,6 +299,10 @@ label .note { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
   margin-top: 1.2rem;
 }
 
+.beats.pair {
+  grid-template-columns: 1fr 1fr;
+}
+
 .beats article {
   background: var(--paper-2);
   padding: 1rem;
@@ -937,7 +941,7 @@ textarea {
 }
 
 @media (max-width: 800px) {
-  .presets, .presets.launch, .beats, .sheet, .quotes, dl, .quote-slip, .card-grid, .rights-grid {
+  .presets, .presets.launch, .beats, .beats.pair, .sheet, .quotes, dl, .quote-slip, .card-grid, .rights-grid {
     grid-template-columns: 1fr;
   }
   .top, footer, .listings a {
