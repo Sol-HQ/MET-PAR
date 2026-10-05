@@ -150,6 +150,7 @@ function settleInstruction(payer, listing) {
   const listingKey = listingAddress(asset);
   const mintOwner = listing.tokenProgram;
   const ata = (owner) => getAssociatedTokenAddressSync(mint, owner, true, mintOwner);
+  const payees = listing.payees || [];
   return new TransactionInstruction({
     programId: PROGRAM,
     data: SETTLE,
@@ -168,6 +169,12 @@ function settleInstruction(payer, listing) {
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: CORE, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...(payees.length
+        ? [
+            { pubkey: listing.payout, isSigner: false, isWritable: false },
+            ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
+          ]
+        : []),
     ],
   });
 }
@@ -214,7 +221,25 @@ async function pass(connection, payer, graduationTried) {
           mintKey,
           mintOwner,
         );
-      const sig = await send(connection, payer, [open(creatorKey), open(TREASURY), settleInstruction(payer.publicKey, listing)]);
+      const payees = [];
+      if (listing.pool.equals(Buffer.alloc(32))) {
+        const payout = PublicKey.findProgramAddressSync([Buffer.from("payout"), listing.asset], PROGRAM)[0];
+        const stored = await connection.getAccountInfo(payout, "confirmed");
+        if (!stored) throw new Error("The payout account is missing.");
+        for (let i = 0; i < 3; i += 1) {
+          const amount = stored.data.readBigUInt64LE(8 + 96 + i * 8);
+          if (amount === 0n) break;
+          payees.push(new PublicKey(stored.data.subarray(8 + i * 32, 8 + (i + 1) * 32)));
+        }
+        listing.payout = payout;
+        listing.payees = payees;
+      }
+      const sig = await send(connection, payer, [
+        ...payees.map((holder) => open(holder)),
+        open(creatorKey),
+        open(TREASURY),
+        settleInstruction(payer.publicKey, listing),
+      ]);
       settled += 1;
       console.log(`finished auction ${sig}`);
     } catch (error) {

@@ -1,4 +1,4 @@
-import { getMint, getTokenMetadata } from "@solana/spl-token";
+import { getMint, getTokenMetadata, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { DBC_PROGRAM_ID } from "./constants";
 import { loadPool } from "./load-pool";
@@ -100,6 +100,20 @@ export async function readCoin(connection: Connection, mint: string): Promise<Co
     isMigrated: snapshot.isMigrated,
     uri: snapshot.uri,
   };
+}
+
+/** An ordinary SPL token the escrow can settle. Token-2022 is refused before a sale can be opened. */
+export async function readClassicMint(connection: Connection, mint: string): Promise<PayFacts> {
+  const trimmed = mint.trim();
+  if (!ADDRESS.test(trimmed)) throw new Error("Paste the token address.");
+  const key = new PublicKey(trimmed);
+  const info = await connection.getAccountInfo(key, "confirmed");
+  if (!info) throw new Error("That address is not a token on this network.");
+  if (info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    throw new Error("That token is Token-2022. The escrow cannot settle it. Use USDC, SOL, or an ordinary SPL token.");
+  }
+  if (!info.owner.equals(TOKEN_PROGRAM_ID)) throw new Error("That address is not an ordinary SPL token.");
+  return readPayToken(connection, trimmed);
 }
 
 /** Any token the buyer can pay with. Tensor pays in this mint. */

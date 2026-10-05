@@ -106,7 +106,9 @@ export function SaleTrade({
       [
         `Price: ${formatTokenAmount(amount, decimals)} ${symbol}, paid to your wallet.`,
         `The buyer pays about ${TENSOR_TAKER_FEE_PERCENT}% more. That fee goes to Tensor.`,
-        `You burn ${burn}% of what you receive, within ${CREATOR_BURN_DAYS} days.`,
+        noCoin
+          ? "PAR takes none of this sale."
+          : `You burn ${burn}% of what you receive, within ${CREATOR_BURN_DAYS} days.`,
         "The title moves into Tensor's listing until it sells or you take it down.",
       ],
       transaction,
@@ -157,7 +159,9 @@ export function SaleTrade({
       ) : (
         <p className="note">
           {open
-            ? "The sale is open. The creator lists the title here, through Tensor's program."
+            ? noCoin
+              ? "Tensor pays you the full price in the token already on this title. PAR takes none of this sale."
+              : "The sale is open. The creator lists the title here, through Tensor's program."
             : wait}
         </p>
       )}

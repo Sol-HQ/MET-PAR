@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { readClassicMint, readCoin, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { DEFAULT_MIGRATION_FEE_BPS, USDC_DEVNET, USDC_MAINNET, WSOL } from "@/lib/constants";
 import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
@@ -61,6 +61,8 @@ export type Draft = {
   sale: "fixed" | "auction";
   /** The fixed price, or the auction reserve, in this token. The escrow stores it at deposit. */
   titlePrice: string;
+  /** Share of an escrow sale that is burned. A whole percent from 0 to 98. The program keeps 2%. */
+  burnPercent: string;
   /** Where the title goes. Auth wallets can pick escrow on the practice network. Mainnet stays on Tensor. */
   hold: "wallet" | "escrow";
   shipDays: string;
@@ -90,7 +92,7 @@ export function launchChoice(draft: Draft): LaunchChoice {
   return { kind: "custom-par", supply: BILLION_SUPPLY, parPrice: Number(draft.par), poolPrice: Number(draft.pool) };
 }
 
-function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "titlePrice" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen" | "feeEnd" | "straightFall" | "dynamicFee" | "compoundOn" | "poolFee" | "compoundShare" | "poolFeeBps"> & Partial<Draft>): Draft {
+function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "titlePrice" | "burnPercent" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen" | "feeEnd" | "straightFall" | "dynamicFee" | "compoundOn" | "poolFee" | "compoundShare" | "poolFeeBps"> & Partial<Draft>): Draft {
   return {
     existsNow: "yes",
     marks: "own",
@@ -100,6 +102,7 @@ function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale
     saleDays: String(SALE_DELAY_DAYS),
     sale: "fixed",
     titlePrice: "",
+    burnPercent: String(SALE_BURN_PERCENT),
     hold: "wallet",
     quote: "USDC",
     fee: "fall",
@@ -283,6 +286,13 @@ function wholeDays(value: string) {
   return days;
 }
 
+function wholeBurn(value: string) {
+  if (!/^\d+$/.test(value.trim())) return null;
+  const burn = Number(value);
+  if (!Number.isInteger(burn) || burn < 0 || burn > 98) return null;
+  return burn;
+}
+
 function positive(value: string) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return null;
@@ -314,6 +324,7 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
   if (step === "Claim") {
     if (!draft.claim.trim()) return "Write what the holder of the title can claim.";
     if (checks.withCoin && wholeDays(draft.saleDays) === null) return "The days after graduation before the title sale are a whole number from 1 to 365.";
+    if (checks.withCoin && wholeBurn(draft.burnPercent) === null) return "The burn is a whole percent from 0 to 98. The PAR program keeps 2%.";
     if (checks.withCoin && draft.hold === "escrow" && !parseTokenAmount(draft.titlePrice, checks.decimals)) {
       return draft.sale === "auction" ? "Type the reserve in this token. A bid has to reach it." : "Type the price in this token. The buyer pays that amount.";
     }
@@ -476,10 +487,10 @@ export function AssetDesk() {
                       : `The clock starts on the first bid at the reserve and runs ${AUCTION_HOURS} hours. A bid in the last hour extends it ${AUCTION_EXTEND_HOURS} hour. With no bid it sits ${AUCTION_SIT_DAYS} days and does not come back on its own.`
                   } `
                 : `The price is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. The first person to pay it gets the title. `
-            }${SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent()}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+            }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
-            ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`
-            : `No coin. Tensor is the sale path. The title is listed from the PAR sale page through Tensor's marketplace program, priced in ${pay?.symbol || "the token you read"}. There is no graduation wait. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${SALE_BURN_PERCENT}% of the price and keeps ${100 - SALE_BURN_PERCENT}%.`,
+            ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
+            : `No coin. The title can be listed through Tensor, priced in ${pay?.symbol || "the token you read"}, or put in the PAR escrow after it is minted. On an escrow sale the creator names the token, chooses a burn from 0% to 98%, and can name up to three extra wallets. The PAR program keeps 2%. On a Tensor sale, PAR takes none.`,
       ],
       [
         "Token",
@@ -547,10 +558,10 @@ export function AssetDesk() {
     setPay(null);
     setPayNote("Reading the token…");
     try {
-      const read = await readPayToken(connection, mint);
+      const read = await readClassicMint(connection, mint);
       setPay(read);
       setPayInput(read.mint);
-      setPayNote(`${read.name} (${read.symbol}). ${read.decimals} decimals. This is the token the buyer pays.`);
+      setPayNote(`${read.name} (${read.symbol}). ${read.decimals} decimals. This token can be used. Token-2022 is refused.`);
     } catch (cause) {
       setPayNote(cause instanceof Error ? cause.message : "Could not read that token.");
     }
@@ -585,7 +596,7 @@ export function AssetDesk() {
         <h1>Real-world asset</h1>
         <p className="tagline">One object. One title.</p>
         <p>
-          Create the coin on the home page first, when this title has a coin. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve. With no coin, this page makes the title only, and Tensor sells it in a token you name.
+          Create the coin on the home page first, when this title has a coin. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve. With no coin, this page makes the title only. The sale page then asks you to sell it through Tensor or through the escrow.
         </p>
         <div className="segmented" role="group" aria-label="Does a coin go with this title">
           <button type="button" aria-pressed={withCoin === true} onClick={() => chooseCoin(true)}>
@@ -600,7 +611,7 @@ export function AssetDesk() {
             ? "Choose one before the steps. A title that says it has a coin cannot be created until that coin's token address is read."
             : withCoin
               ? "The Coin step asks for the token address. Leave it empty and the title cannot be created."
-              : "There is no curve step. The Price step asks for the token the buyer pays. The PAR escrow sells a title only in its own coin, so an auction needs a coin."}
+              : "There is no curve step. The Price step asks for the token a Tensor sale uses. After the title exists, the sale page can put it in the escrow. There you name USDC, SOL, or another ordinary token, the burn, and up to three extra wallets."}
         </p>
         {withCoin === true ? <div className="beats">
           <article>
@@ -798,10 +809,12 @@ export function AssetDesk() {
             There is one asset and one title.{" "}
             {withCoin
               ? `${COIN_WORDS} The title can be bought ${draft.saleDays || "some"} ${waitUnit} after graduation. `
-              : "This title has no coin. Tensor sells it in the token named on the Price step. "}
+              : "This title has no coin. After it is minted you can list it through Tensor, or put it in the escrow and name the token. "}
             {withCoin && rail === "escrow"
-              ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${SALE_BURN_PERCENT}%, pays you ${creatorSalePercent()}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
-              : `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`}
+              ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}%, pays you ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
+              : withCoin
+                ? `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`
+                : "An auction, a burn from 0% to 98%, and up to three extra wallets are chosen on the sale page if you use the escrow. The PAR program keeps 2% of that sale."}
           </p>
           {withCoin ? <>
           <div className="segmented" role="group" aria-label="Title path">
@@ -858,6 +871,19 @@ export function AssetDesk() {
                 : ""}
             </span>
           </label>
+          <label>
+            Burn, whole percent from 0 to 98
+            <input
+              value={draft.burnPercent}
+              onChange={(event) => patch({ burnPercent: event.target.value.replace(/\D/g, "") })}
+              inputMode="numeric"
+            />
+            <span className="note">
+              {wholeBurn(draft.burnPercent) === null
+                ? `Type a whole percent from 0 to 98. Zero burns nothing. The PAR program still keeps ${SALE_PROGRAM_FEE_PERCENT}% of an escrow sale.`
+                : `Burn ${wholeBurn(draft.burnPercent)}%. On an escrow sale you receive ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? 0)}% and the PAR program keeps ${SALE_PROGRAM_FEE_PERCENT}%. On a Tensor sale, Tensor pays you the full price and you burn this percent within ${CREATOR_BURN_DAYS} days.`}
+            </span>
+          </label>
           {rail === "escrow" ? (
             <>
               <div className="segmented" role="group" aria-label="How the title sells">
@@ -900,15 +926,15 @@ export function AssetDesk() {
                 </div>
                 <div>
                   <dt>Burn</dt>
-                  <dd>{SALE_BURN_PERCENT}% is burned by the escrow.</dd>
+                  <dd>{draft.burnPercent || "unset"}% is burned by the escrow.</dd>
                 </div>
                 <div>
                   <dt>Creator</dt>
-                  <dd>{creatorSalePercent()}% goes to you.</dd>
+                  <dd>{wholeBurn(draft.burnPercent) === null ? "Set the burn" : `${creatorSalePercent(wholeBurn(draft.burnPercent) ?? 0)}% goes to you.`}</dd>
                 </div>
                 <div>
                   <dt>Program</dt>
-                  <dd>{SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.</dd>
+                  <dd>{SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program. This does not move.</dd>
                 </div>
                 {draft.sale === "auction" ? (
                   <>
@@ -947,7 +973,7 @@ export function AssetDesk() {
               </dl>
             </>
           ) : null}
-          </> : <p className="note">The PAR escrow sells a title only in its own coin. An auction needs a coin.</p>}
+          </> : <p className="note">After this title exists, its sale page can put it in the escrow. You name the token, the burn, and any extra wallets there. The PAR program keeps 2%.</p>}
         </form>
       ) : null}
 
@@ -1043,7 +1069,7 @@ export function AssetDesk() {
       {step === "Price" ? (
         <form>
           <p className="note">
-            There is no coin and no curve. Paste the token the buyer pays. USDC and SOL fill the known address. Any other token address can be read the same way.
+            There is no coin and no curve. This token is the one a Tensor listing uses. USDC and SOL fill the known address. Any other ordinary token can be read. Token-2022 is refused. If you later use the escrow, the sale page asks for the token again.
           </p>
           <div className="segmented" role="group" aria-label="Price token">
             <button type="button" onClick={() => void loadPay(cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>

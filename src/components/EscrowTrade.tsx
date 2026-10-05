@@ -38,6 +38,7 @@ export function EscrowTrade({
   endsAt,
   curveFull,
   decimals = 6,
+  payees = [],
 }: {
   pageCluster: ClusterName;
   program: string;
@@ -56,6 +57,7 @@ export function EscrowTrade({
   endsAt: number;
   curveFull: boolean;
   decimals?: number;
+  payees?: { wallet: string; amount: string }[];
 }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
@@ -73,6 +75,8 @@ export function EscrowTrade({
   const reserve = BigInt(price);
   const leading = BigInt(highBid);
   const parts = split(reserve, burnPercent);
+  const assigned = payees.reduce((sum, row) => sum + BigInt(row.amount), BigInt(0));
+  const creatorPaid = parts.paid > assigned ? parts.paid - assigned : BigInt(0);
   const opensAt = graduatedAt > 0 ? graduatedAt + delaySeconds : 0;
   const now = Math.floor(Date.now() / 1000);
   const open = opensAt > 0 && now >= opensAt;
@@ -122,10 +126,12 @@ export function EscrowTrade({
     const creatorKey = new PublicKey(creator);
     const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
     const ata = (holder: PublicKey) => getAssociatedTokenAddressSync(mintKey, holder, true, owner);
+    const named = payees.map((row) => ({ wallet: new PublicKey(row.wallet), amount: BigInt(row.amount) }));
     const transaction = new Transaction().add(
       createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(publicKey), publicKey, mintKey, owner),
       createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(creatorKey), creatorKey, mintKey, owner),
       createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(treasury), treasury, mintKey, owner),
+      ...named.map((row) => createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(row.wallet), row.wallet, mintKey, owner)),
       escrowBuyInstruction({
         program: new PublicKey(program),
         buyer: publicKey,
@@ -134,13 +140,17 @@ export function EscrowTrade({
         mint: new PublicKey(mint),
         tokenProgram: owner,
         price: reserve,
+        payees: named.map((row) => row.wallet),
       }),
     );
+    const assigned = named.reduce((sum, row) => sum + row.amount, BigInt(0));
+    const creatorPaid = parts.paid > assigned ? parts.paid - assigned : BigInt(0);
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Buy this title", [
       `You pay ${showAmount(reserve)} ${symbol}.`,
       `${showAmount(parts.burned)} ${symbol} is burned.`,
-      `${showAmount(parts.paid)} ${symbol} goes to the creator.`,
+      ...named.map((row) => `${showAmount(row.amount)} ${symbol} goes to ${row.wallet.toBase58()}.`),
+      `${showAmount(creatorPaid)} ${symbol} goes to the creator.`,
       `${showAmount(parts.fee)} ${symbol} goes to the PAR program.`,
       "The title moves to your wallet.",
       `Network fee: ${formatLamports(prepared.feeLamports)}`,
@@ -152,6 +162,12 @@ export function EscrowTrade({
     const next = readAmount(nextPrice);
     if (!next) {
       setError("Type the new price in tokens.");
+      return;
+    }
+    const nextParts = split(next, burnPercent);
+    const assignedNow = payees.reduce((sum, row) => sum + BigInt(row.amount), BigInt(0));
+    if (nextParts.paid < assignedNow) {
+      setError("That price is too low. The 2% program fee, the burn, and the named wallets have to fit inside it.");
       return;
     }
     const transaction = new Transaction().add(
@@ -231,7 +247,7 @@ export function EscrowTrade({
         <p className="note">
           {sale === "auction"
             ? `The auction is open. The reserve is ${showAmount(reserve)} ${symbol}.${leading > BigInt(0) ? ` The bid is ${showAmount(leading)} ${symbol}.` : ""}`
-            : `The sale is open at ${showAmount(reserve)} ${symbol}. ${showAmount(parts.burned)} is burned, ${showAmount(parts.paid)} goes to the creator, and ${showAmount(parts.fee)} goes to the PAR program.`}
+            : `The sale is open at ${showAmount(reserve)} ${symbol}. ${showAmount(parts.burned)} is burned, ${showAmount(parts.fee)} goes to the PAR program, ${payees.map((row) => `${showAmount(BigInt(row.amount))} goes to ${row.wallet}`).join(", ")}${payees.length ? ", and " : ""}${showAmount(creatorPaid)} goes to the creator.`}
         </p>
       ) : (
         <p className="note">The buy stays closed until the sale wait ends.</p>

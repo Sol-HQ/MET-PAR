@@ -47,6 +47,8 @@ const BPS: u64 = 10_000;
 pub const TREASURY: Pubkey = pubkey!("pa1Tt6RjP5YLbxjqDtKhFCmwRdtQvscxPrwfopWX18u");
 
 pub const LISTING_SEED: &[u8] = b"listing";
+pub const PAYOUT_SEED: &[u8] = b"payout";
+pub const MAX_PAYOUTS: usize = 3;
 
 #[program]
 pub mod par_escrow {
@@ -60,6 +62,11 @@ pub mod par_escrow {
         require!(delay_days >= 1 && delay_days <= MAX_DELAY_DAYS, EscrowError::BadDelay);
         require!(burn_bps <= MAX_BURN_BPS && burn_bps % 100 == 0, EscrowError::BadBurn);
         require!(sale_kind == SALE_FIXED || sale_kind == SALE_AUCTION, EscrowError::BadSale);
+        require_keys_eq!(
+            *ctx.accounts.mint.to_account_info().owner,
+            anchor_spl::token::ID,
+            EscrowError::UnsupportedToken
+        );
         require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
         check_title(&ctx.accounts.asset.to_account_info(), &ctx.accounts.creator.key())?;
         let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &ctx.accounts.mint.key())?;
@@ -106,6 +113,80 @@ pub mod par_escrow {
         Ok(())
     }
 
+    /// A title with no coin. The creator names an ordinary SPL token, a burn, and up to three fixed payouts.
+    /// There is no pool and no graduation. The program still keeps 2% of the price. Token-2022 is refused.
+    pub fn deposit_open(
+        ctx: Context<DepositOpen>,
+        price: u64,
+        delay_days: u16,
+        burn_bps: u16,
+        sale_kind: u8,
+        payout_wallets: [Pubkey; 3],
+        payout_amounts: [u64; 3],
+    ) -> Result<()> {
+        require!(price > 0, EscrowError::ZeroPrice);
+        require!(delay_days <= MAX_DELAY_DAYS, EscrowError::BadOpenDelay);
+        require!(burn_bps <= MAX_BURN_BPS && burn_bps % 100 == 0, EscrowError::BadBurn);
+        require!(sale_kind == SALE_FIXED || sale_kind == SALE_AUCTION, EscrowError::BadSale);
+        require_keys_eq!(
+            *ctx.accounts.mint.to_account_info().owner,
+            anchor_spl::token::ID,
+            EscrowError::UnsupportedToken
+        );
+        require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
+        check_title(&ctx.accounts.asset.to_account_info(), &ctx.accounts.creator.key())?;
+        let assigned = pack_payouts(&payout_wallets, &payout_amounts)?;
+        let fee = share(price, PROGRAM_FEE_BPS)?;
+        let burned = share(price, u64::from(burn_bps))?;
+        let net = price.checked_sub(fee).ok_or(EscrowError::Overflow)?.checked_sub(burned).ok_or(EscrowError::Overflow)?;
+        require!(assigned <= net, EscrowError::PayoutTooBig);
+
+        let core = ctx.accounts.core_program.to_account_info();
+        let asset = ctx.accounts.asset.to_account_info();
+        let creator = ctx.accounts.creator.to_account_info();
+        let listing_info = ctx.accounts.listing.to_account_info();
+        let system = ctx.accounts.system_program.to_account_info();
+        TransferV1CpiBuilder::new(&core)
+            .asset(&asset)
+            .payer(&creator)
+            .authority(Some(&creator))
+            .new_owner(&listing_info)
+            .system_program(Some(&system))
+            .invoke()?;
+
+        let now = Clock::get()?.unix_timestamp;
+        let listing = &mut ctx.accounts.listing;
+        listing.creator = ctx.accounts.creator.key();
+        listing.asset = ctx.accounts.asset.key();
+        listing.record = ctx.accounts.record.key();
+        listing.mint = ctx.accounts.mint.key();
+        listing.pool = Pubkey::default();
+        listing.price = price;
+        listing.delay = i64::from(delay_days) * DAY;
+        listing.deposited_at = now;
+        listing.graduated_at = now;
+        listing.burn_bps = burn_bps;
+        listing.sale_kind = sale_kind;
+        listing.bump = ctx.bumps.listing;
+        listing.high_bidder = Pubkey::default();
+        listing.high_bid = 0;
+        listing.ends_at = 0;
+
+        let payouts = &mut ctx.accounts.payouts;
+        payouts.wallets = payout_wallets;
+        payouts.amounts = payout_amounts;
+
+        emit!(Deposited {
+            asset: listing.asset,
+            creator: listing.creator,
+            price,
+            delay_days,
+            burn_bps,
+            sale_kind,
+        });
+        Ok(())
+    }
+
     /// Anyone can call this once the pool has migrated. The sale opens `delay` seconds after.
     pub fn mark_graduated(ctx: Context<MarkGraduated>) -> Result<()> {
         let listing = &mut ctx.accounts.listing;
@@ -133,7 +214,7 @@ pub mod par_escrow {
 
     /// The buyer pays the listed coins. The burn written on the listing is destroyed, 2% goes to the
     /// program treasury, the rest goes to the creator, and the title goes to the buyer.
-    pub fn buy(ctx: Context<Buy>, max_price: u64) -> Result<()> {
+    pub fn buy<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, Buy<'info>>, max_price: u64) -> Result<()> {
         let listing = &ctx.accounts.listing;
         require!(listing.sale_kind == SALE_FIXED, EscrowError::NotFixed);
         let now = Clock::get()?.unix_timestamp;
@@ -143,9 +224,24 @@ pub mod par_escrow {
 
         let fee = share(price, PROGRAM_FEE_BPS)?;
         let burned = share(price, u64::from(listing.burn_bps))?;
-        let paid = price.checked_sub(fee).ok_or(EscrowError::Overflow)?.checked_sub(burned).ok_or(EscrowError::Overflow)?;
+        let mut paid = price.checked_sub(fee).ok_or(EscrowError::Overflow)?.checked_sub(burned).ok_or(EscrowError::Overflow)?;
         let decimals = ctx.accounts.mint.decimals;
+        let named = named_payouts(&ctx.remaining_accounts, &listing.asset, &ctx.program_id, listing.pool == Pubkey::default(), &listing.mint)?;
         let token_program = ctx.accounts.token_program.to_account_info();
+        for (index, amount) in named {
+            require!(amount <= paid, EscrowError::PayoutTooBig);
+            require!(ctx.remaining_accounts[index].key() != ctx.accounts.buyer_token.key(), EscrowError::BadPayout);
+            paid = paid.checked_sub(amount).ok_or(EscrowError::Overflow)?;
+            pay_tokens(
+                &token_program,
+                &ctx.accounts.buyer_token.to_account_info(),
+                &ctx.accounts.mint.to_account_info(),
+                &ctx.remaining_accounts[index],
+                &ctx.accounts.buyer.to_account_info(),
+                amount,
+                decimals,
+            )?;
+        }
 
         pay_tokens(
             &token_program,
@@ -203,6 +299,7 @@ pub mod par_escrow {
 
     /// A bid at or above the reserve. The first one starts the 72-hour clock. The coins stay in the escrow.
     pub fn bid(ctx: Context<Bid>, amount: u64) -> Result<()> {
+        require_keys_eq!(ctx.accounts.token_program.key(), anchor_spl::token::ID, EscrowError::UnsupportedToken);
         let now = Clock::get()?.unix_timestamp;
         let bidder = ctx.accounts.bidder.key();
         let (asset_key, bump_seed, ends_at, pull, refund) = {
@@ -287,7 +384,7 @@ pub mod par_escrow {
     }
 
     /// Pays out the high bid and sends the title. PAR's watcher sends this when the clock has ended.
-    pub fn settle(ctx: Context<Settle>) -> Result<()> {
+    pub fn settle<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, Settle<'info>>) -> Result<()> {
         let listing = &ctx.accounts.listing;
         require!(listing.sale_kind == SALE_AUCTION, EscrowError::NotAuction);
         require!(listing.ends_at > 0, EscrowError::NoBid);
@@ -300,11 +397,30 @@ pub mod par_escrow {
         let price = listing.high_bid;
         let fee = share(price, PROGRAM_FEE_BPS)?;
         let burned = share(price, u64::from(listing.burn_bps))?;
-        let paid = price.checked_sub(fee).ok_or(EscrowError::Overflow)?.checked_sub(burned).ok_or(EscrowError::Overflow)?;
+        let mut paid = price.checked_sub(fee).ok_or(EscrowError::Overflow)?.checked_sub(burned).ok_or(EscrowError::Overflow)?;
         let decimals = ctx.accounts.mint.decimals;
-        let token_program = ctx.accounts.token_program.to_account_info();
         let asset_key = listing.asset;
         let seeds: &[&[u8]] = &[LISTING_SEED, asset_key.as_ref(), &[listing.bump]];
+        let named = named_payouts(&ctx.remaining_accounts, &asset_key, &ctx.program_id, listing.pool == Pubkey::default(), &listing.mint)?;
+        let token_program = ctx.accounts.token_program.to_account_info();
+        for (index, amount) in named {
+            require!(amount <= paid, EscrowError::PayoutTooBig);
+            paid = paid.checked_sub(amount).ok_or(EscrowError::Overflow)?;
+            token_interface::transfer_checked(
+                CpiContext::new_with_signer(
+                    token_program.clone(),
+                    TransferChecked {
+                        from: ctx.accounts.vault.to_account_info(),
+                        mint: ctx.accounts.mint.to_account_info(),
+                        to: ctx.remaining_accounts[index].clone(),
+                        authority: ctx.accounts.listing.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                amount,
+                decimals,
+            )?;
+        }
 
         if paid > 0 {
             token_interface::transfer_checked(
@@ -386,8 +502,10 @@ pub mod par_escrow {
     pub fn reclaim(ctx: Context<Reclaim>) -> Result<()> {
         let listing = &ctx.accounts.listing;
         require!(listing.high_bid == 0, EscrowError::AuctionLive);
-        let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &listing.mint)?;
-        require!(!(migrated && listing.graduated_at == 0), EscrowError::MarkGraduationFirst);
+        if listing.pool != Pubkey::default() {
+            let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &listing.mint)?;
+            require!(!(migrated && listing.graduated_at == 0), EscrowError::MarkGraduationFirst);
+        }
         let now = Clock::get()?.unix_timestamp;
         let due = reclaim_due(listing)?;
         require!(now >= due, EscrowError::TooEarly);
@@ -481,6 +599,63 @@ fn release<'info>(
     Ok(())
 }
 
+/// Named amounts are packed at the front. A zero amount ends the list.
+fn pack_payouts(wallets: &[Pubkey; 3], amounts: &[u64; 3]) -> Result<u64> {
+    let mut assigned = 0u64;
+    let mut closed = false;
+    for i in 0..MAX_PAYOUTS {
+        if amounts[i] == 0 {
+            closed = true;
+            require!(wallets[i] == Pubkey::default(), EscrowError::BadPayout);
+            continue;
+        }
+        require!(!closed, EscrowError::BadPayout);
+        require!(wallets[i] != Pubkey::default(), EscrowError::BadPayout);
+        assigned = assigned.checked_add(amounts[i]).ok_or(EscrowError::Overflow)?;
+    }
+    Ok(assigned)
+}
+
+/// When this sale has no coin, the payout account and one token account per named wallet are required.
+/// A coin sale passes nothing here and pays the creator the whole remainder.
+fn named_payouts(remaining: &[AccountInfo], asset: &Pubkey, program_id: &Pubkey, required: bool, mint: &Pubkey) -> Result<Vec<(usize, u64)>> {
+    if !required {
+        return Ok(Vec::new());
+    }
+    require!(!remaining.is_empty(), EscrowError::BadPayout);
+    let (expected, _) = Pubkey::find_program_address(&[PAYOUT_SEED, asset.as_ref()], program_id);
+    require_keys_eq!(remaining[0].key(), expected, EscrowError::BadPayout);
+    require_keys_eq!(*remaining[0].owner, *program_id, EscrowError::BadPayout);
+    let stored = {
+        let data = remaining[0].try_borrow_data()?;
+        require!(data.len() >= 8 + 96 + 24, EscrowError::BadPayout);
+        let mut rows = Vec::new();
+        for i in 0..MAX_PAYOUTS {
+            let amount_at = 8 + 96 + i * 8;
+            let amount = u64::from_le_bytes(data[amount_at..amount_at + 8].try_into().map_err(|_| error!(EscrowError::BadPayout))?);
+            if amount == 0 {
+                break;
+            }
+            let wallet_at = 8 + i * 32;
+            let wallet = Pubkey::new_from_array(data[wallet_at..wallet_at + 32].try_into().map_err(|_| error!(EscrowError::BadPayout))?);
+            rows.push((wallet, amount));
+        }
+        rows
+    };
+    let mut named = Vec::new();
+    for (i, (wallet, amount)) in stored.iter().enumerate() {
+        let index = i + 1;
+        let token = remaining.get(index).ok_or(error!(EscrowError::BadPayout))?;
+        require_keys_eq!(*token.owner, anchor_spl::token::ID, EscrowError::BadPayout);
+        let data = token.try_borrow_data()?;
+        require!(data.len() >= 64, EscrowError::BadPayout);
+        require!(data[0..32] == mint.to_bytes(), EscrowError::BadPayout);
+        require!(data[32..64] == wallet.to_bytes(), EscrowError::BadPayout);
+        named.push((index, *amount));
+    }
+    Ok(named)
+}
+
 /// Returns whether the pool has migrated. Fails unless this is a DBC pool for `mint`.
 fn read_pool(pool: &AccountInfo, mint: &Pubkey) -> Result<bool> {
     require_keys_eq!(*pool.owner, DBC_PROGRAM, EscrowError::WrongPool);
@@ -551,6 +726,14 @@ pub struct Listing {
     pub ends_at: i64,
 }
 
+/// Fixed token amounts paid before the depositing creator receives the rest. Empty amounts are zero.
+#[account]
+#[derive(InitSpace)]
+pub struct Payouts {
+    pub wallets: [Pubkey; 3],
+    pub amounts: [u64; 3],
+}
+
 #[derive(Accounts)]
 pub struct Deposit<'info> {
     #[account(mut)]
@@ -571,6 +754,38 @@ pub struct Deposit<'info> {
         bump
     )]
     pub listing: Account<'info, Listing>,
+    /// CHECK: Metaplex Core program.
+    #[account(address = mpl_core::ID)]
+    pub core_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DepositOpen<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    /// CHECK: Core asset, checked in `check_title` and moved by the Core program.
+    #[account(mut)]
+    pub asset: UncheckedAccount<'info>,
+    /// CHECK: The permanent record. Only its owner program is checked.
+    pub record: UncheckedAccount<'info>,
+    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + Listing::INIT_SPACE,
+        seeds = [LISTING_SEED, asset.key().as_ref()],
+        bump
+    )]
+    pub listing: Account<'info, Listing>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + Payouts::INIT_SPACE,
+        seeds = [PAYOUT_SEED, asset.key().as_ref()],
+        bump
+    )]
+    pub payouts: Account<'info, Payouts>,
     /// CHECK: Metaplex Core program.
     #[account(address = mpl_core::ID)]
     pub core_program: UncheckedAccount<'info>,
@@ -715,8 +930,8 @@ pub struct Reclaim<'info> {
     /// CHECK: Must be the listing's asset. Moved by the Core program.
     #[account(mut)]
     pub asset: UncheckedAccount<'info>,
-    /// CHECK: Must be the listing's pool. Checked in `read_pool`.
-    #[account(address = listing.pool)]
+    /// CHECK: The coin's pool when this sale has one. Ignored when the listing has no pool.
+    #[account(constraint = listing.pool == Pubkey::default() || pool.key() == listing.pool @ EscrowError::WrongPool)]
     pub pool: UncheckedAccount<'info>,
     /// CHECK: Metaplex Core program.
     #[account(address = mpl_core::ID)]
@@ -775,6 +990,8 @@ pub enum EscrowError {
     ZeroPrice,
     #[msg("The wait after graduation has to be 1 to 365 days.")]
     BadDelay,
+    #[msg("The wait has to be a whole number from 0 to 365 days.")]
+    BadOpenDelay,
     #[msg("The burn has to be a whole percent from 0 to 98. The program keeps 2%.")]
     BadBurn,
     #[msg("The sale is either a fixed price or an auction.")]
@@ -829,4 +1046,10 @@ pub enum EscrowError {
     BadVault,
     #[msg("A number overflowed.")]
     Overflow,
+    #[msg("That token cannot be used. The escrow settles an ordinary SPL token. Token-2022 is refused.")]
+    UnsupportedToken,
+    #[msg("Those payouts do not fit. The program keeps 2%, then the burn, and the named amounts have to fit in what is left.")]
+    PayoutTooBig,
+    #[msg("A payout wallet or its token account is wrong.")]
+    BadPayout,
 }

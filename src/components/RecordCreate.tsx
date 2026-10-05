@@ -34,7 +34,6 @@ import {
   chosenRail,
   escrowDepositAllowed,
   railWords,
-  SALE_BURN_PERCENT,
   SALE_PROGRAM_FEE_PERCENT,
   creatorSalePercent,
   saleUrl,
@@ -83,6 +82,14 @@ type Plan = {
 };
 
 type Promise_ = { message: string; signature: string };
+
+function burnOf(draft: Draft): number {
+  const burn = Number(draft.burnPercent);
+  if (!Number.isInteger(burn) || burn < 0 || burn > 98) {
+    throw new Error("The burn is a whole percent from 0 to 98. The PAR program keeps 2%.");
+  }
+  return burn;
+}
 
 function titleName(assetName: string): string {
   return `${assetName} title`;
@@ -152,7 +159,7 @@ function sheetJson(input: {
         tokenName: plan.tokenName,
         symbol,
         mint,
-        soldThrough: saleVenueWords(plan.rail),
+        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
         salePage: plan.venue,
         attached: !plan.noCoin,
       })}\n\n${draft.story}\n\nFull sheet: ${input.htmlUrl}`,
@@ -163,7 +170,7 @@ function sheetJson(input: {
         { trait_type: "Token", value: symbol },
         { trait_type: "Token address", value: mint },
         { trait_type: "Sale page", value: plan.venue },
-        { trait_type: "Sold through", value: saleVenueWords(plan.rail) },
+        { trait_type: "Sold through", value: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail) },
         { trait_type: "Sale", value: saleKind },
         { trait_type: "Record", value: RECORD_KIND },
         { trait_type: "Title", value: plan.keys.title.publicKey.toBase58() },
@@ -240,15 +247,15 @@ function sheetJson(input: {
           sale: {
             page: plan.venue,
             kind: plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor",
-            soldThrough: saleVenueWords(plan.rail),
+            soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
             soldThroughProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[input.cluster === "devnet" ? "devnet" : "mainnet-beta"] : TENSOR_MARKETPLACE,
             payIn: mint,
             opensDaysAfterGraduation: plan.noCoin ? null : Number(draft.saleDays),
-            burnPercent: SALE_BURN_PERCENT,
-            creatorPercent: plan.rail === "escrow" ? creatorSalePercent() : 100 - SALE_BURN_PERCENT,
-            programPercent: plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
+            burnPercent: plan.noCoin ? null : burnOf(draft),
+            creatorPercent: plan.noCoin ? null : plan.rail === "escrow" ? creatorSalePercent(burnOf(draft)) : 100 - burnOf(draft),
+            programPercent: plan.noCoin ? null : plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
             price: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "Set by the creator in this token.",
-            burnedBy: plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
+            burnedBy: plan.noCoin ? "chosen on the sale page if the title goes into the escrow" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
             auction:
               plan.rail === "escrow" && draft.sale === "auction"
                 ? {
@@ -309,7 +316,7 @@ export function RecordCreate({
   const previewPromises = creatorPromises({
     rail,
     delayDays: Number(draft.saleDays),
-    burnPercent: SALE_BURN_PERCENT,
+    burnPercent: burnOf(draft),
     handoffDays: draft.shipDays,
     venue: "the sale page named on this record sheet",
     sale: draft.sale,
@@ -373,7 +380,7 @@ export function RecordCreate({
       const promises = creatorPromises({
         rail: attached ? rail : "creator",
         delayDays: Number(draft.saleDays),
-        burnPercent: SALE_BURN_PERCENT,
+        burnPercent: burnOf(draft),
         handoffDays: draft.shipDays,
         venue,
         sale: draft.sale,
@@ -437,7 +444,7 @@ export function RecordCreate({
           tokenName: draftPlan.tokenName,
           symbol: draftPlan.symbol,
           mint,
-          soldThrough: saleVenueWords(draftPlan.rail),
+          soldThrough: draftPlan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(draftPlan.rail),
           salePage: venue,
           pool,
           pathLine: `${draftPlan.rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
@@ -493,7 +500,7 @@ export function RecordCreate({
           escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
           sheet: sheetSlot,
           salePage: venue,
-          soldThrough: saleVenueWords(coin ? rail : "creator"),
+          soldThrough: coin ? saleVenueWords(rail) : "Tensor or the PAR escrow",
           coin: coin ? "attached" : "none",
         }),
         (attributes) =>
@@ -525,7 +532,7 @@ export function RecordCreate({
           creator,
           rail: draftPlan.rail,
           delayDays: Number(draft.saleDays),
-          burnPercent: SALE_BURN_PERCENT,
+          burnPercent: burnOf(draft),
           venue,
           program: ESCROW_PROGRAM[cluster],
           sale: draft.sale,
@@ -567,12 +574,14 @@ export function RecordCreate({
         `Record: ${record}`,
         `Title: ${title}`,
         `Platform vault: ${vault}`,
-        `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
+        draftPlan.noCoin
+          ? `The title stays in your wallet (${creator}). On its sale page you choose Tensor or the PAR escrow. PAR tracks it at ${venue}`
+          : `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
         useRail === "escrow"
-          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${SALE_BURN_PERCENT}% is burned by the escrow, ${creatorSalePercent()}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `No coin. The creator lists the title on the sale page through Tensor, priced in ${draftPlan.symbol}. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`
-            : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${SALE_BURN_PERCENT}% of it and keep ${100 - SALE_BURN_PERCENT}%.`,
+            ? `No coin. You can list the title through Tensor, priced in ${draftPlan.symbol}, or put it in the escrow on the sale page and name the token, the burn, and up to three extra wallets. The PAR program keeps 2% of an escrow sale.`
+            : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
         `The record and the title each carry the token address ${mint}, the sale page, and a full sheet link. That link is the readable page on Arweave.`,
         draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : "This title has no coin.",
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
@@ -657,17 +666,18 @@ export function RecordCreate({
       const imageArweave = arweaveUrl(imageUpload.id);
       mark("Picture stored on Arweave", imageArweave);
 
-      const pathLine =
-        plan.rail === "escrow"
+      const pathLine = plan.noCoin
+        ? "Sale path: chosen on the sale page. Tensor, or the PAR escrow."
+        : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
-          : `Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.`;
+          : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
       const htmlUpload = await turbo.upload({
         data: sheetPageHtml({
           name: draft.assetName,
           tokenName: plan.tokenName,
           symbol: plan.symbol,
           mint,
-          soldThrough: saleVenueWords(plan.rail),
+          soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
           salePage: plan.venue,
           pool: plan.pool,
           pathLine,
@@ -734,7 +744,7 @@ export function RecordCreate({
             escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
             sheet: htmlArweave,
             salePage: plan.venue,
-            soldThrough: saleVenueWords(plan.rail),
+            soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
             coin: plan.noCoin ? "none" : "attached",
           }), plan.omitRecord),
         }),
@@ -756,7 +766,7 @@ export function RecordCreate({
             creator: payer.toBase58(),
             rail: plan.rail,
             delayDays: Number(draft.saleDays),
-            burnPercent: SALE_BURN_PERCENT,
+            burnPercent: burnOf(draft),
             venue: plan.venue,
             program: ESCROW_PROGRAM[cluster],
             sale: draft.sale,
@@ -787,7 +797,7 @@ export function RecordCreate({
             pool: new PublicKey(pool),
             price: typedPrice,
             delayDays: Number(draft.saleDays),
-            burnPercent: SALE_BURN_PERCENT,
+            burnPercent: burnOf(draft),
             sale: draft.sale,
           }),
         );

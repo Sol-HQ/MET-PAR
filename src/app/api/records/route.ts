@@ -77,17 +77,23 @@ export async function POST(request: Request) {
     return fail("The creator wallet does not hold the title.", 409);
   }
 
+  const noCoin = facts.coin === "none";
   const config = parsed.record?.token?.config || "";
   const quoteMint = parsed.record?.token?.quoteMint || "";
-  if (!ADDRESS.test(config) || !acceptedQuoteMints(cluster).includes(quoteMint)) return fail("The record sheet template or quote is not valid.", 409);
-  const derived = deriveDbcPoolAddress(new PublicKey(quoteMint), new PublicKey(facts.mint), new PublicKey(config)).toBase58();
-  if (derived !== facts.pool) return fail("The template does not lead to the pool on the record.", 409);
-
   const sale = parsed.record?.title?.sale;
-  const delay = Number(sale?.opensDaysAfterGraduation);
-  const burn = Number(sale?.burnPercent);
-  if (!Number.isInteger(delay) || delay < 1 || delay > 365 || !Number.isInteger(burn) || burn < 0 || burn > 100) {
-    return fail("The record sheet sale terms are not valid.", 409);
+  let delay = Number(sale?.opensDaysAfterGraduation);
+  let burn = Number(sale?.burnPercent);
+  if (noCoin) {
+    if (facts.pool !== "none") return fail("A title with no coin names a pool.", 409);
+    delay = 0;
+    burn = 0;
+  } else {
+    if (!ADDRESS.test(config) || !acceptedQuoteMints(cluster).includes(quoteMint)) return fail("The record sheet template or quote is not valid.", 409);
+    const derived = deriveDbcPoolAddress(new PublicKey(quoteMint), new PublicKey(facts.mint), new PublicKey(config)).toBase58();
+    if (derived !== facts.pool) return fail("The template does not lead to the pool on the record.", 409);
+    if (!Number.isInteger(delay) || delay < 1 || delay > 365 || !Number.isInteger(burn) || burn < 0 || burn > 98) {
+      return fail("The record sheet sale terms are not valid.", 409);
+    }
   }
   const signatures = Object.fromEntries(
     Object.entries(body?.signatures ?? {}).filter(([, value]) => typeof value === "string" && SIGNATURE.test(value)),

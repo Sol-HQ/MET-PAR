@@ -1,14 +1,16 @@
+import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
 import { ObjectPicture } from "@/components/AssetOnPool";
 import { EscrowTrade } from "@/components/EscrowTrade";
+import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
 import { DBC_PROGRAM_ID, explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
 import { formatMoney, shortAddress } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
-import { creatorSalePercent, ESCROW_PROGRAM, readListing, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 const TOKEN_DECIMALS = 6;
 
@@ -183,6 +185,12 @@ export default async function SalePage({
     status?.rail === "escrow" && ESCROW_PROGRAM[cluster]
       ? await readListing(connection, new PublicKey(ESCROW_PROGRAM[cluster]), new PublicKey(address)).catch(() => null)
       : null;
+  const openSale = listing?.pool === PublicKey.default.toBase58();
+  const payees =
+    openSale && ESCROW_PROGRAM[cluster]
+      ? await readPayouts(connection, new PublicKey(ESCROW_PROGRAM[cluster]), new PublicKey(address)).catch(() => [])
+      : [];
+  const openDecimals = openSale && listing ? (await getMint(connection, new PublicKey(listing.mint), "confirmed").catch(() => null))?.decimals : undefined;
   const opensAt = listing && listing.graduatedAt > 0 ? listing.graduatedAt + listing.delaySeconds : 0;
   const curveOpensAt = finishedAt > 0 ? finishedAt + delay * 86_400 : 0;
   const leftEscrow = status?.rail === "escrow" && title.exists && Boolean(status.listing) && status.owner !== status.listing;
@@ -202,7 +210,7 @@ export default async function SalePage({
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
   const saleLine = noCoin
-    ? "The creator lists this title on this page through Tensor."
+    ? "The creator can list this title through Tensor, or put it in the escrow and name the token."
     : !title.exists
     ? "This title is not on chain."
     : !Number.isFinite(delay) || !Number.isFinite(burn)
@@ -300,7 +308,7 @@ export default async function SalePage({
             pageCluster={cluster}
             program={ESCROW_PROGRAM[cluster]}
             title={address}
-            mint={record.attributes.mint}
+            mint={listing.mint}
             creator={listing.creator}
             pool={listing.pool}
             symbol={symbol}
@@ -313,17 +321,49 @@ export default async function SalePage({
             previousBidder={listing.highBidder}
             endsAt={listing.endsAt}
             curveFull={snapshot?.isMigrated === true}
-            decimals={decimals}
+            decimals={openDecimals ?? decimals}
+            payees={payees.map((row) => ({ wallet: row.wallet, amount: row.amount.toString() }))}
           />
         </>
       ) : null}
-      {status?.rail === "creator" && record?.attributes.mint && !sold ? (
+      {noCoin && creatorHolds && recordAddress && record?.attributes.mint && !sold ? (
+        <>
+          <h2>How this title sells</h2>
+          <NoCoinChoice
+            escrow={<OpenEscrow pageCluster={cluster} title={address} record={recordAddress} />}
+            tensor={
+              <SaleTrade
+                pageCluster={cluster}
+                title={address}
+                mint={record.attributes.mint}
+                creator={record.attributes.creator}
+                symbol={symbol}
+                burn={Number.isFinite(burn) ? burn : 0}
+                delayDays={Number.isFinite(delay) ? delay : 0}
+                finishedAt={finishedAt}
+                graduated={graduated === true}
+                holdsTitle={creatorHolds}
+                decimals={decimals}
+                noCoin={noCoin}
+                listing={
+                  status?.tensor
+                    ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
+                    : null
+                }
+              />
+            }
+          />
+        </>
+      ) : null}
+      {status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
         <>
           <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
           <p className="note">
             {tensorOpen
               ? `This title is available for purchase through Tensor's program, paid in ${symbol}.`
-              : `The creator lists this title through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
+              : noCoin
+                ? `This title has no coin. The creator lists it through Tensor, paid in ${symbol}.`
+                : `The creator lists this title through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
           </p>
           <SaleTrade
             pageCluster={cluster}

@@ -119,10 +119,12 @@ export function creatorPromises(input: {
         : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
       : attached
         ? `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
-        : `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}. This title has no coin.`,
+        : `I will sell the title from the PAR sale page (${input.venue}). I can list it through Tensor, priced in ${pay}, or put it in the PAR escrow and sell it for an ordinary token I name there, at a fixed price or by auction. This title has no coin.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-      : `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`,
+      : attached
+        ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
+        : "If I sell through Tensor, Tensor pays me the full price and PAR takes none of that sale. If I put the title in the PAR escrow, I name the token, I choose a burn from 0% to 98%, and the PAR program keeps 2%.",
     `I will hand the item to the holder of the title within ${input.handoffDays} days of their claim, as the handoff terms say.`,
     escrow
       ? auction
@@ -175,17 +177,17 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
     { key: "coin", value: facts.noCoin ? "none" : "attached" },
     { key: "mint", value: facts.mint },
-    { key: "sold through", value: saleVenueWords(facts.rail) },
+    { key: "sold through", value: facts.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(facts.rail) },
     { key: "sale page", value: facts.venue },
     { key: "record", value: facts.record },
     { key: "pool", value: facts.pool },
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
     { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
-    { key: "paid in", value: "this token only" },
-    { key: "burned", value: escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
+    { key: "paid in", value: facts.noCoin ? "the token named when it is listed" : "this token only" },
+    { key: "burned", value: facts.noCoin ? "0 to 98 percent if escrow. Program keeps 2 percent." : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
-    { key: "sale", value: auction ? "auction" : escrow ? "fixed price" : "tensor" },
+    { key: "sale", value: facts.noCoin ? "chosen on the sale page" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
   ];
   if (auction) {
     rows.push({
@@ -236,6 +238,7 @@ export function titleInstructions(input: {
 }
 
 const DEPOSIT = Uint8Array.from([242, 35, 198, 137, 82, 225, 242, 182]);
+const DEPOSIT_OPEN = Uint8Array.from([118, 120, 19, 252, 170, 126, 182, 49]);
 const MARK_GRADUATED = Uint8Array.from([125, 72, 57, 129, 59, 15, 247, 251]);
 const BUY = Uint8Array.from([102, 6, 61, 18, 1, 218, 235, 234]);
 const BID = Uint8Array.from([199, 56, 85, 38, 146, 243, 37, 158]);
@@ -291,6 +294,73 @@ export function escrowDepositInstruction(input: {
   });
 }
 
+export type SalePayout = { wallet: PublicKey; amount: bigint };
+
+/** A title with no coin. The mint must be an ordinary SPL token. Up to three fixed payouts, then the rest to the creator. */
+export function escrowDepositOpenInstruction(input: {
+  program: PublicKey;
+  creator: PublicKey;
+  title: PublicKey;
+  record: PublicKey;
+  mint: PublicKey;
+  price: bigint;
+  delayDays: number;
+  burnPercent: number;
+  sale?: SaleMode;
+  payouts?: SalePayout[];
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  if (!Number.isInteger(input.delayDays) || input.delayDays < 0 || input.delayDays > 365) {
+    throw new Error("The wait is a whole number from 0 to 365 days. Zero opens the sale now.");
+  }
+  if (!Number.isInteger(input.burnPercent) || input.burnPercent < 0 || input.burnPercent > 98) {
+    throw new Error("The burn has to be a whole percent from 0 to 98.");
+  }
+  const payouts = input.payouts ?? [];
+  if (payouts.length > 3) throw new Error("Name at most three extra wallets.");
+  const wallets = [PublicKey.default, PublicKey.default, PublicKey.default];
+  const amounts = [BigInt(0), BigInt(0), BigInt(0)];
+  payouts.forEach((payout, index) => {
+    wallets[index] = payout.wallet;
+    amounts[index] = payout.amount;
+  });
+  const data = new Uint8Array(8 + 8 + 2 + 2 + 1 + 32 * 3 + 8 * 3);
+  data.set(DEPOSIT_OPEN, 0);
+  const view = new DataView(data.buffer);
+  view.setBigUint64(8, input.price, true);
+  view.setUint16(16, input.delayDays, true);
+  view.setUint16(18, input.burnPercent * 100, true);
+  data[20] = input.sale === "auction" ? 1 : 0;
+  let at = 21;
+  for (const wallet of wallets) {
+    data.set(wallet.toBytes(), at);
+    at += 32;
+  }
+  for (const amount of amounts) {
+    view.setBigUint64(at, amount, true);
+    at += 8;
+  }
+  const title = input.title;
+  return new TransactionInstruction({
+    programId: input.program,
+    data: Buffer.from(data),
+    keys: [
+      { pubkey: input.creator, isSigner: true, isWritable: true },
+      { pubkey: title, isSigner: false, isWritable: true },
+      { pubkey: input.record, isSigner: false, isWritable: false },
+      { pubkey: input.mint, isSigner: false, isWritable: false },
+      { pubkey: listingAddress(title, input.program), isSigner: false, isWritable: true },
+      { pubkey: payoutAddress(title, input.program), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+  });
+}
+
+export function payoutAddress(title: PublicKey, program: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([new TextEncoder().encode("payout"), title.toBuffer()], program)[0];
+}
+
 /** The creator changes the price. On an auction this is the reserve, and it stays put once a bid is in. */
 export function escrowSetPriceInstruction(input: { program: PublicKey; creator: PublicKey; title: PublicKey; price: bigint }): TransactionInstruction {
   requirePracticeProgram(input.program);
@@ -333,10 +403,12 @@ export function escrowBuyInstruction(input: {
   mint: PublicKey;
   tokenProgram: PublicKey;
   price: bigint;
+  payees?: PublicKey[];
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
   const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
   const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(input.mint, owner, true, input.tokenProgram);
+  const payees = input.payees ?? [];
   return new TransactionInstruction({
     programId: input.program,
     data: escrowAmount(BUY, input.price),
@@ -354,6 +426,12 @@ export function escrowBuyInstruction(input: {
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...(payees.length
+        ? [
+            { pubkey: payoutAddress(input.title, input.program), isSigner: false, isWritable: false },
+            ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
+          ]
+        : []),
     ],
   });
 }
@@ -428,6 +506,18 @@ export async function readListing(connection: Connection, program: PublicKey, ti
     highBid,
     endsAt: Number(data.readBigInt64LE(244)),
   };
+}
+
+export async function readPayouts(connection: Connection, program: PublicKey, title: PublicKey): Promise<{ wallet: string; amount: bigint }[]> {
+  const info = await connection.getAccountInfo(payoutAddress(title, program), "confirmed");
+  if (!info || info.data.length < 8 + 96 + 24) return [];
+  const rows: { wallet: string; amount: bigint }[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const amount = info.data.readBigUInt64LE(8 + 96 + i * 8);
+    if (amount === BigInt(0)) break;
+    rows.push({ wallet: new PublicKey(info.data.subarray(8 + i * 32, 8 + (i + 1) * 32)).toBase58(), amount });
+  }
+  return rows;
 }
 
 /** Tensor's marketplace program. Its Core listings can be priced in any SPL token, and it holds the NFT while listed. */
