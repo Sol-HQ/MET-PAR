@@ -115,7 +115,8 @@ function takeLock() {
 }
 
 function listingAddress(asset) {
-  return PublicKey.findProgramAddressSync([Buffer.from("listing"), asset], PROGRAM)[0];
+  const bytes = asset instanceof PublicKey ? asset.toBuffer() : asset;
+  return PublicKey.findProgramAddressSync([Buffer.from("listing"), bytes], PROGRAM)[0];
 }
 
 async function send(connection, payer, instructions) {
