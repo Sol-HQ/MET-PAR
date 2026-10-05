@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import { launchChoice, type Draft } from "@/components/AssetDesk";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
-import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, explorerAccount, explorerTx, quoteMintAddress } from "@/lib/constants";
+import { DEFAULT_FEE_DECAY_SECONDS, explorerAccount, explorerTx, quoteMintAddress } from "@/lib/constants";
+import { readCurveShape, type CurveShape } from "@/lib/curve";
 import { bpsToPercent, formatLamports } from "@/lib/format";
 import { buildLaunchConfig } from "@/lib/launch";
 import { assertCurveFee, parseFeePercent, type PlatformSettings } from "@/lib/platform";
@@ -57,6 +58,8 @@ type Plan = {
   tokenUri: string;
   openingBps: number;
   endingBps: number;
+  migrationFeeBps: number;
+  shape: CurveShape;
   platformFeePercent: number;
   rail: TitleRail;
   venue: string;
@@ -167,7 +170,7 @@ function sheetJson(input: {
           openingFee: bpsToPercent(plan.openingBps),
           endingFee: bpsToPercent(plan.endingBps),
           feeDecaySeconds: plan.openingBps === plan.endingBps ? 0 : DEFAULT_FEE_DECAY_SECONDS,
-          migrationFeeBps: DEFAULT_MIGRATION_FEE_BPS,
+          migrationFeeBps: plan.shape.compound ? plan.shape.compound.poolFeeBps : plan.migrationFeeBps,
           platformFeePercent: plan.platformFeePercent,
         },
         title: {
@@ -285,7 +288,17 @@ export function RecordCreate({
     try {
       const openingBps = parseFeePercent(draft.feeOpen);
       assertCurveFee(openingBps);
-      const endingBps = draft.fee === "flat" ? openingBps : Math.min(openingBps, platform.platformFeeBps);
+      const endingBps = draft.fee === "flat" ? openingBps : parseFeePercent(draft.feeEnd);
+      if (endingBps > openingBps) throw new Error("The ending fee has to be at or under the opening fee.");
+      const shapeRead = readCurveShape({
+        straightFall: draft.straightFall,
+        dynamicFee: draft.dynamicFee,
+        compoundOn: draft.compoundOn,
+        poolFeePercent: draft.poolFee,
+        compoundPercent: draft.compoundShare,
+      });
+      if (shapeRead.error) throw new Error(shapeRead.error);
+      const migrationFeeBps = draft.poolFeeBps;
       const platformFeePercent = platform.platformFeePercent ?? 20;
       const quoteKind = draft.quote === "SOL" ? "sol" : "usdc";
       const quoteMint = quoteMintAddress(cluster, quoteKind);
@@ -295,8 +308,11 @@ export function RecordCreate({
         endingBps,
         platformFeePercent,
         DEFAULT_FEE_DECAY_SECONDS,
-        DEFAULT_MIGRATION_FEE_BPS,
+        migrationFeeBps,
         quoteKind,
+        undefined,
+        undefined,
+        shapeRead.shape,
       );
       const keys: Keys = {
         baseMint: Keypair.generate(),
@@ -323,7 +339,7 @@ export function RecordCreate({
       });
       if (rail === "escrow") openingEscrowPrice(draft.declared, draft.par);
 
-      const draftPlan: Plan = { keys, pool, tokenUri, openingBps, endingBps, platformFeePercent, rail, venue, promises, lines: [] };
+      const draftPlan: Plan = { keys, pool, tokenUri, openingBps, endingBps, migrationFeeBps, shape: shapeRead.shape, platformFeePercent, rail, venue, promises, lines: [] };
       const sampleMessage = promiseMessage({ promises, record, title, mint, creator });
       const sample = sheetJson({
         promise: { message: sampleMessage, signature: "A".repeat(88) },
@@ -488,8 +504,11 @@ export function RecordCreate({
           plan.endingBps,
           plan.platformFeePercent,
           DEFAULT_FEE_DECAY_SECONDS,
-          DEFAULT_MIGRATION_FEE_BPS,
+          plan.migrationFeeBps,
           quoteKind,
+          undefined,
+          undefined,
+          plan.shape,
         ),
         config: keys.config.publicKey,
         feeClaimer: new PublicKey(PLATFORM_FEE_CLAIMER),

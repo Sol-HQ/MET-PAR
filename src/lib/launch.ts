@@ -13,7 +13,7 @@ import { Keypair } from "@solana/web3.js";
 import BN from "bn.js";
 import { BASE_DECIMALS, quoteLabel, type QuoteKind } from "./constants";
 import { formatTokenPrice, plainDecimal } from "./format";
-import { curveBase } from "./curve";
+import { curveBase, type CurveShape } from "./curve";
 import { NO_RESERVE, reserveToParams, storyFromRaw, type CreatorReserve } from "./vesting";
 
 export const BILLION_SUPPLY = 1_000_000_000;
@@ -347,12 +347,13 @@ function buildOnce(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): ConfigParameters {
   const sqrtPrices = [par, par * SHELF_LIFT, pool].map((price) =>
     getSqrtPriceFromPrice(String(price), BASE_DECIMALS, dec(kind, extra)),
   );
   const config = buildCurveWithCustomSqrtPrices({
-    ...curveBase(supply, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve)),
+    ...curveBase(supply, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve), shape),
     sqrtPrices,
     liquidityWeights: [weight, 1],
   });
@@ -393,6 +394,7 @@ function buildFair(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): { config: ConfigParameters; read: CurveRead } {
   assertParBand(par, pool);
   const weight = SHELF_WEIGHT;
@@ -402,7 +404,7 @@ function buildFair(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (leftover > supply * 0.01) break;
     try {
-      config = buildOnce(supply, par, pool, weight, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+      config = buildOnce(supply, par, pool, weight, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
       break;
     } catch (cause) {
       last = cause instanceof Error ? cause.message : last;
@@ -456,6 +458,7 @@ function buildSplit(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): { config: ConfigParameters; leftover: number } {
   let leftover = 0;
   let last = SPLIT_FIT_ERROR;
@@ -463,7 +466,7 @@ function buildSplit(
     if (leftover > supply * 0.01) break;
     try {
       const config = buildCurveWithTwoSegments({
-        ...curveBase(supply, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve)),
+        ...curveBase(supply, leftover, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve), shape),
         initialMarketCap: open * supply,
         migrationMarketCap: pool * supply,
         percentageSupplyOnMigration: percent,
@@ -620,6 +623,27 @@ export function poolForMigratingShare(par: number, percent: number): number | nu
   return par * best;
 }
 
+/** Par and pool price for a preset card. The quote that locks stays `raise`. The share picks the shape. */
+export function parForLockedRaise(
+  raise: number,
+  percent: number,
+  kind: QuoteKind = "usdc",
+  extra?: QuoteExtra,
+): { par: number; pool: number } | null {
+  if (!(raise > 0)) return null;
+  const poolAtOne = poolForMigratingShare(1, percent);
+  if (!poolAtOne) return null;
+  try {
+    const built = buildFair(BILLION_SUPPLY, 1, poolAtOne, 2500, 100, 20, 43_200, 25, kind, NO_RESERVE, extra);
+    const locked = uiRaise(built.config.migrationQuoteThreshold, kind, extra);
+    if (!(locked > 0)) return null;
+    const par = raise / locked;
+    return { par, pool: par * poolAtOne };
+  } catch {
+    return null;
+  }
+}
+
 export function priceField(amount: number): string {
   return plainDecimal(amount, 9);
 }
@@ -634,9 +658,10 @@ function buildClimb(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): ConfigParameters {
   const config = buildCurve({
-    ...curveBase(BILLION_SUPPLY, 0, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve)),
+    ...curveBase(BILLION_SUPPLY, 0, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve), shape),
     percentageSupplyOnMigration: 20,
     migrationQuoteThreshold: raise,
   });
@@ -705,6 +730,7 @@ export function buildLaunchConfig(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): ConfigParameters {
   const split = pricedSplit(choice);
   if (split) {
@@ -721,12 +747,13 @@ export function buildLaunchConfig(
       kind,
       reserve,
       extra,
+      shape,
     ).config;
   }
-  if (choice.kind === "climb") return buildClimb(choice.raise, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+  if (choice.kind === "climb") return buildClimb(choice.raise, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
   if (choice.kind === "custom") {
     const config = buildCurveWithMarketCap({
-      ...curveBase(choice.supply, 0, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve)),
+      ...curveBase(choice.supply, 0, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, dec(kind, extra), reserveToParams(reserve), shape),
       initialMarketCap: choice.openPrice * choice.supply,
       migrationMarketCap: choice.endPrice * choice.supply,
     });
@@ -737,7 +764,7 @@ export function buildLaunchConfig(
   const pool = choice.kind === "fixed" ? PAR_FIXED.pool : choice.poolPrice;
   const supply =
     choice.kind === "custom-par" ? choice.supply : choice.kind === "fixed" ? PAR_FIXED.supply : BILLION_SUPPLY;
-  return buildFair(supply, par, pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra).config;
+  return buildFair(supply, par, pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape).config;
 }
 
 function describeFair(
@@ -752,8 +779,9 @@ function describeFair(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): LaunchPicture {
-  const built = buildFair(supply, par, pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+  const built = buildFair(supply, par, pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
   return finishPicture(built.config, built.read, supply, kind, extra);
 }
 
@@ -767,6 +795,7 @@ export function describeLaunch(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): LaunchPicture {
   try {
     const split = pricedSplit(choice);
@@ -790,12 +819,13 @@ export function describeLaunch(
         kind,
         reserve,
         extra,
+        shape,
       );
       return pictureFromSplit(built.config, split.supply, built.leftover, kind, extra);
     }
     if (choice.kind === "climb") {
       return pictureFromClimb(
-        buildClimb(choice.raise, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra),
+        buildClimb(choice.raise, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape),
         choice.raise,
         kind,
         extra,
@@ -808,7 +838,7 @@ export function describeLaunch(
       if (!(choice.openPrice > 0) || !(choice.endPrice > choice.openPrice)) {
         return { ...EMPTY, error: "The graduation price has to be above the opening price." };
       }
-      const config = buildLaunchConfig(choice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+      const config = buildLaunchConfig(choice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
       const sold = soldOnCurve(config);
       const decimals = dec(kind, extra);
       const start = getPriceFromSqrtPrice(config.sqrtStartPrice, BASE_DECIMALS, decimals);
@@ -843,15 +873,27 @@ export function describeLaunch(
       };
     }
     if (choice.kind === "fixed") {
-      return describeFair(PAR_FIXED.supply, PAR_FIXED.par, PAR_FIXED.pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+      return describeFair(PAR_FIXED.supply, PAR_FIXED.par, PAR_FIXED.pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
     }
     if (choice.kind === "custom-par") {
       if (!Number.isInteger(choice.supply) || choice.supply < 2 || choice.supply > 1_000_000_000_000) {
         return { ...EMPTY, fair: true, error: "Supply has to be a whole number from 2 to 1,000,000,000,000." };
       }
-      return describeFair(choice.supply, choice.parPrice, choice.poolPrice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+      return describeFair(choice.supply, choice.parPrice, choice.poolPrice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
     }
-    return describeFair(BILLION_SUPPLY, choice.parPrice, choice.poolPrice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+    const picture = describeFair(BILLION_SUPPLY, choice.parPrice, choice.poolPrice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
+    if (!picture.ok) return picture;
+    const locked = uiRaise(new BN(picture.raiseRaw), kind, extra);
+    const target = choice.raise;
+    const tolerance = Math.max(target * 0.02, kind === "sol" ? 0.05 : 50);
+    if (Math.abs(locked - target) > tolerance) {
+      return {
+        ...EMPTY,
+        fair: true,
+        error: `These prices lock ${formatQuote(locked, kind, extra)}. This card locks ${formatQuote(target, kind, extra)}. The prices on a preset follow the migrating share, and the lock stays the amount on the card.`,
+      };
+    }
+    return picture;
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "That curve is not valid.";
     const tooLarge =
@@ -955,6 +997,7 @@ export function checkClimbCustom(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): CustomMarks {
   const unit = kind === "sol" ? "SOL" : kind === "other" ? unitOf(kind, extra) : "USDC";
   const { supply, mark } = supplyMarkFor(supplyText);
@@ -992,6 +1035,7 @@ export function checkClimbCustom(
     kind,
     reserve,
     extra,
+    shape,
   );
   if (picture.ok) return blankMarks(picture);
   if (/do not fit together|Under 20%/i.test(picture.error)) {
@@ -1016,6 +1060,7 @@ export function checkParPrices(
   kind: QuoteKind = "usdc",
   reserve: CreatorReserve = NO_RESERVE,
   extra?: QuoteExtra,
+  shape?: CurveShape,
 ): CustomMarks {
   const unit = kind === "sol" ? "SOL" : kind === "other" ? unitOf(kind, extra) : "USDC";
   const par = decimalAmount(parText);
@@ -1054,7 +1099,7 @@ export function checkParPrices(
     supplyText === null
       ? { kind: "par", raise: raise as RaiseChoice, parPrice: par as number, poolPrice: pool as number, ...migratePercent }
       : { kind: "custom-par", supply: supplied.supply, parPrice: par as number, poolPrice: pool as number, ...migratePercent };
-  const picture = describeLaunch(choice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra);
+  const picture = describeLaunch(choice, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
   if (picture.ok) return blankMarks(picture);
   if (/do not fit together|Under 20%/i.test(picture.error)) {
     return { ...blankMarks(picture), share: picture.error };

@@ -2,6 +2,8 @@ import {
   ActivationType,
   BaseFeeMode,
   CollectFeeMode,
+  DammV2DynamicFeeMode,
+  MigratedCollectFeeMode,
   MigrationFeeOption,
   MigrationOption,
   TokenAuthorityOption,
@@ -32,6 +34,38 @@ function migrationFeeOption(bps: number): MigrationFeeOption {
   }
 }
 
+/** How the fee falls, and whether pool fees after the lock go back into the pool. */
+export type CurveShape = {
+  straightFall?: boolean;
+  dynamicFee?: boolean;
+  compound?: { poolFeeBps: number; compoundingBps: number } | null;
+};
+
+export function readCurveShape(input: {
+  straightFall: boolean;
+  dynamicFee: boolean;
+  compoundOn: boolean;
+  poolFeePercent: string;
+  compoundPercent: string;
+}): { shape: CurveShape; error: string } {
+  const shape: CurveShape = {
+    straightFall: input.straightFall,
+    dynamicFee: input.dynamicFee,
+    compound: null,
+  };
+  if (!input.compoundOn) return { shape, error: "" };
+  const pool = Number(input.poolFeePercent);
+  const share = Number(input.compoundPercent);
+  if (!Number.isFinite(pool) || pool < 0.1 || pool > 10) {
+    return { shape, error: "The pool fee, when fees go back into the pool, is from 0.1% to 10%." };
+  }
+  if (!Number.isFinite(share) || share < 1 || share > 100) {
+    return { shape, error: "The share put back into the pool is from 1% to 100%." };
+  }
+  shape.compound = { poolFeeBps: Math.round(pool * 100), compoundingBps: Math.round(share * 100) };
+  return { shape, error: "" };
+}
+
 export function curveBase(
   totalTokenSupply: number,
   leftover: number,
@@ -48,12 +82,14 @@ export function curveBase(
     totalVestingDuration: 0,
     cliffDurationFromMigrationTime: 0,
   },
+  shape?: CurveShape,
 ): BuildCurveBaseParams {
   const flat = openingFeeBps === endingFeeBps;
   if (!flat && !FEE_DECAY_CHOICES.some((choice) => choice.seconds === feeDurationSeconds)) {
     throw new Error("That fee timing is not one of the allowed choices.");
   }
   const locked = lockedLiquiditySplit(platformFeePercent);
+  const compound = shape?.compound ?? null;
   return {
     token: {
       tokenType: TokenType.SPLToken,
@@ -65,7 +101,7 @@ export function curveBase(
     },
     fee: {
       baseFeeParams: {
-        baseFeeMode: flat ? BaseFeeMode.FeeSchedulerLinear : BaseFeeMode.FeeSchedulerExponential,
+        baseFeeMode: flat || shape?.straightFall ? BaseFeeMode.FeeSchedulerLinear : BaseFeeMode.FeeSchedulerExponential,
         feeSchedulerParam: {
           startingFeeBps: openingFeeBps,
           endingFeeBps,
@@ -73,7 +109,7 @@ export function curveBase(
           totalDuration: flat ? 0 : feeDurationSeconds,
         },
       },
-      dynamicFeeEnabled: false,
+      dynamicFeeEnabled: shape?.dynamicFee === true,
       collectFeeMode: CollectFeeMode.QuoteToken,
       creatorTradingFeePercentage: creatorTradingFeePercentage(platformFeePercent),
       poolCreationFee: 0,
@@ -81,11 +117,21 @@ export function curveBase(
     },
     migration: {
       migrationOption: MigrationOption.MET_DAMM_V2,
-      migrationFeeOption: migrationFeeOption(migrationFeeBps),
+      migrationFeeOption: compound ? MigrationFeeOption.Customizable : migrationFeeOption(migrationFeeBps),
       migrationFee: {
         feePercentage: 0,
         creatorFeePercentage: 0,
       },
+      ...(compound
+        ? {
+            migratedPoolFee: {
+              collectFeeMode: MigratedCollectFeeMode.Compounding,
+              dynamicFee: DammV2DynamicFeeMode.Disabled,
+              poolFeeBps: compound.poolFeeBps,
+              compoundingFeeBps: compound.compoundingBps,
+            },
+          }
+        : {}),
     },
     liquidityDistribution: {
       partnerLiquidityPercentage: 0,

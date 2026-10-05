@@ -6,7 +6,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS } from "@/lib/constants";
+import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, MIGRATION_FEE_CHOICES, migrationFeeLabel } from "@/lib/constants";
+import { readCurveShape } from "@/lib/curve";
+import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
 import { BILLION_SUPPLY, checkParPrices, type LaunchChoice } from "@/lib/launch";
 import { DEFAULT_PLATFORM_SETTINGS, assertCurveFee, parseFeePercent, type PlatformSettings } from "@/lib/platform";
@@ -85,13 +87,20 @@ export type Draft = {
   pool: string;
   fee: "flat" | "fall";
   feeOpen: string;
+  feeEnd: string;
+  straightFall: boolean;
+  dynamicFee: boolean;
+  compoundOn: boolean;
+  poolFee: string;
+  compoundShare: string;
+  poolFeeBps: number;
 };
 
 export function launchChoice(draft: Draft): LaunchChoice {
   return { kind: "custom-par", supply: BILLION_SUPPLY, parPrice: Number(draft.par), poolPrice: Number(draft.pool) };
 }
 
-function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen"> & Partial<Draft>): Draft {
+function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale" | "hold" | "serial" | "makerName" | "pitch" | "quote" | "value" | "par" | "pool" | "fee" | "feeOpen" | "feeEnd" | "straightFall" | "dynamicFee" | "compoundOn" | "poolFee" | "compoundShare" | "poolFeeBps"> & Partial<Draft>): Draft {
   return {
     existsNow: "yes",
     marks: "own",
@@ -104,6 +113,13 @@ function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale
     quote: "USDC",
     fee: "fall",
     feeOpen: "5",
+    feeEnd: "1",
+    straightFall: false,
+    dynamicFee: false,
+    compoundOn: false,
+    poolFee: "0.25",
+    compoundShare: "100",
+    poolFeeBps: DEFAULT_MIGRATION_FEE_BPS,
     ...pricesFor(partial.value ?? partial.declared),
     ...partial,
   };
@@ -331,6 +347,11 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
     if (par === null || pool === null) return "Pick or type what the whole supply is worth at par. It is a number above zero.";
     if (pool <= par) return "The pool price sits above par. The last slice of the sale walks up to it.";
     if (fee === null || fee < 0.25 || fee > 99) return "The opening fee is from 0.25% to 99%.";
+    if (draft.fee === "fall") {
+      const ending = positive(draft.feeEnd);
+      if (ending === null || ending < 0.25 || ending > 99) return "The ending fee is from 0.25% to 99%.";
+      if (ending > fee) return "The ending fee has to be at or under the opening fee.";
+    }
     if (checks.curveError) return checks.curveError;
   }
   return "";
@@ -401,7 +422,23 @@ export function AssetDesk() {
     } catch {
       return { error: "", parCap: "", locked: "" };
     }
-    const endingBps = draft.fee === "flat" ? openingBps : Math.min(openingBps, platform.platformFeeBps);
+    const shapeRead = readCurveShape({
+      straightFall: draft.straightFall,
+      dynamicFee: draft.dynamicFee,
+      compoundOn: draft.compoundOn,
+      poolFeePercent: draft.poolFee,
+      compoundPercent: draft.compoundShare,
+    });
+    if (shapeRead.error) return { error: shapeRead.error, parCap: "", locked: "" };
+    let endingBps = openingBps;
+    if (draft.fee === "fall") {
+      try {
+        endingBps = parseFeePercent(draft.feeEnd);
+      } catch (cause) {
+        return { error: cause instanceof Error ? cause.message : "That ending fee is not allowed.", parCap: "", locked: "" };
+      }
+      if (endingBps > openingBps) return { error: "The ending fee has to be at or under the opening fee.", parCap: "", locked: "" };
+    }
     const marks = checkParPrices(
       draft.par,
       draft.pool,
@@ -412,12 +449,15 @@ export function AssetDesk() {
       endingBps,
       platform.platformFeePercent ?? 20,
       DEFAULT_FEE_DECAY_SECONDS,
-      DEFAULT_MIGRATION_FEE_BPS,
+      draft.poolFeeBps,
       draft.quote === "SOL" ? "sol" : "usdc",
+      undefined,
+      undefined,
+      shapeRead.shape,
     );
     if (marks.picture.ok) return { error: "", parCap: marks.picture.parMarketCap, locked: marks.picture.locked };
     return { error: marks.supply || marks.par || marks.pool || marks.picture.error || "That curve does not fit.", parCap: "", locked: "" };
-  }, [draft.feeOpen, draft.fee, draft.par, draft.pool, draft.quote, platform]);
+  }, [draft.feeOpen, draft.fee, draft.feeEnd, draft.straightFall, draft.dynamicFee, draft.compoundOn, draft.poolFee, draft.compoundShare, draft.poolFeeBps, draft.par, draft.pool, draft.quote, platform]);
 
   const checks: Checks = { hasPicture: Boolean(picture && pictureCopy), curveError: curve.error };
   const word = profitWord(draft);
@@ -467,7 +507,7 @@ export function AssetDesk() {
           : `${SALE_BURN_PERCENT}% of the price is burned and ${100 - SALE_BURN_PERCENT}% goes to the creator.`
       }`],
       ["Token", `${draft.tokenName} (${symbol}). ${COIN_WORDS}`],
-      ["Curve", `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls to 1%.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`],
+      ["Curve", `PAR on a Meteora bonding curve, quoted in ${unit}. Par ${draft.par} ${unit}. Pool price ${draft.pool} ${unit}. ${curve.locked} ${draft.fee === "flat" ? `The fee stays at ${draft.feeOpen}% until graduation.` : `The fee starts at ${draft.feeOpen}% and falls ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%.`} ${draft.compoundOn ? `${draft.compoundShare}% of the pool fee is put back into the pool after the lock.` : `After the lock the pool fee is ${migrationFeeLabel(draft.poolFeeBps)}.`} Graduation locks the sale into a DAMM v2 pool. ${sizeLine}`],
     ],
     [draft, symbol, unit, sizeLine, curve.locked, rail],
   );
@@ -895,7 +935,7 @@ export function AssetDesk() {
           {curve.locked ? <p className="note">{curve.locked}</p> : null}
           <div className="segmented" role="group" aria-label="Curve fee">
             <button type="button" aria-pressed={draft.fee === "fall"} onClick={() => patch({ fee: "fall" })}>
-              Fee falls to 1%
+              Fee falls
             </button>
             <button type="button" aria-pressed={draft.fee === "flat"} onClick={() => patch({ fee: "flat" })}>
               Fee stays flat
@@ -905,6 +945,61 @@ export function AssetDesk() {
             {draft.fee === "flat" ? "Fee until graduation, percent" : "Trading fee at the open, percent"}
             <input value={draft.feeOpen} onChange={(event) => patch({ feeOpen: event.target.value })} inputMode="decimal" />
           </label>
+          {draft.fee === "fall" ? (
+            <>
+              <label>
+                Ending fee, percent
+                <input value={draft.feeEnd} onChange={(event) => patch({ feeEnd: event.target.value })} inputMode="decimal" />
+              </label>
+              <div className="segmented" role="group" aria-label="How the fee falls">
+                <button type="button" aria-pressed={!draft.straightFall} onClick={() => patch({ straightFall: false })}>
+                  Curved fall
+                </button>
+                <button type="button" aria-pressed={draft.straightFall} onClick={() => patch({ straightFall: true })}>
+                  Straight fall
+                </button>
+              </div>
+              <p className="note">
+                {draft.straightFall
+                  ? "A straight fall drops by the same amount on each step of the 12 hour clock."
+                  : "A curved fall drops faster at the start, then slows as it nears the ending fee. The clock is 12 hours."}
+              </p>
+            </>
+          ) : null}
+          <label className="check">
+            <input type="checkbox" checked={draft.dynamicFee} onChange={(event) => patch({ dynamicFee: event.target.checked })} />
+            Add a volatility fee on the curve
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={draft.compoundOn} onChange={(event) => patch({ compoundOn: event.target.checked })} />
+            Put pool fees back into the pool after the lock
+          </label>
+          {draft.compoundOn ? (
+            <>
+              <label>
+                Pool fee after the lock, percent
+                <input value={draft.poolFee} onChange={(event) => patch({ poolFee: event.target.value })} inputMode="decimal" />
+              </label>
+              <label>
+                Share of that fee put back into the pool, percent
+                <input value={draft.compoundShare} onChange={(event) => patch({ compoundShare: event.target.value })} inputMode="decimal" />
+              </label>
+              <p className="note">
+                After the lock, trades pay this pool fee in the quote. The share you type is added back to the pool. The quote that locks does not change. The liquidity stays locked. At 100%, nothing from that pool fee is left to claim.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="choices" role="group" aria-label="Pool fee after the lock">
+                {MIGRATION_FEE_CHOICES.map((choice) => (
+                  <button key={choice.bps} type="button" aria-pressed={draft.poolFeeBps === choice.bps} onClick={() => patch({ poolFeeBps: choice.bps })}>
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+              <p className="note">After the lock, every swap pays {migrationFeeLabel(draft.poolFeeBps)}. The liquidity stays locked.</p>
+            </>
+          )}
           {sizeLine ? <p className="note">{sizeLine}</p> : null}
         </form>
       ) : null}
@@ -1011,12 +1106,17 @@ export function AssetDesk() {
                 <dd>
                   {draft.fee === "flat"
                     ? `${draft.feeOpen}% until graduation`
-                    : `${draft.feeOpen}% falling to 1%`}
+                    : `${draft.feeOpen}% falling ${draft.straightFall ? "in a straight line" : "on a curve"} to ${draft.feeEnd}%`}
                 </dd>
               </div>
               <div>
                 <dt>After graduation</dt>
-                <dd>A DAMM v2 pool. The quote raised on the curve and the remaining tokens lock there.</dd>
+                <dd>
+                  A DAMM v2 pool. The quote raised on the curve and the remaining tokens lock there.
+                  {draft.compoundOn
+                    ? ` ${draft.compoundShare}% of the ${draft.poolFee}% pool fee is put back into the pool.`
+                    : ` The pool fee is ${bpsToPercent(draft.poolFeeBps)}.`}
+                </dd>
               </div>
             </dl>
             <p className="note">

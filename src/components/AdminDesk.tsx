@@ -10,6 +10,7 @@ import { MainnetGate } from "@/components/MainnetGate";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
 import { FEE_DECAY_CHOICES, HIDDEN_POOLS } from "@/lib/constants";
+import { SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
 import { bpsToPercent, formatLamports, formatMoney, rawToUi, shortAddress } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
@@ -374,7 +375,7 @@ export function AdminDesk() {
               <dt>Trading fee</dt>
               <dd>
                 Chosen on the create form, from 0.25% to 99%. A falling fee opens at the number the creator types
-                and settles at {bpsToPercent(settings.platformFeeBps)}. The fall can take{" "}
+                and ends at the ending fee the creator types. The fall is curved or straight, over{" "}
                 {FEE_DECAY_CHOICES.map((choice) => choice.label).join(", ")}. A flat fee stays at the typed percent
                 until migration and ignores the clock. The saved opening example is{" "}
                 {bpsToPercent(settings.openingFeeBps)}. That percent is what the buyer pays on the curve. It is
@@ -382,23 +383,42 @@ export function AdminDesk() {
               </dd>
             </div>
             <div>
-              <dt>Platform fee</dt>
+              <dt>Platform fee on the curve</dt>
               <dd>
                 {settings.platformFeePercent}% of the trading fee. Meteora keeps {METEORA_TRADING_FEE_PERCENT}%.
                 The token creator receives {creatorSharePercent(settings.platformFeePercent)}%. The next token
-                created here uses this split. A token already created keeps the split written into it.
+                created here uses this split. A token already created keeps the split written into it. This box
+                takes whole numbers from 0 to 80 in steps of 4. 2 is not a step. 4 is the closest step to 2. At 4,
+                Meteora keeps 20, the platform keeps 4, and the creator keeps 76.
               </dd>
             </div>
             <div>
-              <dt>After graduation</dt>
+              <dt>After the lock</dt>
               <dd>
-                Every swap pays the pool fee written into that token. New tokens default to 0.25%, and the creator
-                can choose 0.30%, 1%, 2%, 4%, or 6% instead. Of that fee, Meteora keeps {METEORA_TRADING_FEE_PERCENT}%, the platform
+                Every swap pays the pool fee written into that token. The creator picks 0.25%, 0.30%, 1%, 2%, 4%,
+                or 6%, or turns on compounding and types a pool fee from 0.1% to 10%. When compounding is off, the
+                same platform percent applies to that pool fee: Meteora keeps {METEORA_TRADING_FEE_PERCENT}%, the platform
                 keeps {settings.platformFeePercent}%, and the token creator keeps{" "}
-                {creatorSharePercent(settings.platformFeePercent)}%. The locked tokens and the locked quote token stay
-                in the pool. They are not part of this fee. The fee shares wait until they are claimed. A token
-                already created keeps the split written into it. The claim button below withdraws the platform
-                share of the curve fee, from trades before graduation.
+                {creatorSharePercent(settings.platformFeePercent)}%. When compounding is on, the typed share of the
+                pool fee is put back into the pool. The liquidity stays locked either way. Meteora also keeps 0.2%
+                of the quote and of the tokens at the moment of the lock. That 0.2% is in Meteora's program. This
+                page cannot turn it off, and this page does not add a second cut on top of it. The claim button
+                below withdraws the platform share of the curve fee, from trades before the lock.
+              </dd>
+            </div>
+            <div>
+              <dt>Title on the escrow path</dt>
+              <dd>
+                A practice-network escrow sale pays {SALE_PROGRAM_FEE_PERCENT}% of the sale price to the PAR program.
+                That {SALE_PROGRAM_FEE_PERCENT}% is written in the escrow program. Saving this page does not change it.
+              </dd>
+            </div>
+            <div>
+              <dt>Title on Tensor</dt>
+              <dd>
+                The creator is the seller. The buyer pays the list price to the creator, plus Tensor's own fee to
+                Tensor. The master record is frozen, and no plugin can be added, so a platform cut is not attached
+                to a Tensor sale. The escrow path is where the title pays the program.
               </dd>
             </div>
           </dl>
@@ -414,10 +434,13 @@ export function AdminDesk() {
               <input value={share} onChange={(event) => setShare(event.target.value)} inputMode="numeric" />
             </label>
             <p className="note">
-              20 means Meteora 20, platform 20, token creator 60. 40 means Meteora 20, platform 40, token creator
-              40. Public users cannot edit this. Saving it applies to the next token. It does not edit a token
-              that already exists, and it does not create a chain template.
+              20 means Meteora 20, platform 20, token creator 60. 4 means Meteora 20, platform 4, token creator
+              76. 4 is the closest step to 2. Public users cannot edit this. Saving it applies to the next token.
+              It does not edit a token that already exists, and it does not change the escrow program or a Tensor sale.
             </p>
+            <button type="button" onClick={() => setShare("4")}>
+              Use 4%, the closest step to 2%
+            </button>
             <button className="solid" type="submit" disabled={busy}>
               {busy ? "Waiting for the wallet…" : "Save platform fee"}
             </button>

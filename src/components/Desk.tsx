@@ -24,6 +24,7 @@ import {
   checkClimbCustom,
   checkParPrices,
   type QuoteExtra,
+  parForLockedRaise,
   poolForMigratingShare,
   priceField,
   shareMarkFor,
@@ -33,6 +34,7 @@ import {
 import { bpsToPercent, formatDollars, formatLamports, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
+import { readCurveShape } from "@/lib/curve";
 import { metadataUriForChain } from "@/lib/metadata";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
@@ -166,6 +168,13 @@ export function Desk() {
   const [curveFeeEdited, setCurveFeeEdited] = useState(false);
   const [feeDecaySeconds, setFeeDecaySeconds] = useState(DEFAULT_FEE_DECAY_SECONDS);
   const [feeFlat, setFeeFlat] = useState(false);
+  const [endFee, setEndFee] = useState("1");
+  const [straightFall, setStraightFall] = useState(false);
+  const [dynamicFee, setDynamicFee] = useState(false);
+  const [compoundOn, setCompoundOn] = useState(false);
+  const [compoundFee, setCompoundFee] = useState("0.25");
+  const [compoundShare, setCompoundShare] = useState("100");
+  const [shelfShare, setShelfShare] = useState(45);
   const [migrationFeeBps, setMigrationFeeBps] = useState(DEFAULT_MIGRATION_FEE_BPS);
   const [reservePercent, setReservePercent] = useState<0 | 5 | 10 | 20 | "custom">(0);
   const [reserveWhen, setReserveWhen] = useState<ReserveWhen | "custom">("open");
@@ -213,6 +222,13 @@ export function Desk() {
           : preset === "thin"
             ? THIN_RAISE
             : 10_000;
+  const presetLock = onPar && preset !== "custom" && preset !== "fixed";
+  const lockedPrices = useMemo(
+    () => (presetLock ? parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra) : null),
+    [presetLock, raise, shelfShare, quoteKind, quoteExtra],
+  );
+  const shownPar = lockedPrices ? plainDecimal(lockedPrices.par, 18) : parText;
+  const shownPool = lockedPrices ? plainDecimal(lockedPrices.pool, 18) : poolText;
   const migratePercent = onPar ? undefined : shareMarkFor(migrateText).percent;
   const choice: LaunchChoice = useMemo(() => {
     const share = migratePercent ? { migratePercent } : {};
@@ -223,11 +239,10 @@ export function Desk() {
       }
       return { kind: "custom", supply: Number(supplyText), openPrice: Number(openText), endPrice: Number(endText), ...share };
     }
-    if (onPar) return { kind: "par", raise, parPrice: Number(parText), poolPrice: Number(poolText), ...share };
+    if (onPar) return { kind: "par", raise, parPrice: Number(shownPar), poolPrice: Number(shownPool), ...share };
     return { kind: "climb", raise };
-  }, [preset, onPar, raise, supplyText, openText, endText, parText, poolText, migratePercent]);
+  }, [preset, onPar, raise, supplyText, openText, endText, parText, poolText, shownPar, shownPool, migratePercent]);
   const openingBps = platform.openingFeeBps;
-  const settledBps = platform.platformFeeBps;
   let feeProblem = "";
   let parsedFeeBps = 0;
   try {
@@ -237,7 +252,26 @@ export function Desk() {
     feeProblem = cause instanceof Error ? cause.message : "That trading fee is not allowed.";
   }
   const openingFeeForShape = feeProblem ? openingBps : parsedFeeBps;
-  const endingForCurve = feeFlat ? openingFeeForShape : Math.min(openingFeeForShape, settledBps);
+  let endingProblem = "";
+  let endingParsed = openingFeeForShape;
+  if (!feeFlat) {
+    try {
+      endingParsed = parseFeePercent(endFee);
+      if (endingParsed > openingFeeForShape) endingProblem = "The ending fee has to be at or under the opening fee.";
+    } catch (cause) {
+      endingProblem = cause instanceof Error ? cause.message : "That ending fee is not allowed.";
+    }
+  }
+  const endingForCurve = feeFlat || endingProblem ? openingFeeForShape : endingParsed;
+  const shapeRead = readCurveShape({
+    straightFall,
+    dynamicFee,
+    compoundOn,
+    poolFeePercent: compoundFee,
+    compoundPercent: compoundShare,
+  });
+  const curveShapeValue = shapeRead.shape;
+  const compoundProblem = shapeRead.error;
   const reserveSupply = preset === "custom" && /^\d+$/.test(supplyText) ? Number(supplyText) : BILLION_SUPPLY;
   const reserve = useMemo((): CreatorReserve => {
     if (reservePercent === 0) return NO_RESERVE;
@@ -264,12 +298,12 @@ export function Desk() {
     const ending = endingForCurve;
     const feePercent = platform.platformFeePercent ?? 20;
     if (preset === "custom" && !onPar) {
-      return checkClimbCustom(supplyText, openText, endText, migrateText, openingFeeForShape, ending, feePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra);
+      return checkClimbCustom(supplyText, openText, endText, migrateText, openingFeeForShape, ending, feePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra, curveShapeValue);
     }
     if (onPar && preset !== "fixed") {
       return checkParPrices(
-        parText,
-        poolText,
+        shownPar,
+        shownPool,
         preset === "custom" ? supplyText : null,
         preset === "custom" ? null : raise,
         onPar ? "" : migrateText,
@@ -281,10 +315,11 @@ export function Desk() {
         quoteKind,
         curveReserve,
         quoteExtra,
+        curveShapeValue,
       );
     }
     return null;
-  }, [preset, onPar, supplyText, openText, endText, parText, poolText, migrateText, raise, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra]);
+  }, [preset, onPar, supplyText, openText, endText, shownPar, shownPool, migrateText, raise, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra, curveShapeValue]);
   const picture = useMemo(() => {
     const built =
       customMarks?.picture ??
@@ -298,13 +333,14 @@ export function Desk() {
         quoteKind,
         curveReserve,
         quoteExtra,
+        curveShapeValue,
       );
     if (quoteKind === "other" && !quoteCheck?.ok) {
       return { ...built, ok: false, error: quoteCheck?.message || "Check the quote mint before review." };
     }
     if (!reserveError) return built;
     return { ...built, ok: false, creator: "", error: reserveError };
-  }, [customMarks, choice, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, reserveError, quoteExtra, quoteCheck]);
+  }, [customMarks, choice, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, reserveError, quoteExtra, quoteCheck, curveShapeValue]);
   const formFingerprint = JSON.stringify({
     cluster,
     quoteKind,
@@ -316,12 +352,17 @@ export function Desk() {
     supplyText,
     openText,
     endText,
-    parText,
-    poolText,
+    parText: shownPar,
+    poolText: shownPool,
     migrateText,
     curveFeeBps: parsedFeeBps,
-    endingFeeBps: feeFlat ? parsedFeeBps : Math.min(parsedFeeBps, settledBps),
+    endingFeeBps: endingForCurve,
     feeFlat,
+    straightFall,
+    dynamicFee,
+    compoundOn,
+    compoundFee,
+    compoundShare,
     migrationFeeBps,
     platformFeePercent: platform.platformFeePercent ?? 20,
     feeDecaySeconds,
@@ -349,6 +390,18 @@ export function Desk() {
   }, [onPar, preset, picture.ok, picture.fair, picture.migratedPercent, picture.migratedTokens]);
 
   function applySharePercent(percent: number, from: "percent" | "tokens" | "prices") {
+    if (onPar && preset !== "custom" && preset !== "fixed") {
+      if (percent < SHARE_PERCENT_LOW || percent > SHARE_PERCENT_HIGH) {
+        setShareError(
+          `The shelf locks from ${SHARE_PERCENT_LOW}% to ${SHARE_PERCENT_HIGH}% of the supply. ${SHARE_PERCENT_LOW}% is the low end, with the pool almost double par. ${SHARE_PERCENT_HIGH}% is the high end, just above the 10% shelf.`,
+        );
+        return;
+      }
+      setShareError("");
+      shareDriver.current = from;
+      setShelfShare(percent);
+      return;
+    }
     const par = Number(parText);
     if (!(par > 0)) return;
     if (percent < SHARE_PERCENT_LOW || percent > SHARE_PERCENT_HIGH) {
@@ -366,6 +419,14 @@ export function Desk() {
     shareDriver.current = from;
     setPoolText(priceField(pool));
   }
+
+  useEffect(() => {
+    if (!onPar || preset === "custom" || preset === "fixed") return;
+    const fitted = parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra);
+    if (!fitted) return;
+    setParText(plainDecimal(fitted.par, 18));
+    setPoolText(plainDecimal(fitted.pool, 18));
+  }, [onPar, preset, raise, shelfShare, quoteKind, quoteExtra]);
 
   useEffect(() => {
     let cancelled = false;
@@ -545,7 +606,7 @@ export function Desk() {
       setError(cause instanceof Error ? cause.message : "That curve fee is not allowed.");
       return;
     }
-    const endingFeeBps = feeFlat ? curveFeeBps : Math.min(curveFeeBps, settledBps);
+    const endingFeeBps = endingForCurve;
     const trimmedName = name.trim();
     const trimmedSymbol = shownSymbol.trim();
     const trimmedImage = image.trim();
@@ -590,7 +651,7 @@ export function Desk() {
       } else {
         const freshConfig = Keypair.generate();
         const configTransaction = await client.partner.createConfig({
-          ...buildLaunchConfig(choice, curveFeeBps, endingFeeBps, platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, reserve, quoteExtra),
+          ...buildLaunchConfig(choice, curveFeeBps, endingFeeBps, platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, reserve, quoteExtra, curveShapeValue),
           config: freshConfig.publicKey,
           feeClaimer: new PublicKey(PLATFORM_FEE_CLAIMER),
           leftoverReceiver: new PublicKey(PLATFORM_FEE_CLAIMER),
@@ -626,7 +687,7 @@ export function Desk() {
       const feeLine =
         curveFeeBps === endingFeeBps
           ? `Curve fee: ${bpsToPercent(curveFeeBps)} on every trade until migration.`
-          : `Curve fee: starts at ${bpsToPercent(curveFeeBps)} and falls to ${bpsToPercent(endingFeeBps)} over ${feeDecayLabel(feeDecaySeconds)}.`;
+          : `Curve fee: starts at ${bpsToPercent(curveFeeBps)} and falls ${straightFall ? "in a straight line" : "on a curve"} to ${bpsToPercent(endingFeeBps)} over ${feeDecayLabel(feeDecaySeconds)}.`;
       const next: PendingCreate = {
         prepared,
         configPrepared,
@@ -689,7 +750,10 @@ export function Desk() {
           `Pool creation fee: 0 ${unit}`,
           `${unit} spent: 0`,
           `The locked tokens and the locked ${unit} stay in the pool. They are not paid out.`,
-          `After migration the pool charges ${migrationFeeLabel(migrationFeeBps)} on every swap. Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%, platform ${platformFeePercent}%, token creator ${creatorPercent}%. Those fee shares wait until they are claimed. The claim buttons on this site withdraw the curve fee from before migration.`,
+          dynamicFee ? "A volatility fee can add on top of the curve fee when the price moves fast. The total still stops at 99%." : "The curve fee is the base fee only.",
+          curveShapeValue.compound
+            ? `After the lock, the pool fee is ${bpsToPercent(curveShapeValue.compound.poolFeeBps)}. ${bpsToPercent(curveShapeValue.compound.compoundingBps)} of that fee is put back into the pool. The liquidity stays locked.`
+            : `After migration the pool charges ${migrationFeeLabel(migrationFeeBps)} on every swap. Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%, platform ${platformFeePercent}%, token creator ${creatorPercent}%. Those fee shares wait until they are claimed. The claim buttons on this site withdraw the curve fee from before migration.`,
           prepared
             ? `Network fee: ${formatLamports((configPrepared?.feeLamports ?? 0) + prepared.feeLamports)}`
             : `Template network fee: ${formatLamports(configPrepared?.feeLamports ?? 0)}. The second signature pays the mint and pool rent, about 0.021 SOL, and the wallet shows that exact amount.`,
@@ -707,15 +771,16 @@ export function Desk() {
   }
 
   const writtenStart = feeProblem ? null : parsedFeeBps;
-  const writtenEnd = writtenStart === null ? null : feeFlat ? writtenStart : Math.min(writtenStart, settledBps);
+  const writtenEnd = writtenStart === null || endingProblem ? null : endingForCurve;
+  const fallWords = straightFall ? "in a straight line" : "on a curve";
   const feeStory =
     writtenStart === null || writtenEnd === null
-      ? "Fix the trading fee. It has to be from 0.25% to 99%."
+      ? endingProblem || "Fix the trading fee. It has to be from 0.25% to 99%."
       : feeFlat
         ? `Every trade until migration pays ${bpsToPercent(writtenStart)}.`
         : writtenStart === writtenEnd
-          ? `The fee stays at ${bpsToPercent(writtenStart)} because that number is already at the settled fee.`
-          : `The fee starts at ${bpsToPercent(writtenStart)} and falls to ${bpsToPercent(writtenEnd)} over ${feeDecayLabel(feeDecaySeconds)}.`;
+          ? `The fee stays at ${bpsToPercent(writtenStart)} for the whole curve.`
+          : `The fee starts at ${bpsToPercent(writtenStart)} and falls ${fallWords} to ${bpsToPercent(writtenEnd)} over ${feeDecayLabel(feeDecaySeconds)}.`;
   return (
     <div className="desk">
       <section className="lede">
@@ -744,9 +809,9 @@ export function Desk() {
               The curve fee is what a trade pays while the coin is still for sale. It can fall, or it can stay flat.
             </p>
             <p>
-              A falling fee starts at the percent you type and steps down to {bpsToPercent(settledBps)}. You pick
-              the clock: 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days. A buy at the open pays more. A
-              buy after the clock pays {bpsToPercent(settledBps)}.
+              A falling fee starts at the percent you type and steps down to the ending fee you type. The fall can
+              be curved or straight. You pick the clock: 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days.
+              A buy at the open pays the opening fee. A buy after the clock pays the ending fee.
             </p>
             <p>A flat fee stays at the percent you type for the whole sale.</p>
             <h2>How they work together</h2>
@@ -754,7 +819,7 @@ export function Desk() {
               The shelf ends when its tokens are bought. The curve fee ends when its clock runs out. Each one ends
               on its own.
             </p>
-            <p>If buying is slow, the fee can already be at {bpsToPercent(settledBps)} while the price is still on the shelf.</p>
+            <p>If buying is slow, the fee can already be at the ending fee while the price is still on the shelf.</p>
             <p>If the shelf sells out quickly, the price can already be walking up to the pool while the fee is still falling.</p>
             <h2>Graduation</h2>
             <p>
@@ -764,7 +829,7 @@ export function Desk() {
             </p>
             <p>
               The curve fee stops at graduation, even if time is left on the clock. From then on, every trade pays
-              the pool fee you pick below. The default is 0.25%, and it stays at that percent.
+              the pool fee you pick below. The default is 0.25%. You can also put a share of that fee back into the pool. The liquidity stays locked either way.
             </p>
             <p>The prices and the fee are written into the template. They cannot be edited later.</p>
           </div>
@@ -897,11 +962,35 @@ export function Desk() {
         <p className="note">
           {feeFlat
             ? "Flat means this percent is charged on every trade until migration. The clock does not apply."
-            : `Falls means this percent is the opening fee. It falls to ${bpsToPercent(settledBps)} over the clock below.`}{" "}
+            : "Falls means this percent is the opening fee. The ending fee and the clock below set where it lands."}{" "}
           {feeStory} Meteora writes it into the template and does not let it be edited later.
         </p>
         {feeFlat ? null : (
           <>
+            <label>
+              Ending fee, percent
+              <input
+                className={endingProblem ? "bad" : undefined}
+                aria-invalid={endingProblem ? true : undefined}
+                value={endFee}
+                onChange={(event) => setEndFee(event.target.value)}
+                inputMode="decimal"
+              />
+              {endingProblem ? <span className="field-error">{endingProblem}</span> : null}
+            </label>
+            <div className="choices" role="group" aria-label="How the fee falls">
+              <button type="button" aria-pressed={!straightFall} onClick={() => setStraightFall(false)}>
+                Curved fall
+              </button>
+              <button type="button" aria-pressed={straightFall} onClick={() => setStraightFall(true)}>
+                Straight fall
+              </button>
+            </div>
+            <p className="note">
+              {straightFall
+                ? "A straight fall drops by the same amount on each step of the clock."
+                : "A curved fall drops faster at the start, then slows as it nears the ending fee."}
+            </p>
             <div className="choices" role="group" aria-label="How long the opening fee falls">
               {FEE_DECAY_CHOICES.map((choice) => (
                 <button
@@ -915,28 +1004,63 @@ export function Desk() {
               ))}
             </div>
             <p className="note">
-              This clock is {feeDecayLabel(feeDecaySeconds)}. It is the fall from the opening fee to{" "}
-              {bpsToPercent(settledBps)}, and it is written into the template.
+              This clock is {feeDecayLabel(feeDecaySeconds)}. It is the fall from the opening fee to the ending fee, and it is written into the template.
             </p>
           </>
         )}
-        <p className="note">Pool fee after migration</p>
-        <div className="choices" role="group" aria-label="Pool fee after migration">
-          {MIGRATION_FEE_CHOICES.map((choice) => (
-            <button
-              key={choice.bps}
-              type="button"
-              aria-pressed={migrationFeeBps === choice.bps}
-              onClick={() => setMigrationFeeBps(choice.bps)}
-            >
-              {choice.label}
-            </button>
-          ))}
-        </div>
+        <label className="check">
+          <input type="checkbox" checked={dynamicFee} onChange={(event) => setDynamicFee(event.target.checked)} />
+          Add a volatility fee on the curve
+        </label>
         <p className="note">
-          After the pool locks, every swap pays {migrationFeeLabel(migrationFeeBps)}. That choice is separate
-          from the curve fee. The default is 0.25%. It is written into the template and cannot be edited later.
+          The volatility fee adds on top of the base fee when the price moves fast. The total still stops at 99%. It does not change how much quote locks.
         </p>
+        <label className="check">
+          <input type="checkbox" checked={compoundOn} onChange={(event) => setCompoundOn(event.target.checked)} />
+          Put pool fees back into the pool after the lock
+        </label>
+        {compoundOn ? (
+          <>
+            <label>
+              Pool fee after the lock, percent
+              <input
+                className={compoundProblem ? "bad" : undefined}
+                aria-invalid={compoundProblem ? true : undefined}
+                value={compoundFee}
+                onChange={(event) => setCompoundFee(event.target.value)}
+                inputMode="decimal"
+              />
+            </label>
+            <label>
+              Share of that fee put back into the pool, percent
+              <input value={compoundShare} onChange={(event) => setCompoundShare(event.target.value)} inputMode="decimal" />
+            </label>
+            {compoundProblem ? <span className="field-error">{compoundProblem}</span> : null}
+            <p className="note">
+              After the lock, trades pay this pool fee in the quote. The share you type is added back to the pool, so the pool gets deeper. The quote that locks on graduation does not change. The liquidity stays locked. At 100%, nothing from that pool fee is left to claim.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="note">Pool fee after migration</p>
+            <div className="choices" role="group" aria-label="Pool fee after migration">
+              {MIGRATION_FEE_CHOICES.map((choice) => (
+                <button
+                  key={choice.bps}
+                  type="button"
+                  aria-pressed={migrationFeeBps === choice.bps}
+                  onClick={() => setMigrationFeeBps(choice.bps)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+            <p className="note">
+              After the pool locks, every swap pays {migrationFeeLabel(migrationFeeBps)}. That choice is separate
+              from the curve fee. The default is 0.25%. It is written into the template and cannot be edited later.
+            </p>
+          </>
+        )}
         <dl className="fee-sheet">
           <div>
             <dt>Supply</dt>
@@ -1038,12 +1162,10 @@ export function Desk() {
           <div>
             <dt>After graduation</dt>
             <dd>
-              Every swap pays {migrationFeeLabel(migrationFeeBps)}. Of that fee, Meteora keeps {METEORA_TRADING_FEE_PERCENT}%, the platform
-              keeps {platform.platformFeePercent}%, and the token creator keeps{" "}
-              {creatorSharePercent(platform.platformFeePercent)}%. The locked tokens and the locked {unit} stay in the pool. They are separate from this fee. Trading
-              opens at the pool price. A later buy moves the price up, and a later sell moves it down. The fee
-              shares wait until they are claimed. The claim buttons on this site withdraw the curve fee, from
-              trades before migration. A token already created keeps the split written into it.
+              {curveShapeValue.compound
+                ? `Every swap pays ${bpsToPercent(curveShapeValue.compound.poolFeeBps)}. ${bpsToPercent(curveShapeValue.compound.compoundingBps)} of that fee is put back into the pool. The locked tokens and the locked ${unit} stay in the pool.`
+                : `Every swap pays ${migrationFeeLabel(migrationFeeBps)}. Of that fee, Meteora keeps ${METEORA_TRADING_FEE_PERCENT}%, the platform keeps ${platform.platformFeePercent}%, and the token creator keeps ${creatorSharePercent(platform.platformFeePercent)}%. The locked tokens and the locked ${unit} stay in the pool. They are separate from this fee. The fee shares wait until they are claimed.`}{" "}
+              Trading opens at the pool price. A later buy moves the price up, and a later sell moves it down. The claim buttons on this site withdraw the curve fee, from trades before migration. A token already created keeps the split written into it.
             </dd>
           </div>
         </dl>
@@ -1139,7 +1261,7 @@ export function Desk() {
         ) : null}
         <p className="note">
           {quoteKind === "sol"
-            ? `Buyers pay SOL. 0.002 and 0.0002 are fractions of one SOL. ${solUsd > 0 ? `One SOL is about ${formatDollars(solUsd)} right now.` : "The dollar line uses the live SOL price."} ${cluster === "devnet" ? "Practice SOL is not worth that. The dollar line uses the real-network price." : ""} Thin test locks 1 SOL, which a practice wallet can fill from the faucet. On the real network, Meteora opens a SOL curve by itself at 10 SOL. A par of 1 means 1 SOL per token, and that lock is large.`
+            ? `Buyers pay SOL. 0.002 and 0.0002 are fractions of one SOL. ${solUsd > 0 ? `One SOL is about ${formatDollars(solUsd)} right now.` : "The dollar line uses the live SOL price."} ${cluster === "devnet" ? "Practice SOL is not worth that. The dollar line uses the real-network price." : ""} Thin test locks 1 SOL, which a practice wallet can fill from the faucet. On the real network, Meteora opens a SOL curve by itself at 10 SOL.`
             : quoteKind === "other"
               ? `Buyers pay ${unit}. The amounts on the cards are ${unit}, not dollars. On the real network, Meteora opens a badged stock quote by itself once the quote collected is worth at least $750.`
               : "Buyers pay USDC. Thin test locks $750. On the real network, that is the smallest USDC curve Meteora opens by itself. Practice USDC from Circle is about $20, so a $750 curve cannot be filled from that faucet."}
@@ -1155,17 +1277,15 @@ export function Desk() {
             >
               <span className="preset-kicker">{item.name}</span>
               <strong>
-                {onPar
-                  ? "One billion tokens"
-                  : quoteKind === "sol"
-                    ? `${grouped(item.raise)} SOL locked`
-                    : quoteKind === "other"
-                      ? `${grouped(item.raise)} ${unit} locked`
-                      : `$${grouped(item.raise)} locked`}
+                {quoteKind === "sol"
+                  ? `${grouped(item.raise)} SOL locked`
+                  : quoteKind === "other"
+                    ? `${grouped(item.raise)} ${unit} locked`
+                    : `$${grouped(item.raise)} locked`}
               </strong>
               <span>
                 {onPar
-                  ? `PAR is on. The prices below set the ${unit} lock. This card's amount applies only with PAR off.`
+                  ? "PAR is on. One billion tokens. The prices below are the ones that lock this amount. The share buttons move the price. The lock stays."
                   : quoteKind === "other"
                     ? `One billion tokens. The price climbs from the open to the pool and locks about ${grouped(item.raise)} ${unit}.`
                     : item.detail}
@@ -1204,17 +1324,15 @@ export function Desk() {
           >
             <span className="preset-kicker">Thin test</span>
             <strong>
-              {onPar
-                ? "One billion tokens"
-                : quoteKind === "sol"
-                  ? "1,000,000,000 tokens, 1 SOL locked"
-                  : quoteKind === "other"
-                    ? `1,000,000,000 tokens, 750 ${unit} locked`
-                    : "1,000,000,000 tokens, $750 locked"}
+              {quoteKind === "sol"
+                ? "1,000,000,000 tokens, 1 SOL locked"
+                : quoteKind === "other"
+                  ? `1,000,000,000 tokens, 750 ${unit} locked`
+                  : "1,000,000,000 tokens, $750 locked"}
             </strong>
             <span>
               {onPar
-                ? `PAR is on. The prices below set the ${unit} lock. ${quoteKind === "sol" ? "1 SOL" : quoteKind === "other" ? `750 ${unit}` : "$750"} applies only with PAR off.`
+                ? "PAR is on. The prices below are the ones that lock this amount. The share buttons move the price. The lock stays."
                 : quoteKind === "sol"
                   ? "A 1 SOL curve. A practice wallet can fill it. On the real network this is under 10 SOL, so someone signs once to open the trading pool. Turn PAR on for the shelf."
                   : quoteKind === "other"
@@ -1243,7 +1361,7 @@ export function Desk() {
               <strong>Keep the opening on par</strong>
               <span>
                 {onPar
-                  ? `PAR is on. Most tokens sold to buyers stay within 10% of the par you type. Starter, Solid, Deep, and Thin do not set the ${unit} while this is on.`
+                  ? `PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks.`
                   : preset === "custom"
                     ? "PAR is off. The price climbs from your opening price to your graduation price. Turn this on to hold the opening near par."
                     : `PAR is off. The price climbs from the first token to the last, and the ${unit} on the selected card is what locks. Turn this on to hold the opening near par.`}
@@ -1315,8 +1433,9 @@ export function Desk() {
               <input
                 className={customMarks.par ? "bad" : undefined}
                 aria-invalid={customMarks.par ? true : undefined}
-                value={parText}
+                value={shownPar}
                 inputMode="decimal"
+                readOnly={preset !== "custom"}
                 onChange={(event) => {
                   shareDriver.current = "prices";
                   setParText(event.target.value.replace(/[^\d.]/g, ""));
@@ -1325,22 +1444,26 @@ export function Desk() {
               {customMarks.par && customMarks.par !== customMarks.pool ? (
                 <span className="field-error">{customMarks.par}</span>
               ) : null}
-              {quoteKind === "sol" && !customMarks.par ? <span className="note">{solDollarHint(parText, solUsd)}</span> : null}
+              {preset !== "custom" ? (
+                <span className="note">These prices keep the lock printed on the card. The share buttons move the price. The lock stays.</span>
+              ) : null}
+              {quoteKind === "sol" && !customMarks.par ? <span className="note">{solDollarHint(shownPar, solUsd)}</span> : null}
             </label>
             <label>
               Pool price, {unit} per token
               <input
                 className={customMarks.pool ? "bad" : undefined}
                 aria-invalid={customMarks.pool ? true : undefined}
-                value={poolText}
+                value={shownPool}
                 inputMode="decimal"
+                readOnly={preset !== "custom"}
                 onChange={(event) => {
                   shareDriver.current = "prices";
                   setPoolText(event.target.value.replace(/[^\d.]/g, ""));
                 }}
               />
               {customMarks.pool ? <span className="field-error">{customMarks.pool}</span> : null}
-              {quoteKind === "sol" && !customMarks.pool ? <span className="note">{solDollarHint(poolText, solUsd)}</span> : null}
+              {quoteKind === "sol" && !customMarks.pool ? <span className="note">{solDollarHint(shownPool, solUsd)}</span> : null}
             </label>
           </>
         ) : null}
@@ -1398,9 +1521,11 @@ export function Desk() {
               />
             </label>
             <span className="note">
-              {picture.ok
-                ? `These prices lock ${percentField(picture.migratedPercent)}% of the supply, ${grouped(picture.migratedTokens)} tokens, because the pool price is ${(Number(poolText) / Number(parText)).toLocaleString("en-US", { maximumFractionDigits: 2 })} times par. The dollar amount does not set the percent. $1 to $1.20 locks the same percent as $0.20 to $0.24. Type any whole percent from 35 to 48, including 47. The four buttons are shortcuts. Par can be any price. The pool price then moves to the one finish that locks that percent. 35% finishes at almost double par. 48% finishes just above the 10% shelf.`
-                : "Set par and the pool price. The share fills from those prices."}
+              {preset !== "custom"
+                ? "The share moves the price. The lock stays the amount printed on the card. 35% finishes at almost double par. 48% finishes just above the 10% shelf."
+                : picture.ok
+                  ? `These prices lock ${percentField(picture.migratedPercent)}% of the supply, ${grouped(picture.migratedTokens)} tokens, because the pool price is ${(Number(poolText) / Number(parText)).toLocaleString("en-US", { maximumFractionDigits: 2 })} times par. Type any whole percent from 35 to 48. The four buttons are shortcuts. 35% finishes at almost double par. 48% finishes just above the 10% shelf.`
+                  : "Set par and the pool price. The share fills from those prices."}
             </span>
           </>
         ) : null}
@@ -1536,7 +1661,7 @@ export function Desk() {
         <button
           className="solid"
           type="submit"
-          disabled={busy || !picture.ok || feeProblem.length > 0 || name.trim().length === 0}
+          disabled={busy || !picture.ok || feeProblem.length > 0 || endingProblem.length > 0 || compoundProblem.length > 0 || name.trim().length === 0}
         >
           {busy ? "Buildingâ€¦" : "Review create"}
         </button>
