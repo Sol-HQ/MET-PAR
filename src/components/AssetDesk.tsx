@@ -970,6 +970,18 @@ export function AssetDesk() {
             <input type="checkbox" checked={draft.dynamicFee} onChange={(event) => patch({ dynamicFee: event.target.checked })} />
             Add a volatility fee on the curve
           </label>
+          <p className="note">
+            The amount is the fee percent above. Meteora can add a volatility piece on top of that percent while the price is moving fast. The piece is at most one fifth of the fee you typed, so a 25% fee can rise by up to 5 points, then it fades when the price is calm. The two together still stop at 99%. There is no second box: the ceiling is one fifth of the fee already typed. It does not change the lock.
+          </p>
+          <section className="card">
+            <h2>Every fee on this object</h2>
+            <p>Curve fee. Buyers pay the percent you type while the coin is still on the curve. A flat fee stays there. A falling fee moves from the opening percent to the ending percent over the clock you pick, either in equal steps or faster at the start.</p>
+            <p>Volatility fee. Optional. It is extra, and only while the price is moving. Its ceiling is one fifth of the curve fee. The total still stops at 99%.</p>
+            <p>Who receives the curve fee. Meteora keeps 20% of it. That share is fixed. Of the whole fee, the platform keeps the percent on the admin page, 20% unless an admin changes it, and the creator keeps the rest. At 20% platform, that is Meteora 20%, platform 20%, creator 60%.</p>
+            <p>Opening the pool. Meteora takes 0.2% of the tokens and 0.2% of the quote as the pool opens. That share cannot be turned off. This page does not add a second migration skim, and it does not charge a pool creation fee.</p>
+            <p>Pool fee after the lock. Every later trade pays the pool fee. Meteora keeps 20% of that fee first. The other 80% sits on the locked position: 25% of it is the platform and 75% is the creator, which is 20% and 60% of the whole fee. If you put fees back into the pool, the share you type of that 80% is added back. At 100%, nothing of that pool fee is left to claim. The locked tokens and quote stay in the pool.</p>
+            <p>The title. On the escrow path the program burns the percent you choose, keeps 2%, and sends the rest to the creator. At a 25% burn the creator receives 73%. On the Tensor path the creator receives the list price. The buyer pays Tensor about 2% on top. This platform does not take a cut of a Tensor sale.</p>
+          </section>
           <label className="check">
             <input type="checkbox" checked={draft.compoundOn} onChange={(event) => patch({ compoundOn: event.target.checked })} />
             Put pool fees back into the pool after the lock

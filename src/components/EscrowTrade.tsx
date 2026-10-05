@@ -1,7 +1,9 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
@@ -10,7 +12,7 @@ import { explorerTx, type ClusterName } from "@/lib/constants";
 import { formatLamports } from "@/lib/format";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
-import { escrowBidInstruction, escrowBuyInstruction, markGraduatedInstruction, SALE_PROGRAM_FEE_PERCENT, type SaleMode } from "@/lib/title";
+import { escrowBidInstruction, escrowBuyInstruction, escrowSetPriceInstruction, markGraduatedInstruction, SALE_PROGRAM_FEE_PERCENT, type SaleMode } from "@/lib/title";
 
 function split(price: bigint, burnPercent: number): { paid: bigint; burned: bigint; fee: bigint } {
   const fee = (price * BigInt(SALE_PROGRAM_FEE_PERCENT * 100)) / BigInt(10000);
@@ -58,6 +60,7 @@ export function EscrowTrade({
   const { cluster } = useCluster();
   const router = useRouter();
   const [bid, setBid] = useState("");
+  const [nextPrice, setNextPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
@@ -111,7 +114,14 @@ export function EscrowTrade({
   async function buy() {
     if (!publicKey) return;
     const owner = await tokenProgram();
+    const mintKey = new PublicKey(mint);
+    const creatorKey = new PublicKey(creator);
+    const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
+    const ata = (holder: PublicKey) => getAssociatedTokenAddressSync(mintKey, holder, true, owner);
     const transaction = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(publicKey), publicKey, mintKey, owner),
+      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(creatorKey), creatorKey, mintKey, owner),
+      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(treasury), treasury, mintKey, owner),
       escrowBuyInstruction({
         program: new PublicKey(program),
         buyer: publicKey,
@@ -129,6 +139,29 @@ export function EscrowTrade({
       `${formatTokenAmount(parts.paid)} ${symbol} goes to the creator.`,
       `${formatTokenAmount(parts.fee)} ${symbol} goes to the PAR program.`,
       "The title moves to your wallet.",
+      `Network fee: ${formatLamports(prepared.feeLamports)}`,
+    ], prepared.transaction);
+  }
+
+  async function changePrice() {
+    if (!publicKey) return;
+    const next = parseTokenAmount(nextPrice);
+    if (!next) {
+      setError("Type the new price in tokens.");
+      return;
+    }
+    const transaction = new Transaction().add(
+      escrowSetPriceInstruction({
+        program: new PublicKey(program),
+        creator: publicKey,
+        title: new PublicKey(title),
+        price: next,
+      }),
+    );
+    const prepared = await prepareTransaction(connection, publicKey, transaction, []);
+    confirm("Change the title price", [
+      `The price becomes ${formatTokenAmount(next)} ${symbol}.`,
+      sale === "auction" ? "This is the reserve. It can change until the first bid." : "A fixed price can change until a buyer pays.",
       `Network fee: ${formatLamports(prepared.feeLamports)}`,
     ], prepared.transaction);
   }
@@ -168,6 +201,26 @@ export function EscrowTrade({
   return (
     <div className="record-promises">
       <p className="eyebrow">Escrow</p>
+      <h2>Price on this title</h2>
+      <p className="note">
+        The price now is {formatTokenAmount(reserve)} {symbol}.
+        {sale === "auction"
+          ? " On an auction this number is the reserve. The creator can change it until the first bid. A bid locks it."
+          : " On a fixed price the creator can change it until a buyer pays."}
+      </p>
+      {leading > BigInt(0) ? (
+        <p className="note">A bid of {formatTokenAmount(leading)} {symbol} is in, so this price stays.</p>
+      ) : publicKey?.toBase58() === creator ? (
+        <label>
+          New price in {symbol}
+          <input value={nextPrice} onChange={(event) => setNextPrice(event.target.value)} inputMode="decimal" />
+          <button type="button" className="solid" disabled={busy} onClick={() => void changePrice().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The price was not changed."))}>
+            {busy ? "Working…" : "Change the price"}
+          </button>
+        </label>
+      ) : (
+        <p className="note">Connect the creator wallet to change this price. The box appears for that wallet.</p>
+      )}
       {needsMark ? (
         <p className="note">The curve is full. Graduation has not been marked, so the sale wait has not started.</p>
       ) : open ? (
@@ -179,7 +232,7 @@ export function EscrowTrade({
       ) : (
         <p className="note">The buy stays closed until the sale wait ends.</p>
       )}
-      {clockOver ? <p className="note">The bidding clock has ended. The watcher finishes the auction.</p> : null}
+      {clockOver ? <p className="note">The bidding clock has ended. The GitHub job finishes the auction.</p> : null}
       <div className="asset-nav">
         {needsMark && publicKey ? (
           <button type="button" className="solid" disabled={busy} onClick={() => void mark().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Graduation was not marked."))}>

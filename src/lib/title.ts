@@ -110,7 +110,7 @@ export function creatorPromises(input: {
     "The title is the one claim to the item. Whoever holds the title can claim the item from me.",
     escrow
       ? auction
-        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. The PAR watcher finishes it when the clock ends.`
+        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. A GitHub job finishes it when the clock ends.`
         : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
       : `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in this token, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`,
     escrow
@@ -176,8 +176,8 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     rows.push({
       key: "auction",
       value: facts.shortClock
-        ? "72 seconds after the first bid at the reserve. A bid in the last second extends 1 second. Sits 60 seconds if no bid. The PAR watcher finishes it."
-        : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. The PAR watcher finishes it.`,
+        ? "72 seconds after the first bid at the reserve. A bid in the last second extends 1 second. Sits 60 seconds if no bid. A GitHub job finishes it."
+        : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. A GitHub job finishes it.`,
     });
   }
   return rows;
@@ -224,6 +224,7 @@ const DEPOSIT = Uint8Array.from([242, 35, 198, 137, 82, 225, 242, 182]);
 const MARK_GRADUATED = Uint8Array.from([125, 72, 57, 129, 59, 15, 247, 251]);
 const BUY = Uint8Array.from([102, 6, 61, 18, 1, 218, 235, 234]);
 const BID = Uint8Array.from([199, 56, 85, 38, 146, 243, 37, 158]);
+const SET_PRICE = Uint8Array.from([16, 19, 182, 8, 149, 83, 72, 181]);
 
 function requirePracticeProgram(program: PublicKey) {
   if (!ESCROW_PROGRAM.devnet || program.toBase58() !== ESCROW_PROGRAM.devnet) {
@@ -271,6 +272,20 @@ export function escrowDepositInstruction(input: {
       { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+  });
+}
+
+/** The creator changes the price. On an auction this is the reserve, and it stays put once a bid is in. */
+export function escrowSetPriceInstruction(input: { program: PublicKey; creator: PublicKey; title: PublicKey; price: bigint }): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  if (input.price <= BigInt(0)) throw new Error("The price has to be above zero.");
+  return new TransactionInstruction({
+    programId: input.program,
+    data: escrowAmount(SET_PRICE, input.price),
+    keys: [
+      { pubkey: input.creator, isSigner: true, isWritable: false },
+      { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
     ],
   });
 }
@@ -449,8 +464,9 @@ export async function titleStatus(
 ): Promise<TitleStatus | null> {
   const address = record.attributes.title;
   if (!address) return null;
-  const rail: TitleRail = record.attributes["title held by"] === "escrow program" ? "escrow" : "creator";
   const read = await readTitle(endpoint, address);
+  const heldBy = `${read.attributes["held by"] || ""} ${record.attributes["title held by"] || ""}`;
+  const rail: TitleRail = heldBy.includes("escrow") ? "escrow" : "creator";
   const program = ESCROW_PROGRAM[cluster];
   const listing = rail === "escrow" && program ? listingAddress(new PublicKey(address), new PublicKey(program)).toBase58() : null;
   const creator = record.attributes.creator;

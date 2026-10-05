@@ -73,8 +73,12 @@ export type PoolSnapshot = {
   openingFeeBps: number;
   /** Settled trading fee in basis points, read from the template. */
   endingFeeBps: number;
-  /** Pool fee after migration, in basis points. 0 means the template used a custom pool fee. */
+  /** Pool fee after migration, in basis points. */
   migrationFeeBps: number;
+  /** Share of the pool fee put back into the pool. 0 means compounding is off. */
+  compoundingFeeBps: number;
+  /** The Meteora DAMM v2 config this curve graduates into. */
+  dammConfig: string | null;
   /** True after the curve fills and before the creator supply is locked. */
   needsLocker: boolean;
   vestingCliffUnlock: BN;
@@ -93,6 +97,13 @@ export type DammMarket = {
 };
 
 const METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+
+function accountNumber(value: unknown): number {
+  if (value == null) return 0;
+  const text = typeof value === "object" && "toString" in value ? String(value) : String(value);
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 function readBorshString(bytes: Uint8Array, offset: number): { value: string; next: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -220,11 +231,14 @@ export async function loadPool(connection: Connection, address: string): Promise
     .add(new BN(pool.poolState.protocolMigrationBaseFeeAmount.toString()));
   const leftoverBase = vaultBase.gt(reservedBase) ? vaultBase.sub(reservedBase) : new BN(0);
   const feeOption = Number(config.migrationFeeOption);
-  const migrationFeeBps = MIGRATION_FEE_BPS_BY_OPTION[feeOption] ?? 0;
-  const dammConfig = DAMM_V2_MIGRATION_FEE_ADDRESS[feeOption];
+  const fixedFeeBps = MIGRATION_FEE_BPS_BY_OPTION[feeOption];
+  const migrationFeeBps = fixedFeeBps ?? accountNumber(config.migratedPoolFeeBps);
+  const compoundingFeeBps = fixedFeeBps ? 0 : accountNumber(config.migratedCompoundingFeeBps);
+  const dammConfigAccount = DAMM_V2_MIGRATION_FEE_ADDRESS[feeOption];
+  const dammConfig = dammConfigAccount ? dammConfigAccount.toBase58() : null;
   const dammPool =
-    isMigrated && dammConfig
-      ? deriveDammV2PoolAddress(dammConfig, pool.poolState.baseMint, quoteMint).toBase58()
+    isMigrated && dammConfigAccount
+      ? deriveDammV2PoolAddress(dammConfigAccount, pool.poolState.baseMint, quoteMint).toBase58()
       : null;
 
   return {
@@ -278,6 +292,8 @@ export async function loadPool(connection: Connection, address: string): Promise
     openingFeeBps,
     endingFeeBps,
     migrationFeeBps,
+    compoundingFeeBps,
+    dammConfig,
     needsLocker: migrationProgress === 1,
     vestingCliffUnlock: new BN(config.lockedVestingConfig.cliffUnlockAmount.toString()),
     vestingPerPeriod: new BN(config.lockedVestingConfig.amountPerPeriod.toString()),

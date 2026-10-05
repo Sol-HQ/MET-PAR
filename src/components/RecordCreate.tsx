@@ -197,7 +197,7 @@ function sheetJson(input: {
                     hours: AUCTION_HOURS,
                     extendHours: AUCTION_EXTEND_HOURS,
                     sitDaysWithoutBid: AUCTION_SIT_DAYS,
-                    finish: "The PAR watcher sends the finish when the clock ends. The creator and the bidder do not send it.",
+                    finish: "A GitHub job sends the finish when the clock ends. The creator and the bidder do not send it.",
                   }
                 : null,
           },

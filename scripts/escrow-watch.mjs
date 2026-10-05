@@ -1,14 +1,15 @@
 /**
  * PAR escrow watcher.
  *
- * One process on this machine. It is not a Vercel route and not a GitHub Action.
- * About every 15 minutes it reads the escrow program from the chain, marks graduation
- * when a pool has migrated, and finishes any auction whose clock has ended.
- * If it misses a pass, the next pass still finishes the same auctions.
+ * GitHub Actions runs one pass about every 5 minutes (`node scripts/escrow-watch.mjs --once`).
+ * The signing key and the record-store key stay in GitHub secrets. They are not in the repository.
+ * A pass reads the escrow program, marks graduation when a pool has migrated, and finishes any
+ * auction whose clock has ended. A missed pass still finishes the same auctions on the next run.
+ * `node scripts/escrow-watch.mjs` without `--once` keeps a local loop for a manual check.
  */
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { needsGraduationMark, needsSettle, readListingData } from "./escrow-clock.mjs";
 
 const PROGRAM = new PublicKey("FASTUQ11TbpbpQL1LitzgwjLcpqRPgQrHXmuk584hypF");
@@ -22,9 +23,11 @@ const GRADUATION_RETRY_MS = 10 * 60_000;
 const LOCK = new URL("../keys/escrow-watch.lock", import.meta.url);
 const KEY = new URL("../keys/me.json", import.meta.url);
 
-function envValue(prefix) {
-  for (const name of [".env.local", ".env"]) {
-    const path = new URL(`../${name}`, import.meta.url);
+function envValue(name) {
+  if (process.env[name]) return process.env[name];
+  const prefix = `${name}=`;
+  for (const file of [".env.local", ".env"]) {
+    const path = new URL(`../${file}`, import.meta.url);
     if (!existsSync(path)) continue;
     const line = readFileSync(path, "utf8")
       .split(/\r?\n/)
@@ -36,13 +39,19 @@ function envValue(prefix) {
 }
 
 function envRpc() {
-  return envValue("NEXT_PUBLIC_DEVNET_RPC_URL=") || "https://api.devnet.solana.com";
+  return envValue("NEXT_PUBLIC_DEVNET_RPC_URL") || "https://api.devnet.solana.com";
 }
 
 function indexDb() {
-  const url = envValue("SUPABASE_URL=").replace(/\/$/, "");
-  const key = envValue("SUPABASE_SERVICE_ROLE_KEY=");
+  const url = envValue("SUPABASE_URL").replace(/\/$/, "");
+  const key = envValue("SUPABASE_SERVICE_ROLE_KEY");
   return url && key ? { url, key } : null;
+}
+
+function loadPayer() {
+  const fromEnv = envValue("WATCHER_KEY");
+  const raw = fromEnv || readFileSync(KEY, "utf8");
+  return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
 }
 
 async function indexRest(path, init = {}) {
@@ -192,7 +201,18 @@ async function pass(connection, payer, graduationTried) {
     if (!mintInfo) continue;
     listing.tokenProgram = mintInfo.owner;
     try {
-      const sig = await send(connection, payer, [settleInstruction(payer.publicKey, listing)]);
+      const mintKey = new PublicKey(listing.mint);
+      const creatorKey = new PublicKey(listing.creator);
+      const mintOwner = listing.tokenProgram;
+      const open = (holder) =>
+        createAssociatedTokenAccountIdempotentInstruction(
+          payer.publicKey,
+          getAssociatedTokenAddressSync(mintKey, holder, true, mintOwner),
+          holder,
+          mintKey,
+          mintOwner,
+        );
+      const sig = await send(connection, payer, [open(creatorKey), open(TREASURY), settleInstruction(payer.publicKey, listing)]);
       settled += 1;
       console.log(`finished auction ${sig}`);
     } catch (error) {
@@ -203,30 +223,43 @@ async function pass(connection, payer, graduationTried) {
   return { watched: real.length, marked, settled };
 }
 
+async function runPass(connection, payer, graduationTried) {
+  const result = { ok: true, note: "", watched: 0, marked: 0, settled: 0 };
+  try {
+    const counts = await pass(connection, payer, graduationTried);
+    result.watched = counts.watched;
+    result.marked = counts.marked;
+    result.settled = counts.settled;
+  } catch (error) {
+    result.ok = false;
+    result.note = error instanceof Error ? error.message : "pass failed";
+    console.log(`pass failed, will try again: ${result.note}`);
+  }
+  try {
+    await writeBeat(result);
+  } catch (error) {
+    console.log(`the record of this pass did not save: ${error instanceof Error ? error.message : "unknown"}`);
+  }
+  return result;
+}
+
 async function main() {
-  takeLock();
-  const secret = Uint8Array.from(JSON.parse(readFileSync(KEY, "utf8")));
-  const payer = Keypair.fromSecretKey(secret);
+  const once = process.argv.includes("--once");
+  if (!once) takeLock();
+  const payer = loadPayer();
   const connection = new Connection(envRpc(), "confirmed");
-  console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`);
+  console.log(
+    once
+      ? `watcher ${payer.publicKey.toBase58()} on the practice network, one pass`
+      : `watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`,
+  );
   const graduationTried = new Map();
+  if (once) {
+    await runPass(connection, payer, graduationTried);
+    return;
+  }
   for (;;) {
-    const result = { ok: true, note: "", watched: 0, marked: 0, settled: 0 };
-    try {
-      const counts = await pass(connection, payer, graduationTried);
-      result.watched = counts.watched;
-      result.marked = counts.marked;
-      result.settled = counts.settled;
-    } catch (error) {
-      result.ok = false;
-      result.note = error instanceof Error ? error.message : "pass failed";
-      console.log(`pass failed, will try again: ${result.note}`);
-    }
-    try {
-      await writeBeat(result);
-    } catch (error) {
-      console.log(`the record of this pass did not save: ${error instanceof Error ? error.message : "unknown"}`);
-    }
+    await runPass(connection, payer, graduationTried);
     const until = Date.now() + INTERVAL_MS;
     while (Date.now() < until) {
       let wake = false;

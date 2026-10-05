@@ -629,12 +629,13 @@ export function parForLockedRaise(
   percent: number,
   kind: QuoteKind = "usdc",
   extra?: QuoteExtra,
+  reserve: CreatorReserve = NO_RESERVE,
 ): { par: number; pool: number } | null {
   if (!(raise > 0)) return null;
   const poolAtOne = poolForMigratingShare(1, percent);
   if (!poolAtOne) return null;
   try {
-    const built = buildFair(BILLION_SUPPLY, 1, poolAtOne, 2500, 100, 20, 43_200, 25, kind, NO_RESERVE, extra);
+    const built = buildFair(BILLION_SUPPLY, 1, poolAtOne, 2500, 100, 20, 43_200, 25, kind, reserve, extra);
     const locked = uiRaise(built.config.migrationQuoteThreshold, kind, extra);
     if (!(locked > 0)) return null;
     const par = raise / locked;

@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::{Mint as SplMint, Token, TokenAccount as SplTokenAccount};
 use anchor_spl::token_interface::{self, Burn, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked};
 use mpl_core::accounts::{BaseAssetV1, PluginHeaderV1};
 use mpl_core::instructions::TransferV1CpiBuilder;
@@ -607,34 +608,23 @@ pub struct Buy<'info> {
         seeds = [LISTING_SEED, listing.asset.as_ref()],
         bump = listing.bump
     )]
-    pub listing: Account<'info, Listing>,
+    pub listing: Box<Account<'info, Listing>>,
     /// CHECK: Must be the listing's asset. Moved by the Core program.
     #[account(mut)]
     pub asset: UncheckedAccount<'info>,
-    #[account(mut, mint::token_program = token_program)]
-    pub mint: InterfaceAccount<'info, Mint>,
-    #[account(mut, token::mint = mint, token::authority = buyer, token::token_program = token_program)]
-    pub buyer_token: InterfaceAccount<'info, TokenAccount>,
-    #[account(
-        init_if_needed,
-        payer = buyer,
-        associated_token::mint = mint,
-        associated_token::authority = creator,
-        associated_token::token_program = token_program
-    )]
-    pub creator_token: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub mint: Account<'info, SplMint>,
+    #[account(mut, token::mint = mint, token::authority = buyer)]
+    pub buyer_token: Account<'info, SplTokenAccount>,
+    #[account(mut, token::mint = mint, token::authority = creator)]
+    pub creator_token: Account<'info, SplTokenAccount>,
     /// CHECK: The platform wallet. Constrained to `TREASURY`, so the fee cannot be sent anywhere else.
     #[account(address = TREASURY)]
     pub treasury: UncheckedAccount<'info>,
-    #[account(
-        init_if_needed,
-        payer = buyer,
-        associated_token::mint = mint,
-        associated_token::authority = treasury,
-        associated_token::token_program = token_program
-    )]
-    pub treasury_token: InterfaceAccount<'info, TokenAccount>,
-    pub token_program: Interface<'info, TokenInterface>,
+    /// Created by the buyer before this instruction. Creating it here overflowed the stack.
+    #[account(mut, token::mint = mint, token::authority = treasury)]
+    pub treasury_token: Account<'info, SplTokenAccount>,
+    pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: Metaplex Core program.
     #[account(address = mpl_core::ID)]
@@ -683,37 +673,25 @@ pub struct Settle<'info> {
         seeds = [LISTING_SEED, listing.asset.as_ref()],
         bump = listing.bump
     )]
-    pub listing: Account<'info, Listing>,
+    pub listing: Box<Account<'info, Listing>>,
     /// CHECK: Must be the listing's asset. Moved by the Core program.
     #[account(mut)]
     pub asset: UncheckedAccount<'info>,
     /// CHECK: The high bidder. Checked against the listing. Receives the title.
     #[account(mut)]
     pub winner: UncheckedAccount<'info>,
-    #[account(mut, mint::token_program = token_program)]
-    pub mint: InterfaceAccount<'info, Mint>,
-    #[account(mut, token::mint = mint, token::authority = listing, token::token_program = token_program)]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
-    #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = mint,
-        associated_token::authority = creator,
-        associated_token::token_program = token_program
-    )]
-    pub creator_token: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub mint: Account<'info, SplMint>,
+    #[account(mut, token::mint = mint, token::authority = listing)]
+    pub vault: Account<'info, SplTokenAccount>,
+    #[account(mut, token::mint = mint, token::authority = creator)]
+    pub creator_token: Account<'info, SplTokenAccount>,
     /// CHECK: The platform wallet. Constrained to `TREASURY`, so the fee cannot be sent anywhere else.
     #[account(address = TREASURY)]
     pub treasury: UncheckedAccount<'info>,
-    #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = mint,
-        associated_token::authority = treasury,
-        associated_token::token_program = token_program
-    )]
-    pub treasury_token: InterfaceAccount<'info, TokenAccount>,
-    pub token_program: Interface<'info, TokenInterface>,
+    #[account(mut, token::mint = mint, token::authority = treasury)]
+    pub treasury_token: Account<'info, SplTokenAccount>,
+    pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: Metaplex Core program.
     #[account(address = mpl_core::ID)]

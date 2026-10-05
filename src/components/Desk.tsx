@@ -223,9 +223,31 @@ export function Desk() {
             ? THIN_RAISE
             : 10_000;
   const presetLock = onPar && preset !== "custom" && preset !== "fixed";
+  const reserveSupply = preset === "custom" && /^\d+$/.test(supplyText) ? Number(supplyText) : BILLION_SUPPLY;
+  const reserve = useMemo((): CreatorReserve => {
+    if (reservePercent === 0) return NO_RESERVE;
+    const tokens =
+      reservePercent === "custom"
+        ? /^\d+$/.test(reserveTokenText)
+          ? Number(reserveTokenText)
+          : Number.NaN
+        : tokensForPercent(reserveSupply, reservePercent);
+    if (reserveWhen !== "custom") return reserveFromWhen(tokens, reserveWhen);
+    const wait = /^\d+$/.test(reserveWaitText) ? Number(reserveWaitText) : Number.NaN;
+    const release = /^\d+$/.test(reserveReleaseText) ? Number(reserveReleaseText) : Number.NaN;
+    const claims = /^\d+$/.test(reserveClaimsText) ? Number(reserveClaimsText) : Number.NaN;
+    return {
+      tokens,
+      cliffSeconds: Number.isFinite(wait) ? wait * DAY_SECONDS : -1,
+      releaseSeconds: Number.isFinite(release) ? release * DAY_SECONDS : -1,
+      periods: claims,
+    };
+  }, [reservePercent, reserveTokenText, reserveWhen, reserveWaitText, reserveReleaseText, reserveClaimsText, reserveSupply]);
+  const reserveError = reserveProblem(reserve, reserveSupply);
+  const curveReserve = reserveError ? NO_RESERVE : reserve;
   const lockedPrices = useMemo(
-    () => (presetLock ? parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra) : null),
-    [presetLock, raise, shelfShare, quoteKind, quoteExtra],
+    () => (presetLock ? parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra, curveReserve) : null),
+    [presetLock, raise, shelfShare, quoteKind, quoteExtra, curveReserve],
   );
   const shownPar = lockedPrices ? plainDecimal(lockedPrices.par, 18) : parText;
   const shownPool = lockedPrices ? plainDecimal(lockedPrices.pool, 18) : poolText;
@@ -272,28 +294,6 @@ export function Desk() {
   });
   const curveShapeValue = shapeRead.shape;
   const compoundProblem = shapeRead.error;
-  const reserveSupply = preset === "custom" && /^\d+$/.test(supplyText) ? Number(supplyText) : BILLION_SUPPLY;
-  const reserve = useMemo((): CreatorReserve => {
-    if (reservePercent === 0) return NO_RESERVE;
-    const tokens =
-      reservePercent === "custom"
-        ? /^\d+$/.test(reserveTokenText)
-          ? Number(reserveTokenText)
-          : Number.NaN
-        : tokensForPercent(reserveSupply, reservePercent);
-    if (reserveWhen !== "custom") return reserveFromWhen(tokens, reserveWhen);
-    const wait = /^\d+$/.test(reserveWaitText) ? Number(reserveWaitText) : Number.NaN;
-    const release = /^\d+$/.test(reserveReleaseText) ? Number(reserveReleaseText) : Number.NaN;
-    const claims = /^\d+$/.test(reserveClaimsText) ? Number(reserveClaimsText) : Number.NaN;
-    return {
-      tokens,
-      cliffSeconds: Number.isFinite(wait) ? wait * DAY_SECONDS : -1,
-      releaseSeconds: Number.isFinite(release) ? release * DAY_SECONDS : -1,
-      periods: claims,
-    };
-  }, [reservePercent, reserveTokenText, reserveWhen, reserveWaitText, reserveReleaseText, reserveClaimsText, reserveSupply]);
-  const reserveError = reserveProblem(reserve, reserveSupply);
-  const curveReserve = reserveError ? NO_RESERVE : reserve;
   const customMarks = useMemo(() => {
     const ending = endingForCurve;
     const feePercent = platform.platformFeePercent ?? 20;
@@ -422,11 +422,11 @@ export function Desk() {
 
   useEffect(() => {
     if (!onPar || preset === "custom" || preset === "fixed") return;
-    const fitted = parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra);
+    const fitted = parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra, curveReserve);
     if (!fitted) return;
     setParText(plainDecimal(fitted.par, 18));
     setPoolText(plainDecimal(fitted.pool, 18));
-  }, [onPar, preset, raise, shelfShare, quoteKind, quoteExtra]);
+  }, [onPar, preset, raise, shelfShare, quoteKind, quoteExtra, curveReserve]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1013,7 +1013,7 @@ export function Desk() {
           Add a volatility fee on the curve
         </label>
         <p className="note">
-          The volatility fee adds on top of the base fee when the price moves fast. The total still stops at 99%. It does not change how much quote locks.
+          The amount is the fee percent above. The volatility piece is at most one fifth of that percent while the price is moving, then it fades. A 25% fee can rise by up to 5 points. The two together still stop at 99%. There is no second box. It does not change how much quote locks. Meteora keeps 20% of the trading fee. The platform keeps its percent of the whole fee, 20% unless an admin changes it, and the creator keeps the rest.
         </p>
         <label className="check">
           <input type="checkbox" checked={compoundOn} onChange={(event) => setCompoundOn(event.target.checked)} />

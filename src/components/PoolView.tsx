@@ -23,7 +23,7 @@ import { ListingActions } from "@/components/ListingActions";
 import { RecordPanel } from "@/components/RecordPanel";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
-import { dammV2FeeConfig, explorerAccount, explorerTx, feeDecayLabel, meteoraPoolUrl } from "@/lib/constants";
+import { explorerAccount, explorerTx, feeDecayLabel, meteoraPoolUrl } from "@/lib/constants";
 import { bpsToPercent, dollarsToSol, formatDollars, formatLamports, formatMoney, pricePerToken, rawToUi, shortAddress, uiToRaw } from "@/lib/format";
 import { loadDammMarket, loadPool, type DammMarket, type PoolSnapshot } from "@/lib/load-pool";
 import { loadHolders, loadTrades, type HolderRow, type TradeRow } from "@/lib/pool-book";
@@ -760,9 +760,9 @@ export function PoolView({ address }: { address: string }) {
     setBusy(true);
     setError("");
     try {
-      const feeConfig = dammV2FeeConfig(snapshot.migrationFeeBps);
+      const feeConfig = snapshot.dammConfig;
       if (!feeConfig) {
-        setError("This curve's pool fee is not one of the choices, so this page cannot open the trading pool.");
+        setError("This curve has no Meteora pool config, so this page cannot open the trading pool.");
         return;
       }
       const client = DynamicBondingCurveClient.create(connection, "confirmed");
@@ -1075,7 +1075,12 @@ export function PoolView({ address }: { address: string }) {
             </div>
             <div>
               <dt>Pool fee</dt>
-              <dd>{snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "Saved on the template"}</dd>
+              <dd>
+                {snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "Saved on the template"}
+                {snapshot.compoundingFeeBps > 0
+                  ? `. Compounding puts ${snapshot.compoundingFeeBps / 100}% of the liquidity fee back into the pool. Meteora's 20% still comes out first.`
+                  : ""}
+              </dd>
             </div>
             <div>
               <dt>Liquidity</dt>
@@ -1500,7 +1505,10 @@ export function PoolView({ address }: { address: string }) {
               </div>
               <h2>After the pool opens</h2>
               <p>
-                Each swap pays {snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "the pool fee saved on the template"}. Meteora keeps {shareLabel(shares.meteora)} of that fee. The other {100 - METEORA_TRADING_FEE_PERCENT}% is the fee on the locked liquidity: platform {snapshot.partnerLockedLiquidity}%, creator {snapshot.creatorLockedLiquidity}%.{" "}
+                Each swap pays {snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "the pool fee saved on the template"}. Meteora keeps {shareLabel(shares.meteora)} of that fee before anyone else is paid. The other {100 - METEORA_TRADING_FEE_PERCENT}% is the fee on the locked liquidity: platform {snapshot.partnerLockedLiquidity}%, creator {snapshot.creatorLockedLiquidity}%. That split is {shareLabel(shares.meteora)} Meteora, {shareLabel(Math.round((snapshot.partnerLockedLiquidity * (100 - METEORA_TRADING_FEE_PERCENT)) / 100))} platform, and {shareLabel(Math.round((snapshot.creatorLockedLiquidity * (100 - METEORA_TRADING_FEE_PERCENT)) / 100))} creator, out of the whole fee.{" "}
+                {snapshot.compoundingFeeBps > 0
+                  ? `Compounding puts ${snapshot.compoundingFeeBps / 100}% of the liquidity fee back into the pool. Meteora's ${shareLabel(shares.meteora)} still comes out first.`
+                  : ""}{" "}
                 {snapshot.partnerVestingLiquidity === 0 && snapshot.creatorVestingLiquidity === 0
                   ? "No liquidity is on a vesting schedule. The locked tokens and the locked quote stay in the pool. The position cannot be withdrawn."
                   : `Liquidity vesting is on: platform ${snapshot.partnerVestingLiquidity}%, creator ${snapshot.creatorVestingLiquidity}%. The permanent locked share still cannot be withdrawn.`}

@@ -4,6 +4,7 @@ import { DBC_PROGRAM_ID, explorerAccount, rpcUrl, type ClusterName } from "@/lib
 import { formatMoney } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { readRecord } from "@/lib/record";
+import { readCopy } from "@/lib/record-copy";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { SaleTrade } from "@/components/SaleTrade";
 import { creatorSalePercent, ESCROW_PROGRAM, readListing, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
@@ -23,12 +24,52 @@ const POOL_MIGRATED_AT = 305;
 const POOL_FINISHED_AT = 344;
 
 type Sheet = {
+  name?: string;
+  description?: string;
   image?: string;
   record?: {
+    pitch?: string;
+    object?: { story?: string; name?: string; kind?: string };
+    claim?: { text?: string };
+    redemption?: { handoff?: string; declaredValue?: string; declaredUnit?: string };
     title?: { promises?: string[] };
     token?: { symbol?: string; pool?: string };
   };
 };
+
+function writtenLines(sheet: Sheet): string[] {
+  const lines = [
+    sheet.description || "",
+    sheet.record?.object?.story || "",
+    sheet.record?.pitch || "",
+    sheet.record?.claim?.text ? `Claim: ${sheet.record.claim.text}` : "",
+    sheet.record?.redemption?.handoff || "",
+    sheet.record?.redemption?.declaredValue
+      ? `Declared value: ${sheet.record.redemption.declaredValue} ${sheet.record.redemption.declaredUnit || ""}`.trim()
+      : "",
+    ...(sheet.record?.title?.promises || []),
+  ];
+  return lines.map((line) => line.trim()).filter(Boolean);
+}
+
+function attributeList(heading: string, rows: Record<string, string>) {
+  const entries = Object.entries(rows);
+  if (!entries.length) return null;
+  return (
+    <>
+      <h2>{heading}</h2>
+      <p className="note">These lines are stored on the NFT. The explorer link at the bottom opens the same account. The words there should match these words.</p>
+      <dl className="quote-slip">
+        {entries.map(([key, value]) => (
+          <div key={`${heading}-${key}`}>
+            <dt>{key}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+}
 
 async function poolSale(connection: Connection, pool: string): Promise<{ graduated: boolean; finishedAt: number } | null> {
   try {
@@ -86,11 +127,19 @@ export default async function SalePage({
       : null;
 
   let sheet: Sheet = {};
-  if (title.uri.startsWith("https://")) {
-    sheet = (await fetch(title.uri, { cache: "force-cache" })
+  const stored = recordAddress ? await readCopy(cluster, recordAddress).catch(() => null) : null;
+  if (stored) {
+    try {
+      sheet = JSON.parse(stored) as Sheet;
+    } catch {
+      sheet = { description: stored };
+    }
+  } else if (record?.uri?.startsWith("https://arweave.net/")) {
+    sheet = (await fetch(record.uri, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : {}))
       .catch(() => ({}))) as Sheet;
   }
+  const prose = writtenLines(sheet);
   const pool = record?.attributes.pool || "";
   const sale = pool ? await poolSale(connection, pool) : null;
   const snapshot = pool ? await loadPool(connection, pool).catch(() => null) : null;
@@ -105,7 +154,14 @@ export default async function SalePage({
       : null;
   const opensAt = listing && listing.graduatedAt > 0 ? listing.graduatedAt + listing.delaySeconds : 0;
   const curveOpensAt = finishedAt > 0 ? finishedAt + delay * 86_400 : 0;
-  const waitSeconds = listing && listing.delaySeconds > 0 ? listing.delaySeconds : Number.isFinite(delay) ? delay * 86_400 : 0;
+  const leftEscrow = status?.rail === "escrow" && title.exists && Boolean(status.listing) && status.owner !== status.listing;
+  const waitSeconds = leftEscrow
+    ? 0
+    : listing && listing.delaySeconds > 0
+      ? listing.delaySeconds
+      : Number.isFinite(delay)
+        ? delay * (cluster === "devnet" && status?.rail === "escrow" ? 1 : 86_400)
+        : 0;
   const waitStart = listing && listing.graduatedAt > 0 ? listing.graduatedAt : finishedAt;
   const now = Math.floor(Date.now() / 1000);
   const waitGone = waitStart > 0 ? Math.min(waitSeconds, Math.max(0, now - waitStart)) : 0;
@@ -122,7 +178,9 @@ export default async function SalePage({
       ? "The pool could not be read."
       : !graduated
         ? `The token has not graduated. The sale opens ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} after it does.`
-        : opensAt
+        : leftEscrow
+          ? "The sale finished. The title has left the escrow."
+          : opensAt
           ? `The token graduated. The sale opens ${day(opensAt)}.`
           : saleOpen
             ? `The sale is open. It opened ${day(curveOpensAt)}.`
@@ -134,6 +192,20 @@ export default async function SalePage({
     <section className="card record-create">
       <p className="eyebrow">Title sale</p>
       <h2>{title.name || "Unknown title"}</h2>
+      {attributeList("Written on this title", title.attributes)}
+      {record?.exists ? attributeList("Written on the record", record.attributes) : null}
+      {prose.length ? (
+        <>
+          <h2>The sheet</h2>
+          {prose.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </>
+      ) : (
+        <p className="note">
+          The long object story is not stored beside this test record. What you can compare is the attribute list above. Those lines are the words on the NFT.
+        </p>
+      )}
       {typeof sheet.image === "string" && sheet.image ? (
         <img src={sheet.image} alt={title.name} style={{ maxWidth: 320, borderRadius: 12 }} />
       ) : null}
