@@ -512,6 +512,9 @@ export function AssetDesk() {
         <p>
           This page creates one object with PAR. The coin on this page is always created on PAR. A token whose price rises from the first buy is a plain token, and that token is created on the home page.
         </p>
+        <p>
+          The lock is graduation. When the curve is full, the {unit} raised on the sale and the tokens still left move into a Meteora DAMM v2 pool. That pool is locked. The {unit} and those tokens stay in it.
+        </p>
         <div className="beats">
           <article>
             <strong>1. The climb</strong>
@@ -522,13 +525,13 @@ export function AssetDesk() {
           <article>
             <strong>2. The lock</strong>
             <span>
-              This is the end of the climb. The sale is full. The remaining tokens and the {unit} lock into a trading pool. They cannot be withdrawn. That is graduation.
+              The lock is graduation. The climb ends when the sale is full. Meteora moves the {unit} raised on the sale and the tokens still left into a DAMM v2 pool. DAMM v2 is the Meteora pool this page uses. The pool is locked, so the {unit} and those tokens cannot be withdrawn.
             </span>
           </article>
           <article>
             <strong>3. After the lock</strong>
             <span>
-              The coin trades from the pool price. Later buys can move it up, and later sells can move it down. The curve fee stops. Every trade pays the pool fee.
+              The coin trades from the pool price on that DAMM v2 pool. Later buys can move it up, and later sells can move it down. The curve fee stops. Every trade pays the pool fee.
             </span>
           </article>
           <article>

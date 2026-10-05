@@ -758,8 +758,9 @@ export function Desk() {
             <p>If the shelf sells out quickly, the price can already be walking up to the pool while the fee is still falling.</p>
             <h2>Graduation</h2>
             <p>
-              Graduation is when the sale is full. The remaining tokens and the {unit} lock into a trading pool.
-              They cannot be withdrawn. Later buys can move the price up, and later sells can move it down.
+              Graduation is the lock. The sale is full. The {unit} raised and the tokens still left move into a
+              Meteora DAMM v2 pool. That pool is locked, so the {unit} and those tokens cannot be withdrawn. Later
+              buys can move the price up, and later sells can move it down.
             </p>
             <p>
               The curve fee stops at graduation, even if time is left on the clock. From then on, every trade pays
@@ -778,6 +779,10 @@ export function Desk() {
         </div>
         <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
         <p>PAR on keeps buyers near one price. PAR off lets the price rise the whole way. Both end at the same lock.</p>
+        <p>
+          The lock is graduation. When the curve is full, the {unit} raised on the sale and the tokens still left
+          move into a Meteora DAMM v2 pool. That pool is locked. The {unit} and those tokens stay in it.
+        </p>
         <div className="beats pair">
           <article>
             <strong>1. The climb, PAR on</strong>
@@ -788,19 +793,19 @@ export function Desk() {
           <article>
             <strong>2. The climb, PAR off</strong>
             <span>
-              The price rises from the first token to the last. The opening price and the pool price are on the sheet, and that rise is the whole sale. Starter, Solid, Deep, and Thin then lock the {unit} printed on the card.
+              The price rises from the first token to the last. The opening price and the pool price are on the sheet, and that rise is the whole sale. Starter, Solid, Deep, and Thin put the {unit} printed on the card into that lock.
             </span>
           </article>
           <article>
             <strong>3. The lock</strong>
             <span>
-              The lock is graduation. It happens when the curve is full, with PAR on and with PAR off. Meteora moves the remaining tokens and the {unit} into a trading pool. They cannot be withdrawn. The pool opens at the pool price on the sheet.
+              The lock is graduation. It happens when the curve is full, with PAR on and with PAR off. Meteora moves the {unit} raised on the sale and the tokens still left into a DAMM v2 pool. DAMM v2 is the Meteora pool this page uses. The pool is locked, so the {unit} and those tokens cannot be withdrawn. It opens at the pool price on the sheet.
             </span>
           </article>
           <article>
             <strong>4. After the lock</strong>
             <span>
-              Trading continues from that pool price. A buy can move it up. A sell can move it down. Buy and sell here, on Meteora, and on Jupiter, Axiom, and Photon. Those screens trade this Meteora pool. The curve fee has stopped. Every trade pays the pool fee you set. The default is 0.25%.
+              Trading continues from that pool price on the DAMM v2 pool. A buy can move it up. A sell can move it down. Buy and sell here, on Meteora, and on Jupiter, Axiom, and Photon. Those screens trade this DAMM v2 pool. The curve fee has stopped. Every trade pays the pool fee you set. The default is 0.25%.
             </span>
           </article>
         </div>
