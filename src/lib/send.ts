@@ -25,6 +25,8 @@ export type PreparedTransaction = {
   feeLamports: number;
   /** 0 on the practice network, and 0 when the tip would push the transaction past the size limit. */
   tipLamports: number;
+  /** Keypairs this page holds. The wallet signs first. These sign the same message afterward. */
+  signers: Keypair[];
 };
 
 /** The practice network has no Jito block engine. A local RPC does not either. */
@@ -99,7 +101,77 @@ export async function prepareTransaction(
     lastValidBlockHeight: latest.lastValidBlockHeight,
     feeLamports: fee?.value ?? 0,
     tipLamports,
+    signers,
   };
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+/** A fresh blockhash on a copy of the reviewed transaction. The copy is what the wallet signs. */
+export function transactionForWallet(
+  prepared: PreparedTransaction,
+  blockhash: string,
+  lastValidBlockHeight: number,
+): { transaction: Transaction; expectedMessage: Uint8Array } {
+  const rebuilt = Transaction.from(prepared.transaction.serialize({ requireAllSignatures: false, verifySignatures: false }));
+  rebuilt.feePayer = prepared.transaction.feePayer;
+  rebuilt.recentBlockhash = blockhash;
+  rebuilt.lastValidBlockHeight = lastValidBlockHeight;
+  rebuilt.signatures = [];
+  const transaction = Transaction.from(rebuilt.serialize({ requireAllSignatures: false, verifySignatures: false }));
+  transaction.feePayer = rebuilt.feePayer;
+  transaction.lastValidBlockHeight = lastValidBlockHeight;
+  return { transaction, expectedMessage: Uint8Array.from(transaction.serializeMessage()) };
+}
+
+/**
+ * Rejects a wallet that changed the message. Extra keypairs sign after the wallet, on that same message.
+ * Solflare returns a new transaction and does not keep signatures that were attached before it signed.
+ */
+export function lockSignedTransaction(signed: Transaction, expectedMessage: Uint8Array, signers: Keypair[]): Uint8Array {
+  if (!sameBytes(signed.serializeMessage(), expectedMessage)) {
+    throw new Error("The wallet changed the transaction. It was not sent.");
+  }
+  if (signers.length > 0) signed.partialSign(...signers);
+  try {
+    return signed.serialize();
+  } catch {
+    throw new Error("The wallet did not sign this transaction. It was not sent.");
+  }
+}
+
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function encodeBase58(bytes: Uint8Array): string {
+  let zeroes = 0;
+  while (zeroes < bytes.length && bytes[zeroes] === 0) zeroes += 1;
+  const digits = [0];
+  for (let index = zeroes; index < bytes.length; index += 1) {
+    let carry = bytes[index];
+    for (let place = 0; place < digits.length; place += 1) {
+      carry += digits[place] << 8;
+      digits[place] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
+  }
+  let out = "1".repeat(zeroes);
+  for (let index = digits.length - 1; index >= 0; index -= 1) out += BASE58[digits[index]];
+  return out;
+}
+
+function payerSignature(raw: Uint8Array): string {
+  if (raw[0] < 1 || raw.length < 65) throw new Error("The wallet did not sign this transaction. It was not sent.");
+  return encodeBase58(raw.subarray(1, 65));
 }
 
 async function relayJito(raw: Uint8Array): Promise<string> {
@@ -118,20 +190,22 @@ export async function sendPrepared(
   prepared: PreparedTransaction,
   signTransaction: (transaction: Transaction) => Promise<Transaction>,
 ): Promise<string> {
-  const signed = await signTransaction(prepared.transaction);
-  const raw = signed.serialize();
-  let signature = "";
-  if (prepared.tipLamports > 0) {
-    signature = await relayJito(raw).catch(() => "");
-  }
-  if (!signature) {
-    signature = await connection.sendRawTransaction(raw, { skipPreflight: false });
+  const latest = await connection.getLatestBlockhash("confirmed");
+  const ready = transactionForWallet(prepared, latest.blockhash, latest.lastValidBlockHeight);
+  const signed = await signTransaction(ready.transaction);
+  const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
+  const signature = payerSignature(raw);
+  let relayed = "";
+  if (prepared.tipLamports > 0) relayed = await relayJito(raw).catch(() => "");
+  if (relayed !== signature) {
+    const sent = await connection.sendRawTransaction(raw, { skipPreflight: false });
+    if (sent !== signature) throw new Error("The network returned a different signature. It was not confirmed.");
   }
   await connection.confirmTransaction(
     {
       signature,
-      blockhash: prepared.blockhash,
-      lastValidBlockHeight: prepared.lastValidBlockHeight,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
     },
     "confirmed",
   );
