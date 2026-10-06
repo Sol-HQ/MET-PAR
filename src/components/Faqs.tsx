@@ -111,7 +111,7 @@ export function Faqs() {
         </p>
         <p>
           Starter, Solid, and Deep are one shelf at three locks: $10,000, $25,000, and $50,000, or 10, 25, and 50
-          SOL. PAR starts on. The share buttons move the price. The lock stays.
+          SOL. PAR starts on. The sliders move the price. The lock stays.
         </p>
         <p>
           Thin is a $750 curve, or 1 SOL. On the real network, $750 is the smallest USDC curve Meteora opens by

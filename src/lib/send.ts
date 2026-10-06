@@ -54,13 +54,21 @@ function resign(transaction: Transaction, signers: Keypair[]) {
   if (signers.length > 0) transaction.partialSign(...signers);
 }
 
-/** Null when the packet is already past the 1232 byte limit. web3.js throws instead of returning the long buffer. */
-function packetBytes(transaction: Transaction): number | null {
+/** The serialized size, including when web3.js refuses to return a packet over 1232 bytes. */
+export function transactionBytes(transaction: Transaction): number | null {
   try {
     return transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).length;
-  } catch {
-    return null;
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "";
+    const match = /Transaction too large: (\d+) > \d+/.exec(message);
+    return match ? Number(match[1]) : null;
   }
+}
+
+/** Null when the packet is already past the 1232 byte limit. web3.js throws instead of returning the long buffer. */
+function packetBytes(transaction: Transaction): number | null {
+  const bytes = transactionBytes(transaction);
+  return bytes !== null && bytes <= TX_BYTES ? bytes : null;
 }
 
 export async function prepareTransaction(

@@ -385,6 +385,10 @@ label .note { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
 .curve-sketch svg { width: 100%; height: auto; display: block; }
 .curve-sketch line { stroke: var(--line); stroke-width: 1; }
 .curve-sketch line.mark { stroke: var(--blue); stroke-dasharray: 4 4; }
+.curve-sketch line.pool { stroke: var(--orange); stroke-dasharray: 3 4; stroke-width: 1.5; }
+.curve-sketch line.graduation { stroke: var(--pine); stroke-width: 1.5; }
+.curve-sketch text.pool { fill: var(--orange); }
+.curve-sketch text.graduation { fill: var(--pine); }
 .curve-sketch polyline {
   fill: none;
   stroke: var(--orange);

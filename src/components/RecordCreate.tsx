@@ -20,7 +20,7 @@ import {
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
-import { landingCost, prepareTransaction, sendPrepared } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
 import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
@@ -106,12 +106,10 @@ function keepSheet(rows: { key: string; value: string }[], omit: string[]) {
   return kept;
 }
 
-/** Other traits can come off. The full sheet link stays. */
+/** Other traits can come off. The full sheet link and the two hashes stay until nothing else can. */
 const DROP_BEFORE_SHEET = [
   "auction",
   "burned",
-  "image sha256",
-  "sheet sha256",
   "serial",
   "maker",
   "declared",
@@ -126,6 +124,8 @@ const DROP_BEFORE_SHEET = [
   "title",
   "record",
   "sale",
+  "image sha256",
+  "sheet sha256",
 ];
 
 type Progress = { label: string; done: boolean; link?: string };
@@ -473,7 +473,8 @@ export function RecordCreate({
         let current = rows;
         for (;;) {
           const prepared = await prepareTransaction(connection, payerKey, build(current), [signer]);
-          const bytes = prepared.transaction.serialize({ requireAllSignatures: false }).length;
+          const bytes = transactionBytes(prepared.transaction);
+          if (bytes === null) throw new Error(`The ${label} could not be measured.`);
           if (bytes <= 1232) return { prepared, bytes, omitted };
           const drop = DROP_BEFORE_SHEET.find((key) => current.some((row) => row.key === key));
           if (!drop) throw new Error(`The ${label} is ${bytes} bytes with the full sheet link. The limit is 1232.`);
@@ -600,6 +601,11 @@ export function RecordCreate({
           : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
         `Record rent: ${formatLamports(recordRent)}. ${landingCost(recordPrepared)} Record transaction: ${recordBytes} of 1232 bytes.`,
         `Title rent: ${formatLamports(titleRent)}. ${landingCost(titlePrepared)} Title transaction: ${titleBytes} of 1232 bytes.`,
+        ...(recordFit.omitted.length || titleFit.omitted.length
+          ? [
+              `Some short fields stay off the NFT so the transaction fits in 1232 bytes. Those words stay on the Arweave sheet. Left off the record: ${recordFit.omitted.join(", ") || "none"}. Left off the title: ${titleFit.omitted.join(", ") || "none"}.`,
+            ]
+          : []),
         "The record locks at creation. Its name, link, and attributes cannot be changed, and no plugin can be added. The vault never burns it.",
         "The title locks at creation too. Nobody can change its name, link, or attributes. It can only be moved by whoever holds it.",
       ];

@@ -30,6 +30,7 @@ import {
   memeLockBounds,
   parForLockedRaise,
   poolForMigratingShare,
+  shelfPriceBand,
   priceField,
   shareMarkFor,
   type LaunchChoice,
@@ -260,6 +261,18 @@ export function Desk() {
     () => (presetLock ? parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra, curveReserve) : null),
     [presetLock, raise, shelfShare, quoteKind, quoteExtra, curveReserve],
   );
+  const shelfBand = useMemo(
+    () => (presetLock ? shelfPriceBand(raise, quoteKind, quoteExtra, curveReserve) : []),
+    [presetLock, raise, quoteKind, quoteExtra, curveReserve],
+  );
+  const parSpan = shelfBand.reduce<{ share: number; par: number }[]>((ends, row) => {
+    if (ends.length === 0) return [row, row];
+    return [row.par < ends[0].par ? row : ends[0], row.par > ends[1].par ? row : ends[1]];
+  }, []);
+  const poolSpan = shelfBand.reduce<{ share: number; pool: number }[]>((ends, row) => {
+    if (ends.length === 0) return [row, row];
+    return [row.pool < ends[0].pool ? row : ends[0], row.pool > ends[1].pool ? row : ends[1]];
+  }, []);
   const shownPar = lockedPrices ? plainDecimal(lockedPrices.par, 18) : parText;
   const shownPool = lockedPrices ? plainDecimal(lockedPrices.pool, 18) : poolText;
   const migratePercent = onPar ? undefined : shareMarkFor(migrateText).percent;
@@ -473,6 +486,17 @@ export function Desk() {
     setShareError("");
     shareDriver.current = from;
     setPoolText(priceField(pool));
+  }
+
+  function shareFromBand(field: "par" | "pool", value: number) {
+    if (shelfBand.length === 0) return;
+    let best = shelfBand[0];
+    for (const row of shelfBand) {
+      if (Math.abs(row[field] - value) < Math.abs(best[field] - value)) best = row;
+    }
+    shareDriver.current = "prices";
+    setShareError("");
+    setShelfShare(best.share);
   }
 
   useEffect(() => {
@@ -1319,7 +1343,7 @@ export function Desk() {
               </strong>
               <span>
                 {onPar
-                  ? "PAR is on. One billion tokens. The prices below are the ones that lock this amount. The share buttons move the price. The lock stays."
+                  ? "PAR is on. One billion tokens. The prices below are the ones that lock this amount. The sliders move the price. The lock stays."
                   : quoteKind === "other"
                     ? `One billion tokens. The price climbs from the open to the pool and locks about ${grouped(item.raise)} ${unit}.`
                     : item.detail}
@@ -1366,7 +1390,7 @@ export function Desk() {
             </strong>
             <span>
               {onPar
-                ? "PAR is on. The prices below are the ones that lock this amount. The share buttons move the price. The lock stays."
+                ? "PAR is on. The prices below are the ones that lock this amount. The sliders move the price. The lock stays."
                 : quoteKind === "sol"
                   ? "A 1 SOL curve. A practice wallet can fill it. On the real network this is under 10 SOL, so someone signs once to open the trading pool. Turn PAR on for the shelf."
                   : quoteKind === "other"
@@ -1511,7 +1535,25 @@ export function Desk() {
                 <span className="field-error">{customMarks.par}</span>
               ) : null}
               {preset !== "custom" ? (
-                <span className="note">These prices keep the lock printed on the card. The share buttons move the price. The lock stays.</span>
+                <span className="note">These prices keep the lock printed on the card. The sliders and the share buttons move the price. The lock stays.</span>
+              ) : null}
+              {parSpan.length === 2 && parSpan[0].par !== parSpan[1].par ? (
+                <>
+                  <input
+                    type="range"
+                    min={parSpan[0].par}
+                    max={parSpan[1].par}
+                    step="any"
+                    value={Math.min(parSpan[1].par, Math.max(parSpan[0].par, Number(shownPar) || parSpan[0].par))}
+                    aria-label="How far par can move"
+                    aria-valuemin={parSpan[0].par}
+                    aria-valuemax={parSpan[1].par}
+                    onChange={(event) => shareFromBand("par", Number(event.target.value))}
+                  />
+                  <span className="note">
+                    {parSpan[0].share}% is {plainDecimal(parSpan[0].par, 10)} {unit}. {parSpan[1].share}% is {plainDecimal(parSpan[1].par, 10)} {unit}.
+                  </span>
+                </>
               ) : null}
               {quoteKind === "sol" && !customMarks.par ? <span className="note">{solDollarHint(shownPar, solUsd)}</span> : null}
             </label>
@@ -1529,6 +1571,24 @@ export function Desk() {
                 }}
               />
               {customMarks.pool ? <span className="field-error">{customMarks.pool}</span> : null}
+              {poolSpan.length === 2 && poolSpan[0].pool !== poolSpan[1].pool ? (
+                <>
+                  <input
+                    type="range"
+                    min={poolSpan[0].pool}
+                    max={poolSpan[1].pool}
+                    step="any"
+                    value={Math.min(poolSpan[1].pool, Math.max(poolSpan[0].pool, Number(shownPool) || poolSpan[0].pool))}
+                    aria-label="How far the pool price can move"
+                    aria-valuemin={poolSpan[0].pool}
+                    aria-valuemax={poolSpan[1].pool}
+                    onChange={(event) => shareFromBand("pool", Number(event.target.value))}
+                  />
+                  <span className="note">
+                    {poolSpan[0].share}% is {plainDecimal(poolSpan[0].pool, 10)} {unit}. {poolSpan[1].share}% is {plainDecimal(poolSpan[1].pool, 10)} {unit}.
+                  </span>
+                </>
+              ) : null}
               {quoteKind === "sol" && !customMarks.pool ? <span className="note">{solDollarHint(shownPool, solUsd)}</span> : null}
             </label>
           </>
@@ -1551,6 +1611,29 @@ export function Desk() {
                 }}
               />
               {shareError ? <span className="field-error">{shareError}</span> : null}
+              <input
+                type="range"
+                min={SHARE_PERCENT_LOW}
+                max={SHARE_PERCENT_HIGH}
+                step={1}
+                value={Math.min(SHARE_PERCENT_HIGH, Math.max(SHARE_PERCENT_LOW, Math.round(preset !== "custom" ? shelfShare : Number(sharePercentText) || 45)))}
+                aria-label="How far the migrating share can move"
+                aria-valuemin={SHARE_PERCENT_LOW}
+                aria-valuemax={SHARE_PERCENT_HIGH}
+                onChange={(event) => {
+                  const percent = Number(event.target.value);
+                  if (preset !== "custom") {
+                    shareDriver.current = "prices";
+                    setShareError("");
+                    setShelfShare(percent);
+                    return;
+                  }
+                  applySharePercent(percent, "prices");
+                }}
+              />
+              <span className="note">
+                {SHARE_PERCENT_LOW}% is the low end. The pool finishes at almost double par. {SHARE_PERCENT_HIGH}% is the high end, just above the 10% shelf.
+              </span>
             </label>
             <div className="choices" role="group" aria-label="Share of the supply that migrates">
               {SHARE_PRESETS.map((percent) => (
@@ -1588,9 +1671,9 @@ export function Desk() {
             </label>
             <span className="note">
               {preset !== "custom"
-                ? "The share moves the price. The lock stays the amount printed on the card. 35% finishes at almost double par. 48% finishes just above the 10% shelf."
+                ? "The share moves the price. The lock stays the amount printed on the card. The four buttons are shortcuts along the slider."
                 : picture.ok
-                  ? `These prices lock ${percentField(picture.migratedPercent)}% of the supply, ${grouped(picture.migratedTokens)} tokens, because the pool price is ${(Number(poolText) / Number(parText)).toLocaleString("en-US", { maximumFractionDigits: 2 })} times par. Type any whole percent from 35 to 48. The four buttons are shortcuts. 35% finishes at almost double par. 48% finishes just above the 10% shelf.`
+                  ? `These prices lock ${percentField(picture.migratedPercent)}% of the supply, ${grouped(picture.migratedTokens)} tokens, because the pool price is ${(Number(poolText) / Number(parText)).toLocaleString("en-US", { maximumFractionDigits: 2 })} times par. The slider runs from ${SHARE_PERCENT_LOW}% to ${SHARE_PERCENT_HIGH}%. The four buttons are shortcuts.`
                   : "Set par and the pool price. The share fills from those prices."}
             </span>
           </>

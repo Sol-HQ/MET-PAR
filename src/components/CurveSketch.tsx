@@ -1,17 +1,14 @@
 import type { LaunchChart } from "@/lib/launch";
 
-function points(values: number[], width: number, height: number, left: number, right: number, top: number, bottom: number): string {
+function placed(values: number[], width: number, height: number, left: number, right: number, top: number, bottom: number): { x: number; y: number }[] {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min;
   const spanCount = Math.max(values.length - 1, 1);
-  return values
-    .map((value, index) => {
-      const x = left + (index / spanCount) * (width - left - right);
-      const y = span === 0 ? top + (height - top - bottom) / 2 : top + (1 - (value - min) / span) * (height - top - bottom);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  return values.map((value, index) => ({
+    x: left + (index / spanCount) * (width - left - right),
+    y: span === 0 ? top + (height - top - bottom) / 2 : top + (1 - (value - min) / span) * (height - top - bottom),
+  }));
 }
 
 function Plot({
@@ -24,6 +21,8 @@ function Plot({
   endLabel,
   markAt,
   label,
+  poolMark,
+  aside,
 }: {
   values: number[];
   width: number;
@@ -34,23 +33,47 @@ function Plot({
   endLabel: string;
   markAt: number | null;
   label: string;
+  poolMark: boolean;
+  aside?: string;
 }) {
   const left = 16;
-  const right = 132;
-  const top = 18;
+  const right = 148;
+  const top = 28;
   const bottom = 32;
-  const line = points(values, width, height, left, right, top, bottom);
+  const spots = placed(values, width, height, left, right, top, bottom);
+  const line = spots.map((spot) => `${spot.x.toFixed(1)},${spot.y.toFixed(1)}`).join(" ");
+  const last = spots[spots.length - 1];
+  const first = spots[0];
   const markX = markAt === null ? null : left + (markAt / 100) * (width - left - right);
+  const flat = startLabel === endLabel;
   return (
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}>
       <line x1={left} y1={top} x2={left} y2={height - bottom} />
       <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} />
       {markX !== null ? <line className="mark" x1={markX} y1={top} x2={markX} y2={height - bottom} /> : null}
+      {poolMark ? (
+        <>
+          <line className="pool" x1={left} y1={last.y} x2={last.x} y2={last.y} />
+          <line className="graduation" x1={last.x} y1={top} x2={last.x} y2={height - bottom} />
+        </>
+      ) : null}
       <polyline points={line} />
-      {startLabel === endLabel ? (
-        <text x={width - right + 10} y={top + (height - top - bottom) / 2 + 4}>
+      {flat ? (
+        <text x={width - right + 10} y={last.y + 4}>
           {endLabel}
         </text>
+      ) : poolMark ? (
+        <>
+          <text className="pool" x={width - right + 10} y={Math.max(top - 8, last.y - 6)}>
+            Pool price
+          </text>
+          <text className="pool" x={width - right + 10} y={Math.max(top + 6, last.y + 8)}>
+            {endLabel}
+          </text>
+          <text x={width - right + 10} y={first.y + 4}>
+            {startLabel}
+          </text>
+        </>
       ) : (
         <>
           <text x={width - right + 10} y={top + 4}>
@@ -64,9 +87,14 @@ function Plot({
       <text x={left} y={height - 8}>
         {leftLabel}
       </text>
-      <text x={width - right} y={height - 8} textAnchor="end">
+      <text className={poolMark ? "graduation" : undefined} x={poolMark ? last.x - 4 : width - right} y={height - 8} textAnchor="end">
         {rightLabel}
       </text>
+      {aside ? (
+        <text className="graduation" x={width - right + 10} y={height - 8}>
+          {aside}
+        </text>
+      ) : null}
     </svg>
   );
 }
@@ -89,11 +117,13 @@ export function CurveSketch({ chart }: { chart: LaunchChart | null }) {
         width={640}
         height={220}
         leftLabel="First token"
-        rightLabel="Last token sold"
+        rightLabel="Graduation"
         startLabel={chart.openLabel}
         endLabel={chart.endLabel}
         markAt={chart.shelfAt}
         label={chart.line}
+        poolMark
+        aside={chart.graduationLabel}
       />
       <h3>The fee clock</h3>
       <p>{chart.feeLine}</p>
@@ -107,6 +137,7 @@ export function CurveSketch({ chart }: { chart: LaunchChart | null }) {
         endLabel={`${chart.feePercents[0]}%`}
         markAt={null}
         label={chart.feeLine}
+        poolMark={false}
       />
     </section>
   );

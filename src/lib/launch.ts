@@ -642,6 +642,29 @@ export function poolForMigratingShare(par: number, percent: number): number | nu
   return par * best;
 }
 
+export type ShelfPoint = { share: number; par: number; pool: number };
+
+const shelfBandCache = new Map<string, ShelfPoint[]>();
+
+/** Every whole share from 35% to 48%, with the par and pool price that lock `raise`. */
+export function shelfPriceBand(
+  raise: number,
+  kind: QuoteKind = "usdc",
+  extra?: QuoteExtra,
+  reserve: CreatorReserve = NO_RESERVE,
+): ShelfPoint[] {
+  const key = [raise, kind, extra?.decimals ?? "", extra?.unit ?? "", reserve.tokens, reserve.cliffSeconds, reserve.releaseSeconds, reserve.periods].join("|");
+  const cached = shelfBandCache.get(key);
+  if (cached) return cached;
+  const rows: ShelfPoint[] = [];
+  for (let share = SHARE_PERCENT_LOW; share <= SHARE_PERCENT_HIGH; share += 1) {
+    const prices = parForLockedRaise(raise, share, kind, extra, reserve);
+    if (prices) rows.push({ share, par: prices.par, pool: prices.pool });
+  }
+  shelfBandCache.set(key, rows);
+  return rows;
+}
+
 /** Par and pool price for a preset card. The quote that locks stays `raise`. The share picks the shape. */
 export function parForLockedRaise(
   raise: number,
@@ -811,6 +834,8 @@ export type LaunchChart = {
   prices: number[];
   openLabel: string;
   endLabel: string;
+  /** Quote that fills the curve and opens the pool. */
+  graduationLabel: string;
   /** Percent of tokens sold where a shelf ends. Empty when the price climbs the whole way. */
   shelfAt: number | null;
   line: string;
@@ -900,6 +925,7 @@ export function sampleLaunchChart(
     const end = getPriceFromSqrtPrice(spans[spans.length - 1].hi, BASE_DECIMALS, decimals);
     const openLabel = tokenPrice(open, kind, extra);
     const endLabel = tokenPrice(end, kind, extra);
+    const graduationLabel = formatQuote(uiRaise(config.migrationQuoteThreshold, kind, extra), kind, extra);
     const shelfPrice = getPriceFromSqrtPrice(spans[0].hi, BASE_DECIMALS, decimals).toNumber();
     const openNumber = open.toNumber();
     const shelfLift = openNumber > 0 ? shelfPrice / openNumber : 0;
@@ -907,8 +933,8 @@ export function sampleLaunchChart(
     const shelfAt = spans.length > 1 && shelfLift > 1.05 && shelfLift < 1.16 ? Math.round(shelfShare * 10) / 10 : null;
     const line =
       shelfAt === null
-        ? `The price rises from ${openLabel} to ${endLabel} as the tokens are bought.`
-        : `${shelfAt}% of the tokens buyers receive stay within 10% of ${openLabel}. The last slice finishes at ${endLabel}.`;
+        ? `The price rises from ${openLabel} to the pool price ${endLabel}. Graduation locks ${graduationLabel}.`
+        : `${shelfAt}% of the tokens buyers receive stay within 10% of ${openLabel}. The last slice reaches the pool price ${endLabel}. Graduation locks ${graduationLabel}.`;
     const fee = config.poolFees.baseFee;
     const periods = Number(fee.firstFactor);
     const cliff = new BN(fee.cliffFeeNumerator.toString());
@@ -932,7 +958,7 @@ export function sampleLaunchChart(
         : shape?.straightFall
           ? `The fee steps from ${firstFee}% to ${lastFee}% over ${feeDecayLabel(feeDurationSeconds)}.`
           : `The fee falls on a curve from ${firstFee}% to ${lastFee}% over ${feeDecayLabel(feeDurationSeconds)}.`;
-    return { prices, openLabel, endLabel, shelfAt, line, feePercents, feeLine };
+    return { prices, openLabel, endLabel, graduationLabel, shelfAt, line, feePercents, feeLine };
   } catch {
     return null;
   }
