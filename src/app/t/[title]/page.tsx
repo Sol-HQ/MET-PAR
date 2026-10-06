@@ -35,31 +35,15 @@ type Sheet = {
   promises?: string[];
   record?: {
     pitch?: string;
-    object?: { story?: string; name?: string; kind?: string };
+    object?: { story?: string; name?: string; kind?: string; existsNow?: boolean; holder?: string; where?: string };
     claim?: { text?: string };
     redemption?: { handoff?: string; declaredValue?: string; declaredUnit?: string };
     title?: { promises?: string[] };
-    token?: { symbol?: string; pool?: string };
+    token?: { name?: string; symbol?: string; supply?: string };
   };
 };
 
-function writtenLines(sheet: Sheet): string[] {
-  const lines = [
-    sheet.description || "",
-    sheet.claim ? `Claim: ${sheet.claim}` : "",
-    sheet.handoff || "",
-    ...(sheet.promises || []),
-    sheet.record?.object?.story || "",
-    sheet.record?.pitch || "",
-    sheet.record?.claim?.text ? `Claim: ${sheet.record.claim.text}` : "",
-    sheet.record?.redemption?.handoff || "",
-    sheet.record?.redemption?.declaredValue
-      ? `Declared value: ${sheet.record.redemption.declaredValue} ${sheet.record.redemption.declaredUnit || ""}`.trim()
-      : "",
-    ...(sheet.record?.title?.promises || []),
-  ];
-  return lines.map((line) => line.trim()).filter(Boolean);
-}
+type SaleKind = "paired" | "rwa" | "token";
 
 async function firstSeen(connection: Connection, address: string): Promise<{ signature: string; at: number | null } | null> {
   if (!ADDRESS.test(address)) return null;
@@ -78,25 +62,6 @@ async function firstSeen(connection: Connection, address: string): Promise<{ sig
   } catch {
     return null;
   }
-}
-
-function attributeList(heading: string, rows: Record<string, string>) {
-  const entries = Object.entries(rows);
-  if (!entries.length) return null;
-  return (
-    <>
-      <h2>{heading}</h2>
-      <p className="note">These lines are stored on the NFT. The explorer link at the bottom opens the same account. The words there should match these words.</p>
-      <dl className="quote-slip">
-        {entries.map(([key, value]) => (
-          <div key={`${heading}-${key}`}>
-            <dt>{key}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </>
-  );
 }
 
 function day(seconds: number): string {
@@ -157,7 +122,6 @@ export default async function SalePage({
       .then((response) => (response.ok ? response.json() : {}))
       .catch(() => ({}))) as Sheet;
   }
-  const prose = writtenLines(sheet);
   const [recordMint, titleMint] = await Promise.all([
     firstSeen(connection, recordAddress),
     firstSeen(connection, address),
@@ -272,27 +236,176 @@ export default async function SalePage({
           ? "The creator wallet holds this title."
           : `The wallet ${shortAddress(title.owner)} holds this title.`;
   const vault = record?.attributes.vault || RECORD_VAULT[cluster];
-  const objectName = sheet.name || sheet.record?.object?.name || title.name || "This object";
+  const tokenName = sheet.record?.token?.name || snapshot?.name || (symbol !== "the token" ? symbol : "This token");
+  const namedObject = (sheet.record?.object?.name || sheet.name || "").trim();
+  const objectKind = (sheet.record?.object?.kind || "").trim();
+  const story = (sheet.record?.object?.story || "").trim();
+  const pitch = (sheet.record?.pitch || "").trim();
+  const claimText = (sheet.record?.claim?.text || sheet.claim || "").trim();
+  const handoffText = (sheet.record?.redemption?.handoff || sheet.handoff || "").trim();
+  const existsNow = sheet.record?.object?.existsNow;
+  const objectHolder = (sheet.record?.object?.holder || "").trim();
+  const where = (sheet.record?.object?.where || "").trim();
+  const picture = typeof sheet.image === "string" ? sheet.image.trim() : "";
+  const distinctObject = Boolean(namedObject) && namedObject !== tokenName && namedObject !== symbol;
+  const hasObject = Boolean(
+    distinctObject || story || objectKind || objectHolder || where || claimText || handoffText || picture || existsNow === true || existsNow === false,
+  );
+  const saleKind: SaleKind = noCoin ? "rwa" : hasObject ? "paired" : "token";
+  const pageTitle = saleKind === "rwa" ? namedObject || title.name || "Real-world asset" : tokenName;
+  const shownState = sold && saleKind === "token" ? "Claimed." : stateLine;
+  const tokenLabel = symbol && symbol !== "the token" && symbol !== tokenName ? `${tokenName} (${symbol})` : tokenName;
+  const showPitch = Boolean(pitch) && !story && pitch !== story;
+  const showClaim = Boolean(claimText) && !story.includes(claimText);
+  const showHandoff = Boolean(handoffText) && !story.includes(handoffText);
+  const burnLine =
+    Number.isFinite(burn) && saleKind !== "rwa"
+      ? status?.rail === "escrow"
+        ? `${burn}% of the price is burned, ${creatorSalePercent(burn)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+        : `The creator is paid the full price and burns ${burn}% of it.`
+      : "";
+  const sentence = (value: string) => (value.endsWith(".") ? value : `${value}.`);
+  const tokenSentence = [
+    `${tokenLabel} trades on a curve${snapshot ? `, quoted in ${snapshot.quoteSymbol}` : ""}.`,
+    snapshot?.supply ? `The supply is ${Number(snapshot.supply).toLocaleString("en-US")}.` : "",
+    saleKind === "paired"
+      ? "It is not a share of the RWA, and it pays nothing. A buyer uses this token to pay for the title."
+      : "Buys and sells on the token page move the price.",
+    burnLine,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const rwaSentence = [
+    `The RWA ${saleKind === "paired" ? "paired with this token" : "for sale here"} is ${namedObject || "this object"}.`,
+    objectKind ? sentence(objectKind) : "",
+    existsNow === true ? "It exists now." : existsNow === false ? "It does not exist yet." : "",
+    objectHolder
+      ? `${objectHolder} has it${where ? `, ${where.charAt(0).toLowerCase()}${where.slice(1)}` : ""}${where?.endsWith(".") || !where ? "" : "."}`
+      : where
+        ? sentence(where)
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <section className="card record-create">
       <p className="eyebrow">Sales page</p>
-      <h2>{objectName}</h2>
-      <p className="object-status">{stateLine}</p>
+      <h2>{pageTitle}</h2>
+      <p className="object-status">{shownState}</p>
       <p>
-        {noCoin
-          ? `A buyer pays for this title in ${symbol}. The sale is a fixed price or a bid. The creator sets how long before it opens.`
-          : `This token${symbol && symbol !== "the token" ? `, ${symbol},` : ""} is attached to this real-world asset.`}{" "}
-        {holderLine} {saleLine}{" "}
-        {pool ? <Link href={poolPath(pool, cluster)}>Open the coin page</Link> : null}
+        {saleKind === "paired"
+          ? `${tokenLabel} is the token. It is paired with a real-world asset.`
+          : saleKind === "rwa"
+            ? `This is a real-world asset. It is not paired with its own token. A buyer pays in ${symbol}.`
+            : `${tokenLabel} is a token. It is not paired with a real-world asset.`}
       </p>
-      <ObjectPicture src={typeof sheet.image === "string" ? sheet.image : ""} alt={objectName} />
+      {stateLine !== saleLine ? <p className="note">{holderLine} {saleLine}</p> : <p className="note">{holderLine}</p>}
+      {saleKind !== "rwa" ? (
+        <>
+          <h2>The token</h2>
+          <p>
+            {tokenSentence}
+            {pool ? (
+              <>
+                {" "}
+                <Link href={poolPath(pool, cluster)}>Open the token page</Link>.
+              </>
+            ) : null}
+          </p>
+          {snapshot?.needsLocker ? (
+            <LockReady
+              pool={pool}
+              symbol={snapshot.symbol}
+              fullAt={`${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol}`}
+            />
+          ) : null}
+          {snapshot?.canMigrate && snapshot.dammConfig ? (
+            <OpenPool
+              pool={pool}
+              dammConfig={snapshot.dammConfig}
+              quoteSymbol={snapshot.quoteSymbol}
+              feeBps={snapshot.migrationFeeBps}
+            />
+          ) : null}
+          {snapshot ? (
+            <section className="quotes" aria-label="This token">
+              <article>
+                <h2>Price</h2>
+                <p className="figure">
+                  {snapshot.price} <span>{snapshot.quoteSymbol}</span>
+                </p>
+                <p className="note">Live curve price.</p>
+              </article>
+              {cap ? (
+                <article>
+                  <h2>Market cap</h2>
+                  <p className="figure">
+                    {cap} <span>{snapshot.quoteSymbol}</span>
+                  </p>
+                  <p className="note">Price times the whole supply.</p>
+                </article>
+              ) : null}
+              <article>
+                <h2>{snapshot.isMigrated ? "Graduated" : "Graduation"}</h2>
+                <p className="figure">
+                  {fill.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  <span>%</span>
+                </p>
+                <div className="meter" aria-hidden="true">
+                  <span style={{ width: `${fill}%` }} />
+                </div>
+                <p className="note">
+                  {snapshot.needsLocker
+                    ? "The curve is full. Trading is stopped. The gold box takes the lock signature. Any wallet can pay the rent."
+                    : snapshot.canMigrate
+                      ? "The creator supply is locked. The trading pool still needs a signature."
+                      : snapshot.isMigrated
+                        ? "The curve is full and the trading pool is open."
+                        : `${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`}
+                </p>
+              </article>
+              {waitSeconds > 0 ? (
+                <article>
+                  <h2>Sale wait</h2>
+                  <p className="figure">
+                    {waitStart > 0 ? waitPercent.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "0"}
+                    <span>%</span>
+                  </p>
+                  <div className="meter" aria-hidden="true">
+                    <span style={{ width: `${waitStart > 0 ? waitPercent : 0}%` }} />
+                  </div>
+                  <p className="note">
+                    {waitStart > 0
+                      ? leftWords(waitSeconds - waitGone)
+                      : `These ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} start when the token graduates. The title stays where it is until then.`}
+                  </p>
+                </article>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      ) : null}
+      {saleKind !== "token" ? (
+        <>
+          <h2>The RWA</h2>
+          <p>{rwaSentence}</p>
+          {showPitch ? <p>{pitch}</p> : null}
+          <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
+          {story ? <p>{story}</p> : null}
+          {showClaim ? <p>The holder of the title can claim this RWA. {claimText}</p> : null}
+          {showHandoff ? <p>{handoffText}</p> : null}
+        </>
+      ) : null}
       {sold ? (
         <>
           <h2>Claimed</h2>
           <p>
-            This title has been purchased. The handoff of the object is still the promise on the sheet. Once the title has left, this sale is finished.
-            {pool ? " The coin can still be live." : ""}
+            This title has been purchased.
+            {saleKind === "token"
+              ? " This sale is finished."
+              : " The handoff of the RWA is still the promise above. This sale is finished."}
+            {pool && saleKind !== "rwa" ? " The token can still be traded." : ""}
           </p>
         </>
       ) : null}
@@ -302,7 +415,7 @@ export default async function SalePage({
           <p className="note">
             {forSaleNow
               ? `This title is available for purchase from the PAR escrow, paid in ${symbol}.`
-              : `The PAR escrow holds this title. Purchase stays closed until ${graduated === false ? "the coin graduates and the wait ends" : "the sale opens"}.`}
+              : `The PAR escrow holds this title. Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
           </p>
           <EscrowTrade
             pageCluster={cluster}
@@ -387,162 +500,24 @@ export default async function SalePage({
           />
         </>
       ) : null}
-      <h2>How this was minted</h2>
-      <dl className="quote-slip">
-        <div>
-          <dt>When the record was minted</dt>
-          <dd>
-            {recordMint?.at ? day(recordMint.at) : "The chain did not return a mint time."}
-            {recordMint ? (
-              <>
-                {" "}
-                <a href={explorerTx(recordMint.signature, cluster)} target="_blank" rel="noreferrer">
-                  Mint transaction
-                </a>
-              </>
-            ) : null}
-          </dd>
-        </div>
-        <div>
-          <dt>When the title was minted</dt>
-          <dd>
-            {titleMint?.at ? day(titleMint.at) : "The chain did not return a mint time."}
-            {titleMint ? (
-              <>
-                {" "}
-                <a href={explorerTx(titleMint.signature, cluster)} target="_blank" rel="noreferrer">
-                  Mint transaction
-                </a>
-              </>
-            ) : null}
-          </dd>
-        </div>
-        <div>
-          <dt>Record minted to</dt>
-          <dd>
-            The program vault{vault ? ` ${vault}` : ""}. It stays frozen there.
-          </dd>
-        </div>
-        <div>
-          <dt>Title minted to</dt>
-          <dd>
-            {status?.rail === "escrow"
-              ? "The creator minted the title, then placed it in the PAR escrow."
-              : "The creator minted the title into the creator wallet."}
-          </dd>
-        </div>
-        <div>
-          <dt>Held now</dt>
-          <dd>
-            {holderLine}
-            {title.owner ? ` ${title.owner}` : ""}
-          </dd>
-        </div>
-        <div>
-          <dt>How</dt>
-          <dd>
-            Metaplex Core. The record is the master. It was minted to the program vault and frozen there, and its words are locked. The title is the one edition that can be sold. Its words are locked, and its update authority is none.
-          </dd>
-        </div>
-      </dl>
-      <h2>{title.name || "Title"}</h2>
-      {attributeList("Written on this title", title.attributes)}
-      {record?.exists ? attributeList("Written on the record", record.attributes) : null}
-      {prose.length ? (
-        <>
-          <h2>The sheet</h2>
-          {prose.map((line) => (
-            <p key={line}>{line}</p>
-          ))}
-        </>
-      ) : (
-        <p className="note">
-          The long object story is not stored beside this test record. What you can compare is the attribute list above. Those lines are the words on the NFT.
-        </p>
-      )}
+      <h2>On chain</h2>
       <p className="note">
-        {noCoin
-          ? `A buyer pays for this title in ${symbol}. The sale is a fixed price or a bid.`
-          : "This coin is a payment token and a meme. It pays for this title. The meme is the joy and heart of the object. It is not a share, and it pays nothing."}{" "}
-        {Number.isFinite(burn) && !noCoin
-          ? status?.rail === "escrow"
-            ? `${burn}% of the price is burned by the escrow, ${creatorSalePercent(burn)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
-            : `The creator is paid the full price and promised to burn ${burn}% of it.`
-          : ""}
+        The record was minted {recordMint?.at ? day(recordMint.at) : "at a time the chain did not return"}
+        {recordMint ? (
+          <>
+            {" "}
+            (<a href={explorerTx(recordMint.signature, cluster)} target="_blank" rel="noreferrer">record mint</a>)
+          </>
+        ) : null}
+        . The title was minted {titleMint?.at ? day(titleMint.at) : "at a time the chain did not return"}
+        {titleMint ? (
+          <>
+            {" "}
+            (<a href={explorerTx(titleMint.signature, cluster)} target="_blank" rel="noreferrer">title mint</a>)
+          </>
+        ) : null}
+        . The record stays in the vault{vault ? ` ${shortAddress(vault)}` : ""}. The title is the one edition that can be sold, and its words are locked.
       </p>
-      {snapshot?.needsLocker ? (
-        <LockReady
-          pool={pool}
-          symbol={snapshot.symbol}
-          fullAt={`${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol}`}
-        />
-      ) : null}
-      {snapshot?.canMigrate && snapshot.dammConfig ? (
-        <OpenPool
-          pool={pool}
-          dammConfig={snapshot.dammConfig}
-          quoteSymbol={snapshot.quoteSymbol}
-          feeBps={snapshot.migrationFeeBps}
-        />
-      ) : null}
-      {snapshot ? (
-        <section className="quotes" aria-label="This coin">
-          <article>
-            <h2>Price</h2>
-            <p className="figure">
-              {snapshot.price} <span>{snapshot.quoteSymbol}</span>
-            </p>
-            <p className="note">The live curve price. The pool page is the full coin page.</p>
-          </article>
-          {cap ? (
-            <article>
-              <h2>Market cap</h2>
-              <p className="figure">
-                {cap} <span>{snapshot.quoteSymbol}</span>
-              </p>
-              <p className="note">Price times the whole supply.</p>
-            </article>
-          ) : null}
-          <article>
-            <h2>{snapshot.isMigrated ? "Graduated" : "Graduation"}</h2>
-            <p className="figure">
-              {fill.toLocaleString("en-US", { maximumFractionDigits: 2 })}
-              <span>%</span>
-            </p>
-            <div className="meter" aria-hidden="true">
-              <span style={{ width: `${fill}%` }} />
-            </div>
-            <p className="note">
-              {snapshot.needsLocker
-                ? "The curve is full. Trading is stopped. The gold box takes the lock signature. Any wallet can pay the rent."
-                : snapshot.canMigrate
-                  ? "The creator supply is locked. The trading pool still needs a signature."
-                  : snapshot.isMigrated
-                    ? "The curve is full and the trading pool is open."
-                    : fill >= 40 && fill < 60
-                      ? `About halfway. ${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`
-                      : `${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`}
-            </p>
-          </article>
-          {waitSeconds > 0 ? (
-            <article>
-              <h2>Sale wait</h2>
-              <p className="figure">
-                {waitStart > 0 ? waitPercent.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "0"}
-                <span>%</span>
-              </p>
-              <div className="meter" aria-hidden="true">
-                <span style={{ width: `${waitStart > 0 ? waitPercent : 0}%` }} />
-              </div>
-              <p className="note">
-                {waitStart > 0
-                  ? leftWords(waitSeconds - waitGone)
-                  : `These ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} start when the coin graduates. The title stays where it is until then.`}
-              </p>
-            </article>
-          ) : null}
-        </section>
-      ) : null}
       {status?.tensor ? (
         <p className="note">
           Listed on Tensor for {formatUnits(status.tensor.amount, TOKEN_DECIMALS)}{" "}
@@ -590,12 +565,12 @@ export default async function SalePage({
       ) : null}
       <p className="note">
         {sold
-          ? "This title is claimed. The handoff remains the promise on the sheet. "
+          ? saleKind === "token"
+            ? "This title is claimed. The sale is finished. "
+            : "This title is claimed. The handoff of the RWA remains the promise above. "
           : status?.rail === "escrow"
             ? "A buyer calls the PAR escrow program from this page. "
             : "Listing and buying on this page both go through Tensor's program. "}
-        {pool ? <Link href={poolPath(pool, cluster)}>Open the pool page</Link> : null}
-        {pool ? " · " : null}
         <a href={explorerAccount(address, cluster)} target="_blank" rel="noreferrer">
           Title on the explorer
         </a>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { objectPairing, titleSentence, type AssetStanding } from "@/lib/asset-on-pool";
 import type { ClusterName } from "@/lib/constants";
 
@@ -19,19 +19,28 @@ type AssetCard = {
 };
 
 export function ObjectPicture({ src, alt, quiet = false }: { src: string; alt: string; quiet?: boolean }) {
-  const [state, setState] = useState<"pending" | "shown" | "missing">(src ? "pending" : "missing");
-  if (!src || state === "missing") return quiet ? null : <p className="note">No picture is stored for this object.</p>;
+  const ref = useRef<HTMLImageElement>(null);
+  const [missing, setMissing] = useState(!src);
+  useEffect(() => {
+    setMissing(!src);
+  }, [src]);
+  useEffect(() => {
+    const img = ref.current;
+    if (!img?.complete) return;
+    if (img.naturalWidth < 32 || img.naturalHeight < 32) setMissing(true);
+  }, [src]);
+  if (!src || missing) return quiet ? null : <p className="note">No picture is stored for this object.</p>;
   return (
     <img
+      ref={ref}
       className="object-shot"
       src={src}
       alt={alt}
-      style={{ display: state === "shown" ? "block" : "none" }}
       onLoad={(event) => {
         const img = event.currentTarget;
-        setState(img.naturalWidth >= 32 && img.naturalHeight >= 32 ? "shown" : "missing");
+        if (img.naturalWidth < 32 || img.naturalHeight < 32) setMissing(true);
       }}
-      onError={() => setState("missing")}
+      onError={() => setMissing(true)}
     />
   );
 }
