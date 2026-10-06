@@ -398,12 +398,10 @@ export function PoolBoard({
                 </Link>
                 <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin)}</p>
                 <p className="object-status">{titleSentence(asset.status)}</p>
-                {realPool(asset.pool) ? (
-                  <p>
-                    {asset.standing === "sold" ? "The token can still be traded. " : null}
-                    <Link href={poolPath(asset.pool, cluster)}>Open the token</Link>
-                  </p>
-                ) : null}
+                <p>
+                  {asset.standing === "sold" && realPool(asset.pool) ? "The token can still be traded. " : null}
+                  <Link href={asset.titleHref}>Open the sales page</Link>
+                </p>
               </article>
             ))}
           </div>

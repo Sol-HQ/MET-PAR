@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { rpcUrl, type ClusterName } from "./constants";
 import { curveSale } from "./load-pool";
 import { readCopy } from "./record-copy";
-import { RECORD_VAULT, readRecord } from "./record";
+import { readRecord } from "./record";
 import {
   ESCROW_PROGRAM,
   readListing,
@@ -56,8 +56,6 @@ type Sheet = {
   };
 };
 
-let indexCache: { cluster: ClusterName; at: number; rows: Indexed[] } | null = null;
-
 function rowsOf(value: Record<string, string>): { key: string; value: string }[] {
   return Object.entries(value).map(([key, item]) => ({ key, value: item }));
 }
@@ -102,44 +100,9 @@ async function readIds(endpoint: string, ids: string[]): Promise<Indexed[]> {
   return rows.filter((row): row is Indexed => row !== null);
 }
 
-async function vaultRecords(cluster: ClusterName, extraRecords: string[] = []): Promise<Indexed[]> {
-  const endpoint = rpcUrl(cluster);
-  if (indexCache && indexCache.cluster === cluster && Date.now() - indexCache.at < 20_000) {
-    const have = new Set(indexCache.rows.map((row) => row.record));
-    const missing = extraRecords.filter((id) => id && !have.has(id));
-    if (missing.length === 0) return indexCache.rows;
-    const added = await readIds(endpoint, missing);
-    indexCache = { cluster, at: indexCache.at, rows: [...added, ...indexCache.rows] };
-    return indexCache.rows;
-  }
-  const vault = RECORD_VAULT[cluster];
-  if (!vault) return [];
-  const ids: string[] = [];
-  for (let page = 1; page <= 5; page += 1) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "vault",
-        method: "getAssetsByOwner",
-        params: { ownerAddress: vault, page, limit: 100 },
-      }),
-    });
-    if (!response.ok) break;
-    const body = (await response.json()) as { result?: { items?: { id?: string }[] } };
-    const items = body.result?.items || [];
-    for (const item of items) {
-      if (item.id) ids.push(item.id);
-    }
-    if (items.length < 100) break;
-  }
-  for (const id of extraRecords) {
-    if (id && !ids.includes(id)) ids.unshift(id);
-  }
-  const rows = await readIds(endpoint, ids);
-  indexCache = { cluster, at: Date.now(), rows };
-  return rows;
+async function indexedRecords(cluster: ClusterName, records: string[]): Promise<Indexed[]> {
+  const ids = [...new Set(records.filter(Boolean))];
+  return readIds(rpcUrl(cluster), ids);
 }
 
 async function loadSheet(cluster: ClusterName, record: string, uri: string): Promise<Sheet> {
@@ -353,9 +316,9 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
   return { ...named, creator, coin, standing: result.standing, status: result.status };
 }
 
-/** Every titled object on this network, read from the vault that holds the records. */
+/** Titled objects saved in the index. A record that is only in the vault does not get a card. */
 export async function poolAssets(cluster: ClusterName, pool?: string, extraRecords: string[] = []): Promise<PoolAsset[]> {
-  const rows = await vaultRecords(cluster, extraRecords);
+  const rows = await indexedRecords(cluster, extraRecords);
   const matched = pool ? rows.filter((row) => row.attributes.pool === pool) : rows;
   const assets = await Promise.all(matched.map((row) => describe(cluster, row).catch(() => null)));
   return assets.filter((asset): asset is PoolAsset => asset !== null);

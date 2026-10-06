@@ -136,6 +136,12 @@ export function explorerAccount(address: string, cluster: ClusterName): string {
 export const HIDDEN_POOLS = new Set([
   "Dze24rViH4WjUHwmvBAc7pUf4thm418L3ZLLq9Tq8ktC",
   "BNrT6yHV8CQfJVc4gLERpH2RQiykVyq4vNampeBz7rFz",
+  "7mMUBzCwQC4hmftM5BGYXoA6TMrQdvm6LDENKCftu3Vq",
+  "4qBqhmfDBnXvBL7MC8F1MuBwMhMGmDD5UhkGfKA6LwEM",
+  "2rVVneFnSAZQL29rVTmUKoTsba6HbbLKuqR84rBsfpyp",
+  "CCrcE5QVyf2oBJDKKXFmKZuKZ9w69B6esxAB6YpTvHoG",
+  "4muA54PzKNKt9xVkb84y46vJTWCQeEqZgRtRzzcxQC7V",
+  "H1Gq5bQonj76XDSLKV4d137j37QzWzmRjQCkH4znzwTC",
 ]);
 
 export function explorerTx(signature: string, cluster: ClusterName): string {
