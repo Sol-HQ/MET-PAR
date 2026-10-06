@@ -57,6 +57,11 @@ export function salePath(title: string, cluster: ClusterName): string {
   return `/t/${title}${cluster === "devnet" ? "?c=devnet" : ""}`;
 }
 
+/** Practice pool links stay bare. A real-network link names the network so a fresh page loads that pool. */
+export function poolPath(pool: string, cluster: ClusterName): string {
+  return `/pool/${pool}${cluster === "devnet" ? "" : "?c=mainnet"}`;
+}
+
 export function railFor(cluster: ClusterName): TitleRail {
   return TITLE_RAIL[cluster] === "escrow" && ESCROW_PROGRAM[cluster] ? "escrow" : "creator";
 }
@@ -119,12 +124,12 @@ export function creatorPromises(input: {
         : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
       : attached
         ? `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
-        : `I will sell the title from the PAR sale page (${input.venue}). I can list it through Tensor, priced in ${pay}, or put it in the PAR escrow and sell it for an ordinary token I name there, at a fixed price or by auction. This title has no coin.`,
+        : `I will put this title up for sale from the PAR sale page (${input.venue}). I name the payment token, a fixed price or a bid, and how many days before the sale opens. I can list it through Tensor or put it in the PAR escrow.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
-        : "If I sell through Tensor, Tensor pays me the full price and PAR takes none of that sale. If I put the title in the PAR escrow, I name the token, I choose a burn from 0% to 98%, and the PAR program keeps 2%.",
+        : "If I list through Tensor, Tensor pays me the full price and PAR takes none of that sale. If I put the title in the PAR escrow, I choose a burn from 0% to 98% and the PAR program keeps 2%.",
     `I will hand the item to the holder of the title within ${input.handoffDays} days of their claim, as the handoff terms say.`,
     escrow
       ? auction
@@ -133,7 +138,7 @@ export function creatorPromises(input: {
       : "Until the sale, the title stays in my wallet or in my Tensor listing. I will not sell, move, lend, or burn it any other way. Doing so breaks my word.",
     attached
       ? "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing."
-      : `There is no coin with this title. The price is paid in ${pay}. That payment is not a share of the item, and this title pays nothing.`,
+      : `The buyer pays for this title in ${pay}. That payment buys the title.`,
     "If I break these promises, I alone am responsible. PAR is software. It does not hold, insure, or guarantee the item. The NFT on the chain is the proof. PAR keeps a copy of the proofs.",
   ];
 }
@@ -183,7 +188,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "pool", value: facts.pool },
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
-    { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
+    { key: "sale opens", value: facts.noCoin ? "the day the creator sets" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
     { key: "paid in", value: facts.noCoin ? "the token named when it is listed" : "this token only" },
     { key: "burned", value: facts.noCoin ? "0 to 98 percent if escrow. Program keeps 2 percent." : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },

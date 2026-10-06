@@ -107,7 +107,9 @@ export async function savePool(row: PoolRow): Promise<void> {
 
 export async function listPools(cluster: ClusterName | null, limit = 500): Promise<PoolRow[]> {
   const where = cluster ? `&cluster=eq.${encodeURIComponent(cluster)}` : "";
-  const response = await rest(`pools?select=cluster,pool,config&hidden=eq.false${where}&order=created_at.desc&limit=${limit}`);
+  const response = await rest(
+    `pools?select=cluster,pool,config,creator,mint,name,symbol&hidden=eq.false${where}&order=created_at.desc&limit=${limit}`,
+  );
   return (await response.json()) as PoolRow[];
 }
 

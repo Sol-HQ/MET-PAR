@@ -10,7 +10,7 @@ import { MainnetGate } from "@/components/MainnetGate";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
 import { FEE_DECAY_CHOICES, HIDDEN_POOLS } from "@/lib/constants";
-import { creatorSalePercent, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
+import { creatorSalePercent, poolPath, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
 import { formatLamports, formatMoney, rawToUi, shortAddress } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
@@ -540,7 +540,7 @@ export function AdminDesk() {
                   </h3>
                   <p>Coin. Creator {row.creator ? shortAddress(row.creator) : "unknown"}.</p>
                   <p className="note">
-                    <Link href={`/pool/${row.pool}`}>Pool {shortAddress(row.pool)}</Link>
+                    <Link href={poolPath(row.pool, cluster)}>Pool {shortAddress(row.pool)}</Link>
                     {row.mint ? `. Mint ${shortAddress(row.mint)}` : ""}
                   </p>
                 </article>
@@ -629,7 +629,7 @@ export function AdminDesk() {
                       {platformSigner ? `Claim ${waiting}` : `Claim ${waiting} with the platform wallet`}
                     </button>
                     <p className="note">
-                      <Link href={`/pool/${row.address}`}>View token</Link>
+                      <Link href={poolPath(row.address, cluster)}>View token</Link>
                     </p>
                   </article>
                 );
@@ -697,7 +697,7 @@ export function AdminDesk() {
                       </>
                     )}
                     <p className="note">
-                      <Link href={`/pool/${row.address}`}>View token</Link>
+                      <Link href={poolPath(row.address, cluster)}>View token</Link>
                     </p>
                   </article>
                 );

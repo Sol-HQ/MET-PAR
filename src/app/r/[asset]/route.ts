@@ -3,7 +3,7 @@ import { rpcUrl, type ClusterName } from "@/lib/constants";
 import { readTokenName } from "@/lib/load-pool";
 import { readCopy } from "@/lib/record-copy";
 import { PUBLIC_ORIGIN, RECORD_VAULT, readRecord, recordChecks, sha256Hex } from "@/lib/record";
-import { titleStatus } from "@/lib/title";
+import { poolPath, salePath, titleStatus } from "@/lib/title";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -55,10 +55,16 @@ export async function GET(request: Request, context: { params: Promise<{ asset: 
     name: token.name,
     symbol: token.symbol,
     description: read.exists
-      ? `A payment token and a meme. It pays for the title to one real object. The meme is the joy and heart of the object. It is not a share, and it pays nothing. Its master is ${asset}, sent to the program vault with the record sheet.`
+      ? read.attributes.coin === "none"
+        ? `One title to one object. A buyer pays in ${token.symbol || "the named token"}. The sale is a fixed price or a bid. The master is ${asset}, sent to the program vault with the record sheet.`
+        : `A payment token and a meme. It pays for the title to one real object. The meme is the joy and heart of the object. It is not a share, and it pays nothing. Its master is ${asset}, sent to the program vault with the record sheet.`
       : `Its record ${asset} has not been minted. Without the record this token is only half of the asset.`,
     image: typeof sheet.image === "string" ? sheet.image : "",
-    external_url: pool ? `${PUBLIC_ORIGIN}/pool/${pool}` : PUBLIC_ORIGIN,
+    external_url: ADDRESS.test(pool)
+      ? `${PUBLIC_ORIGIN}${poolPath(pool, cluster)}`
+      : title?.address
+        ? `${PUBLIC_ORIGIN}${salePath(title.address, cluster)}`
+        : PUBLIC_ORIGIN,
     record: {
       address: asset,
       network: cluster,

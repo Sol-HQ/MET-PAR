@@ -1,7 +1,9 @@
 import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
+import { CLAIMED_STATUS } from "@/lib/asset-on-pool";
 import { ObjectPicture } from "@/components/AssetOnPool";
+import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
@@ -10,7 +12,7 @@ import { formatMoney, shortAddress } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
-import { creatorSalePercent, ESCROW_PROGRAM, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 const TOKEN_DECIMALS = 6;
 
@@ -210,7 +212,7 @@ export default async function SalePage({
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
   const saleLine = noCoin
-    ? "The creator can list this title through Tensor, or put it in the escrow and name the token."
+    ? "The creator lists this title at a fixed price or by bid, and sets how long before the sale opens."
     : !title.exists
     ? "This title is not on chain."
     : !Number.isFinite(delay) || !Number.isFinite(burn)
@@ -251,7 +253,7 @@ export default async function SalePage({
   const stateLine = !title.exists
     ? "This title is not on chain."
     : sold
-      ? "Sold."
+      ? CLAIMED_STATUS
       : clockOver
         ? "The auction clock has ended."
         : auction && forSaleNow
@@ -284,16 +286,19 @@ export default async function SalePage({
       <p className="object-status">{stateLine}</p>
       <p>
         {noCoin
-          ? `This title has no coin. The price is paid in ${symbol}.`
+          ? `A buyer pays for this title in ${symbol}. The sale is a fixed price or a bid. The creator sets how long before it opens.`
           : `This token${symbol && symbol !== "the token" ? `, ${symbol},` : ""} is attached to this real-world asset.`}{" "}
         {holderLine} {saleLine}{" "}
-        {pool ? <Link href={`/pool/${pool}`}>Open the coin page</Link> : null}
+        {pool ? <Link href={poolPath(pool, cluster)}>Open the coin page</Link> : null}
       </p>
       <ObjectPicture src={typeof sheet.image === "string" ? sheet.image : ""} alt={objectName} />
       {sold ? (
         <>
-          <h2>Not for purchase</h2>
-          <p>This title has been sold. The purchase is closed.</p>
+          <h2>Claimed</h2>
+          <p>
+            This title has been purchased. The handoff of the object is still the promise on the sheet. Once the title has left, this sale is finished.
+            {pool ? " The coin can still be live." : ""}
+          </p>
         </>
       ) : null}
       {inEscrow && listing && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
@@ -330,6 +335,7 @@ export default async function SalePage({
         <>
           <h2>How this title sells</h2>
           <NoCoinChoice
+            pageCluster={cluster}
             escrow={<OpenEscrow pageCluster={cluster} title={address} record={recordAddress} />}
             tensor={
               <SaleTrade
@@ -362,7 +368,7 @@ export default async function SalePage({
             {tensorOpen
               ? `This title is available for purchase through Tensor's program, paid in ${symbol}.`
               : noCoin
-                ? `This title has no coin. The creator lists it through Tensor, paid in ${symbol}.`
+                ? `The creator lists this title through Tensor, paid in ${symbol}.`
                 : `The creator lists this title through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
           </p>
           <SaleTrade
@@ -460,13 +466,30 @@ export default async function SalePage({
         </p>
       )}
       <p className="note">
-        This coin is a payment token and a meme. It pays for this title. The meme is the joy and heart of the object. It is not a share, and it pays nothing.{" "}
-        {Number.isFinite(burn)
+        {noCoin
+          ? `A buyer pays for this title in ${symbol}. The sale is a fixed price or a bid.`
+          : "This coin is a payment token and a meme. It pays for this title. The meme is the joy and heart of the object. It is not a share, and it pays nothing."}{" "}
+        {Number.isFinite(burn) && !noCoin
           ? status?.rail === "escrow"
             ? `${burn}% of the price is burned by the escrow, ${creatorSalePercent(burn)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
             : `The creator is paid the full price and promised to burn ${burn}% of it.`
           : ""}
       </p>
+      {snapshot?.needsLocker ? (
+        <LockReady
+          pool={pool}
+          symbol={snapshot.symbol}
+          fullAt={`${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol}`}
+        />
+      ) : null}
+      {snapshot?.canMigrate && snapshot.dammConfig ? (
+        <OpenPool
+          pool={pool}
+          dammConfig={snapshot.dammConfig}
+          quoteSymbol={snapshot.quoteSymbol}
+          feeBps={snapshot.migrationFeeBps}
+        />
+      ) : null}
       {snapshot ? (
         <section className="quotes" aria-label="This coin">
           <article>
@@ -495,11 +518,15 @@ export default async function SalePage({
               <span style={{ width: `${fill}%` }} />
             </div>
             <p className="note">
-              {snapshot.isMigrated
-                ? "The curve is full and the trading pool is open."
-                : fill >= 40 && fill < 60
-                  ? `About halfway. ${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`
-                  : `${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`}
+              {snapshot.needsLocker
+                ? "The curve is full. Trading is stopped. The gold box takes the lock signature. Any wallet can pay the rent."
+                : snapshot.canMigrate
+                  ? "The creator supply is locked. The trading pool still needs a signature."
+                  : snapshot.isMigrated
+                    ? "The curve is full and the trading pool is open."
+                    : fill >= 40 && fill < 60
+                      ? `About halfway. ${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`
+                      : `${formatMoney(snapshot.raised, snapshot.quoteDecimals)} of ${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol} is in the curve.`}
             </p>
           </article>
           {waitSeconds > 0 ? (
@@ -568,11 +595,11 @@ export default async function SalePage({
       ) : null}
       <p className="note">
         {sold
-          ? "This sale is closed. "
+          ? "This title is claimed. The handoff remains the promise on the sheet. "
           : status?.rail === "escrow"
             ? "A buyer calls the PAR escrow program from this page. "
             : "Listing and buying on this page both go through Tensor's program. "}
-        {pool ? <Link href={`/pool/${pool}`}>Open the pool page</Link> : null}
+        {pool ? <Link href={poolPath(pool, cluster)}>Open the pool page</Link> : null}
         {pool ? " · " : null}
         <a href={explorerAccount(address, cluster)} target="_blank" rel="noreferrer">
           Title on the explorer

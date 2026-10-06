@@ -16,6 +16,9 @@ export type PoolAsset = {
   pool: string;
   record: string;
   title: string;
+  creator: string;
+  /** attached when a coin was created first. none when the mint is only the payment token. */
+  coin: "attached" | "none";
   name: string;
   symbol: string;
   image: string;
@@ -145,6 +148,8 @@ async function loadSheet(cluster: ClusterName, record: string, uri: string): Pro
   }
 }
 
+export const CLAIMED_STATUS = "Claimed. Still awaiting handoff.";
+
 function standingOf(
   rail: "escrow" | "creator",
   owner: string,
@@ -152,30 +157,35 @@ function standingOf(
   listingAddress: string | null,
   listing: Listing | null,
   tensorAmount: bigint | null,
+  coin: "attached" | "none",
 ): { standing: AssetStanding; status: string } {
+  const pay = coin === "none" ? "the payment token" : "this coin";
   if (rail === "escrow" && listingAddress && owner && owner !== listingAddress) {
-    return { standing: "sold", status: "Sold." };
+    return { standing: "sold", status: CLAIMED_STATUS };
   }
   if (rail === "creator" && tensorAmount !== null) {
-    return { standing: "for-sale", status: `For sale on Tensor for ${tokenAmount(tensorAmount)} of this coin.` };
+    return { standing: "for-sale", status: `For sale on Tensor for ${tokenAmount(tensorAmount)} of ${pay}.` };
   }
   if (rail === "creator" && owner && creator && owner !== creator) {
-    return { standing: "sold", status: "Sold." };
+    return { standing: "sold", status: CLAIMED_STATUS };
   }
   if (rail === "creator") {
     return { standing: "held", status: "The creator holds the title. It is not listed." };
   }
-  if (!listing || listing.graduatedAt <= 0) {
+  if (coin === "attached" && (!listing || listing.graduatedAt <= 0)) {
     return { standing: "waiting", status: "Waiting for graduation." };
   }
+  if (!listing) {
+    return { standing: "held", status: "The creator holds the title. It is not listed." };
+  }
   const opensAt = listing.graduatedAt + listing.delaySeconds;
-  if (Math.floor(Date.now() / 1000) < opensAt) {
+  if (listing.graduatedAt > 0 && Math.floor(Date.now() / 1000) < opensAt) {
     return { standing: "waiting", status: `Waiting. The sale opens ${when(opensAt)}.` };
   }
   if (listing.sale === "auction") {
     return { standing: "for-sale", status: "In auction." };
   }
-  return { standing: "for-sale", status: `For sale for ${tokenAmount(listing.price)} of this coin.` };
+  return { standing: "for-sale", status: `For sale for ${tokenAmount(listing.price)} of ${pay}.` };
 }
 
 async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset | null> {
@@ -192,6 +202,7 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
     status.rail === "escrow" && program
       ? await readListing(connection, new PublicKey(program), new PublicKey(status.address)).catch(() => null)
       : null;
+  const coin = row.attributes.coin === "none" ? "none" : "attached";
   const sale = standingOf(
     status.rail,
     status.owner,
@@ -199,12 +210,15 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
     status.listing,
     listing,
     status.tensor ? status.tensor.amount : null,
+    coin,
   );
   const network = cluster === "devnet" ? "?c=devnet" : "";
   return {
     pool: row.attributes.pool,
     record: row.record,
     title: status.address,
+    creator: row.attributes.creator || "",
+    coin,
     name: sheet.name || sheet.record?.object?.name || row.name || title.name,
     symbol: row.attributes.symbol || "",
     image: typeof sheet.image === "string" ? sheet.image : "",

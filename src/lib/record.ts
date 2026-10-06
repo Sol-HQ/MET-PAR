@@ -12,12 +12,15 @@ export const RECORD_KIND = "PAR asset record v1";
 export const FREE_UPLOAD_BYTES = 105 * 1024;
 
 /**
- * The platform vault that receives every record. It only holds records and never burns them.
- * The real network vault is an address made offline. Until it is set, records stay on the practice network.
+ * The wallet that receives every record. The same address is used on the practice network and the real network.
+ * The master is frozen with no freeze authority, so this wallet cannot move or burn it.
+ * A later rotation changes where new records go. Records already sent stay at the address they were minted to.
  */
+const RECORD_VAULT_ADDRESS = "pMUdWH9UsqorhF9Wi6Snaq6c5xMpA6yoyYd2q1tmfei";
+
 export const RECORD_VAULT: Record<ClusterName, string> = {
-  devnet: "pMUdWH9UsqorhF9Wi6Snaq6c5xMpA6yoyYd2q1tmfei",
-  "mainnet-beta": "",
+  devnet: RECORD_VAULT_ADDRESS,
+  "mainnet-beta": RECORD_VAULT_ADDRESS,
 };
 
 export function arweaveUrl(id: string): string {

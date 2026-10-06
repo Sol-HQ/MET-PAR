@@ -18,6 +18,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { MainnetGate } from "@/components/MainnetGate";
 import { ListingActions } from "@/components/ListingActions";
 import { AssetOnPool } from "@/components/AssetOnPool";
@@ -30,6 +31,7 @@ import { loadDammMarket, loadPool, type DammMarket, type PoolSnapshot } from "@/
 import { loadHolders, loadTrades, type HolderRow, type TradeRow } from "@/lib/pool-book";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { poolPath } from "@/lib/title";
 import { loadCreatorClaim, nextUnlockSeconds, publicSchedule, storyFromRaw, type CreatorClaim } from "@/lib/vesting";
 
 type Side = "buy" | "sell";
@@ -665,46 +667,6 @@ export function PoolView({ address }: { address: string }) {
     }
   }
 
-  async function lockCreatorSupply() {
-    if (!snapshot || !publicKey || !signTransaction) {
-      setError("Connect a wallet to lock the creator supply.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const client = DynamicBondingCurveClient.create(connection, "confirmed");
-      const transaction = await client.migration.createLocker({
-        payer: publicKey,
-        pool: new PublicKey(address),
-      });
-      const prepared = await prepareTransaction(connection, publicKey, transaction, []);
-      const reserved = snapshot.vestingCliffUnlock.add(snapshot.vestingPerPeriod.mul(new BN(snapshot.vestingPeriods)));
-      const lines = [
-        "Action: lock the creator supply",
-        `Network: ${cluster}`,
-        `Pool: ${address}`,
-        `${snapshot.symbol} reserved for the creator: ${rawToUi(reserved, snapshot.baseDecimals)}`,
-        `Creator: ${snapshot.creator}`,
-        "These tokens come out of the curve. They do not come out of the trading pool.",
-        `${snapshot.quoteSymbol} spent: 0`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
-      ];
-      if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
-        return;
-      }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("The creator supply is locked.");
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The creator supply could not be locked.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function claimCreatorSupply() {
     if (!snapshot || !creatorClaim || !publicKey || !signTransaction) {
       setError("Connect the creator wallet to claim this supply.");
@@ -748,53 +710,6 @@ export function PoolView({ address }: { address: string }) {
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The creator supply claim failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function migrate() {
-    if (!snapshot || !publicKey || !signTransaction) {
-      setError("Connect a wallet to open the trading pool.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const feeConfig = snapshot.dammConfig;
-      if (!feeConfig) {
-        setError("This curve has no Meteora pool config, so this page cannot open the trading pool.");
-        return;
-      }
-      const client = DynamicBondingCurveClient.create(connection, "confirmed");
-      const result = await client.migration.migrateToDammV2({
-        payer: publicKey,
-        pool: new PublicKey(address),
-        dammConfig: new PublicKey(feeConfig),
-      });
-      const prepared = await prepareTransaction(connection, publicKey, result.transaction, [
-        result.firstPositionNftKeypair,
-        result.secondPositionNftKeypair,
-      ]);
-      const lines = [
-        "Open the Meteora trading pool",
-        `Network: ${cluster === "devnet" ? "practice" : "real"}`,
-        `Curve: ${address}`,
-        `Pool fee after it opens: ${bpsToPercent(snapshot.migrationFeeBps)}`,
-        `${snapshot.quoteSymbol} spent: 0`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
-        `The tokens and ${snapshot.quoteSymbol} that move into the pool stay locked. This signature opens the pool. It does not send them to a wallet.`,
-      ];
-      if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
-        return;
-      }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("The trading pool is open.");
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Migration failed.");
     } finally {
       setBusy(false);
     }
@@ -862,9 +777,11 @@ export function PoolView({ address }: { address: string }) {
             <p className="note">
               {snapshot.isMigrated
                 ? "The trading pool is open. Liquidity is locked."
-                : snapshot.canMigrate || snapshot.needsLocker
-                  ? "The curve is full. The trading pool is not open yet."
-                  : "The curve is still filling. Buys and sells on this page move the price."}{" "}
+                : snapshot.needsLocker
+                  ? "The curve is full. Trading is stopped. The gold box takes the lock signature."
+                  : snapshot.canMigrate
+                    ? "The creator supply is locked. The trading pool is the next signature."
+                    : "The curve is still filling. Buys and sells on this page move the price."}{" "}
               {cluster === "devnet" ? "Practice network." : "Real network."}{" "}
               <a href={explorerAccount(snapshot.baseMint, cluster)}>Token</a>
               {" · "}
@@ -880,15 +797,32 @@ export function PoolView({ address }: { address: string }) {
               name={snapshot.name}
               mint={snapshot.baseMint}
               fullAt={`${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol}`}
-              viewHref={`/pool/${snapshot.address}`}
+              viewHref={poolPath(snapshot.address, cluster)}
               meteoraHref={snapshot.dammPool ? meteoraPoolUrl(snapshot.dammPool, cluster) : undefined}
-              sharePath={`/pool/${snapshot.address}`}
+              sharePath={poolPath(snapshot.address, cluster)}
               quoteMint={snapshot.quoteMint}
               opensAt={snapshot.startPrice}
               endsAt={snapshot.endPrice}
               cluster={cluster}
             />
           </header>
+          {snapshot.needsLocker ? (
+            <LockReady
+              pool={snapshot.address}
+              symbol={snapshot.symbol}
+              fullAt={`${formatMoney(snapshot.threshold, snapshot.quoteDecimals)} ${snapshot.quoteSymbol}`}
+              onDone={() => void refresh()}
+            />
+          ) : null}
+          {snapshot.canMigrate && snapshot.dammConfig ? (
+            <OpenPool
+              pool={snapshot.address}
+              dammConfig={snapshot.dammConfig}
+              quoteSymbol={snapshot.quoteSymbol}
+              feeBps={snapshot.migrationFeeBps}
+              onDone={() => void refresh()}
+            />
+          ) : null}
           <RecordPanel uri={snapshot.uri} mint={snapshot.baseMint} pool={snapshot.address} cluster={cluster} />
           <section className="quotes" aria-label={snapshot.isMigrated ? "Trading pool balances" : "Curve progress"}>
             <article>
@@ -1113,7 +1047,7 @@ export function PoolView({ address }: { address: string }) {
               ) : snapshot.migrationProgress < 1 ? (
                 <p>The curve is still filling. This allocation stays reserved until the supply is locked.</p>
               ) : (
-                <p>The curve is full. The supply is not locked yet, so the clock has not started.</p>
+                <p>The curve is full. The clock starts when the gold box is signed.</p>
               )}
             </section>
           ) : null}
@@ -1530,11 +1464,6 @@ export function PoolView({ address }: { address: string }) {
                       Number(snapshot.supply),
                     )}
                   </p>
-                  {snapshot.needsLocker ? (
-                    <button className="solid" type="button" disabled={busy} onClick={() => void lockCreatorSupply()}>
-                      Lock the creator supply
-                    </button>
-                  ) : null}
                   {snapshot.migrationProgress >= 2 && creatorClaim ? (
                     creatorWallet ? (
                       <button
@@ -1548,8 +1477,10 @@ export function PoolView({ address }: { address: string }) {
                     ) : (
                       <p className="note">The creator wallet signs the supply claim. The unlocked amount is on the allocation above.</p>
                     )
+                  ) : snapshot.needsLocker ? (
+                    <p className="note">The gold box on this page takes the lock signature. Any wallet can pay the rent.</p>
                   ) : snapshot.migrationProgress < 1 ? (
-                    <p className="note">The curve is still filling. The lock button appears after it fills, and the clock starts at that signature.</p>
+                    <p className="note">The curve is still filling. When it fills, the gold box on this page takes the lock signature, and the clock starts then.</p>
                   ) : null}
                 </>
               )}
@@ -1583,25 +1514,7 @@ export function PoolView({ address }: { address: string }) {
                   Withdraw leftover
                 </button>
               ) : null}
-              {snapshot.canMigrate ? (
-                <>
-                  <h2>Open the trading pool</h2>
-                  <p>
-                    Trading on the curve has stopped. Sign once to open the Meteora trading pool. On the real network,{" "}
-                    {snapshot.quoteSymbol === "SOL"
-                      ? "Meteora opens a SOL curve by itself once it has collected 10 SOL."
-                      : snapshot.quoteSymbol === "USDC"
-                        ? "Meteora opens a USDC curve by itself once it has collected at least $750."
-                        : "Meteora opens a badged stock quote by itself once the quote collected is worth at least $750. A plain token is opened by itself only if it is on their keeper list, or Jupiter has verified it with an organic score above 50 and the raise is worth more than $750."}{" "}
-                    On the practice network, this signature is required.
-                  </p>
-                  <button className="solid" type="button" disabled={busy} onClick={() => void migrate()}>
-                    Open the trading pool
-                  </button>
-                </>
-              ) : snapshot.isMigrated ? (
-                <p className="note">The trading pool is already open. Liquidity is locked.</p>
-              ) : null}
+              {snapshot.isMigrated ? <p className="note">The trading pool is already open. Liquidity is locked.</p> : null}
               <p className="note">
                 Slippage is in basis points. 100 bps is 1%, 200 is 2%, 300 is 3%, 400 is 4%. It is the furthest the amount received may fall below the quote before the wallet refuses. It does not change the price. On a SOL pool, the Dollars button turns a dollar amount into SOL at the live SOL price and then spends that SOL.
                 {cluster === "devnet" && snapshot.quoteSymbol === "SOL" ? " Practice SOL is not worth that dollar price." : ""}

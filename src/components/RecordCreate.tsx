@@ -5,6 +5,7 @@ import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.j
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type Draft } from "@/components/AssetDesk";
+import { MainnetGate } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { explorerAccount, explorerTx } from "@/lib/constants";
 import { bpsToPercent, formatLamports } from "@/lib/format";
@@ -36,6 +37,8 @@ import {
   railWords,
   SALE_PROGRAM_FEE_PERCENT,
   creatorSalePercent,
+  poolPath,
+  salePath,
   saleUrl,
   saleVenueWords,
   CREATOR_BURN_DAYS,
@@ -198,7 +201,7 @@ function sheetJson(input: {
           uri: plan.tokenUri,
           image: input.image.arweave,
           pool: plan.pool,
-          poolPage: plan.noCoin ? "" : `${PUBLIC_ORIGIN}/pool/${plan.pool}`,
+          poolPage: plan.noCoin ? "" : `${PUBLIC_ORIGIN}${poolPath(plan.pool, input.cluster === "devnet" ? "devnet" : "mainnet-beta")}`,
           config: plan.config,
           quote: plan.quoteSymbol,
           quoteMint: input.quoteMint,
@@ -311,6 +314,7 @@ export function RecordCreate({
   const [error, setError] = useState("");
   const [finished, setFinished] = useState<{ pool: string; record: string; title: string } | null>(null);
   const [agreed, setAgreed] = useState(false);
+  const [gateOpen, setGateOpen] = useState(false);
   const vault = RECORD_VAULT[cluster];
   const rail = chosenRail(cluster, escrowDepositAllowed(cluster, wallet.publicKey?.toBase58()) ? draft.hold : "wallet");
   const previewPromises = creatorPromises({
@@ -328,6 +332,7 @@ export function RecordCreate({
   useEffect(() => {
     setPlan(null);
     setAgreed(false);
+    setGateOpen(false);
   }, [draft, picture, cluster, coin, pay]);
 
   function mark(label: string, link?: string) {
@@ -338,6 +343,7 @@ export function RecordCreate({
     setError("");
     setFinished(null);
     setProgress([]);
+    setGateOpen(false);
     if (problem) {
       setError(problem);
       return;
@@ -565,12 +571,13 @@ export function RecordCreate({
       const walletOpens = useRail === "escrow" ? "six" : "five";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
-        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}. The coin is not created here.`,
+        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
         `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
         `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
-        `Supply: ${draftPlan.supply}. Decimals: ${draftPlan.decimals}.`,
-        `Pool: ${pool}`,
+        ...(draftPlan.noCoin
+          ? [`Decimals: ${draftPlan.decimals}.`]
+          : [`Supply: ${draftPlan.supply}. Decimals: ${draftPlan.decimals}.`, `Pool: ${pool}`]),
         `Record: ${record}`,
         `Title: ${title}`,
         `Platform vault: ${vault}`,
@@ -580,16 +587,16 @@ export function RecordCreate({
         useRail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `No coin. You can list the title through Tensor, priced in ${draftPlan.symbol}, or put it in the escrow on the sale page and name the token, the burn, and up to three extra wallets. The PAR program keeps 2% of an escrow sale.`
+            ? `On the sale page you set a fixed price or a bid in ${draftPlan.symbol}, and how many days before the sale opens. Tensor pays you the full price and PAR takes none of that sale. In the escrow you can also name a burn from 0% to 98% and up to three extra wallets. The PAR program keeps 2% of an escrow sale.`
             : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
         `The record and the title each carry the token address ${mint}, the sale page, and a full sheet link. That link is the readable page on Arweave.`,
-        draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : "This title has no coin.",
+        draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : `Payment token: ${draftPlan.tokenName} (${draftPlan.symbol}).`,
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         draftPlan.noCoin
-          ? "No coin. There is no curve."
+          ? "The sale is a fixed price or a bid. You set the price and the wait on the sale page."
           : `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
         draftPlan.noCoin
-          ? "No curve fee. There is no coin."
+          ? "The PAR program keeps 2% of an escrow sale. A Tensor sale pays you the full price."
           : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
         `Record rent: ${formatLamports(recordRent)}. Record network fee: ${formatLamports(recordPrepared.feeLamports)}. Record transaction: ${recordBytes} of 1232 bytes.`,
         `Title rent: ${formatLamports(titleRent)}. Title network fee: ${formatLamports(titlePrepared.feeLamports)}. Title transaction: ${titleBytes} of 1232 bytes.`,
@@ -667,7 +674,7 @@ export function RecordCreate({
       mark("Picture stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
-        ? "Sale path: chosen on the sale page. Tensor, or the PAR escrow."
+        ? "Sale path: a fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens. Tensor, or the PAR escrow."
         : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
           : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
@@ -712,7 +719,7 @@ export function RecordCreate({
       const sheetArweave = arweaveUrl(sheetUpload.id);
       mark("Record sheet stored on Arweave", sheetArweave);
 
-      mark(coin ? "Using the coin already on chain" : "No coin. The title is priced in the token you read.");
+      mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 
       const recordTx = new Transaction().add(
         ...recordInstruction({
@@ -841,24 +848,22 @@ export function RecordCreate({
   return (
     <section className="card record-create">
       <p className="eyebrow">Create</p>
-      <h2>Token, record, and title</h2>
+      <h2>{coin ? "Token, record, and title" : "Record and title"}</h2>
       <p className="note">
-        The coin, the record, and the title are one asset. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. The coin trades.
-        The master holds the picture, every word on the record sheet, the token mint, and the pool. It is sent to
-        the program vault and stays there. One edition is made. That edition is the title, and it carries the same
-        meta sheet. The NFT on the chain is the proof. PAR keeps a copy of those proofs.
+        {coin
+          ? "The coin, the record, and the title are one asset. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. The coin trades. The master holds the picture, every word on the record sheet, the token mint, and the pool. It is sent to the program vault and stays there. One edition is made. That edition is the title, and it carries the same meta sheet. The NFT on the chain is the proof. PAR keeps a copy of those proofs."
+          : "This step makes the record and one title for one object. The token you named is what a buyer pays. The master holds the picture and every word on the record sheet. It is sent to the program vault and stays there. One edition is the title. The NFT on the chain is the proof. PAR keeps a copy of those proofs."}
       </p>
         <p className="note">
-          {rail === "escrow"
-            ? draft.sale === "auction"
-              ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
-              : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
-            : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."}
+          {coin
+            ? rail === "escrow"
+              ? draft.sale === "auction"
+                ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
+                : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
+              : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."
+            : "The title stays in your wallet. On the sale page you set a fixed price or a bid, the payment token, and how many days before the sale opens."}
           {cluster === "devnet" ? "" : ` ${ESCROW_COMING}`}
         </p>
-      {cluster !== "devnet" ? (
-        <p className="error">Records are made on the practice network only until the real network vault is set.</p>
-      ) : null}
       {!finished ? (
         <div className="record-promises">
           <p className="eyebrow">Creator promises</p>
@@ -879,7 +884,7 @@ export function RecordCreate({
         </div>
       ) : null}
       {!plan && !finished ? (
-        <button type="button" className="solid" disabled={busy || !agreed || cluster !== "devnet"} onClick={() => void review()}>
+        <button type="button" className="solid" disabled={busy || !agreed} onClick={() => void review()}>
           {busy ? "Checking…" : "Review create"}
         </button>
       ) : null}
@@ -891,10 +896,25 @@ export function RecordCreate({
             ))}
           </ul>
           <div className="asset-nav">
-            <button type="button" disabled={busy} onClick={() => setPlan(null)}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setGateOpen(false);
+                setPlan(null);
+              }}
+            >
               Cancel
             </button>
-            <button type="button" className="solid" disabled={busy} onClick={() => void run()}>
+            <button
+              type="button"
+              className="solid"
+              disabled={busy}
+              onClick={() => {
+                if (cluster === "devnet") void run();
+                else setGateOpen(true);
+              }}
+            >
               {busy ? "Creating…" : "Sign and create"}
             </button>
           </div>
@@ -917,7 +937,12 @@ export function RecordCreate({
       ) : null}
       {finished ? (
         <p className="note">
-          <Link href={`/pool/${finished.pool}`}>Open the pool page</Link>.{" "}
+          {finished.pool !== "none" ? (
+            <>
+              <Link href={poolPath(finished.pool, cluster)}>Open the pool page</Link>.{" "}
+            </>
+          ) : null}
+          <Link href={salePath(finished.title, cluster)}>Open the sale page</Link>.{" "}
           <a href={explorerAccount(finished.record, cluster)} target="_blank" rel="noreferrer">
             See the record on the explorer
           </a>
@@ -929,6 +954,18 @@ export function RecordCreate({
         </p>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
+      {gateOpen && plan ? (
+        <MainnetGate
+          title="Create this record on the real network?"
+          lines={plan.lines}
+          confirmLabel="Open wallet"
+          onCancel={() => setGateOpen(false)}
+          onConfirm={() => {
+            setGateOpen(false);
+            void run();
+          }}
+        />
+      ) : null}
     </section>
   );
 }

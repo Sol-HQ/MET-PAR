@@ -462,11 +462,13 @@ export function AssetDesk() {
     (): [string, string][] => [
       [
         "Sale path",
-        rail === "escrow"
-          ? draft.sale === "auction"
-            ? "Escrow, because Escrow is selected on Claim. The title is auctioned only through the PAR escrow program."
-            : "Escrow, because Escrow is selected on Claim. The title is sold only through the PAR escrow program."
-          : "Tensor, because Tensor is selected on Claim. The title is listed through Tensor's marketplace program.",
+        withCoin === false
+          ? "A fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens."
+          : rail === "escrow"
+            ? draft.sale === "auction"
+              ? "Escrow, because Escrow is selected on Claim. The title is auctioned only through the PAR escrow program."
+              : "Escrow, because Escrow is selected on Claim. The title is sold only through the PAR escrow program."
+            : "Tensor, because Tensor is selected on Claim. The title is listed through Tensor's marketplace program.",
       ],
       ["Object", `${draft.assetName || draft.objectName}. ${draft.kind}. ${draft.existsNow === "yes" ? "It exists now." : "It does not exist yet."}`],
       ["Serial", draft.serial.trim() || "None"],
@@ -490,14 +492,14 @@ export function AssetDesk() {
             }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
             ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
-            : `No coin. The title can be listed through Tensor, priced in ${pay?.symbol || "the token you read"}, or put in the PAR escrow after it is minted. On an escrow sale the creator names the token, chooses a burn from 0% to 98%, and can name up to three extra wallets. The PAR program keeps 2%. On a Tensor sale, PAR takes none.`,
+            : `The buyer pays in ${pay?.symbol || "the token you name"}. After the title exists, the sale page takes a fixed price or a bid, and the number of days before the sale opens. On an escrow sale the program keeps 2%, and the burn is a whole percent from 0 to 98. On a Tensor sale, PAR takes none.`,
       ],
       [
         "Token",
         coin
           ? `${coin.name} (${coin.symbol}). Token address ${coin.mint}. ${coin.decimals} decimals. Supply ${coin.supply}. Quoted in ${coin.quoteSymbol}. Quote mint ${coin.quoteMint}. Pool ${coin.pool}. These facts are read from the coin and cannot be changed. ${COIN_WORDS} The picture on the Object step is the record image.`
           : pay
-            ? `No coin. The price is paid in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals. The picture on the Object step is the record image.`
+            ? `The buyer pays in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals. The picture on the Object step is the record image.`
             : "No token has been read yet.",
       ],
       [
@@ -505,17 +507,17 @@ export function AssetDesk() {
         pictureView
           ? coin
             ? "The picture on this sheet is the record image. The coin keeps the image it was created with."
-            : "The picture on this sheet is the record image. This title has no coin."
+            : "The picture on this sheet is the record image."
           : "No picture yet. Add one on the Object step. That picture is the record image.",
       ],
       [
-        "Curve",
+        withCoin === false ? "When it sells" : "Curve",
         coin
           ? `Read from the coin. Supply ${coin.supply}. Opening price ${coin.startPrice} ${coin.quoteSymbol}. Pool price ${coin.endPrice} ${coin.quoteSymbol}. At the opening price the whole supply is priced at ${coin.wholeAtPar} ${coin.quoteSymbol}. Fee ${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${coin.platformFeePercent}%, creator ${coin.creatorFeePercent}%. ${coin.isMigrated ? "The coin has graduated." : "The coin has not graduated."} ${sizeLine}`
-          : "No coin. There is no curve.",
+          : "The sale is a fixed price or a bid in the token named above. The creator sets how many days before it opens.",
       ],
     ],
-    [draft, symbol, rail, waitUnit, shortClock, pictureView, coin, pay, sizeLine],
+    [draft, symbol, rail, waitUnit, shortClock, pictureView, coin, pay, sizeLine, withCoin],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -596,7 +598,11 @@ export function AssetDesk() {
         <h1>Real-world asset</h1>
         <p className="tagline">One object. One title.</p>
         <p>
-          Create the coin on the home page first, when this title has a coin. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve. With no coin, this page makes the title only. The sale page then asks you to sell it through Tensor or through the escrow.
+          {withCoin === false
+            ? "This page makes one title for one object. The token you name is what a buyer pays. After the title exists, you put it up at a fixed price or by bid, and you say how long before that sale opens."
+            : withCoin === true
+              ? "Create the coin on the home page first. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve."
+              : "Choose whether a coin goes with this title."}
         </p>
         <div className="segmented" role="group" aria-label="Does a coin go with this title">
           <button type="button" aria-pressed={withCoin === true} onClick={() => chooseCoin(true)}>
@@ -611,7 +617,7 @@ export function AssetDesk() {
             ? "Choose one before the steps. A title that says it has a coin cannot be created until that coin's token address is read."
             : withCoin
               ? "The Coin step asks for the token address. Leave it empty and the title cannot be created."
-              : "There is no curve step. The Price step asks for the token a Tensor sale uses. After the title exists, the sale page can put it in the escrow. There you name USDC, SOL, or another ordinary token, the burn, and up to three extra wallets."}
+              : "The Price step asks for the token a buyer pays with. USDC, SOL, or another ordinary token. The sale page is where you set a fixed price or a bid, and how long before the sale opens."}
         </p>
         {withCoin === true ? <div className="beats">
           <article>
@@ -645,19 +651,26 @@ export function AssetDesk() {
             </span>
           </article>
         </div> : null}
+        {withCoin === true ? (
+          <p>
+            {COIN_WORDS} The steps name the object, the person, the handoff, and the pitch. They fit any one object: a painting, a card, a kite, a ball, a photograph, or something else. One example is filled in.
+            The other examples use the same steps. A plain token is created on the home page and has no title.
+          </p>
+        ) : withCoin === false ? (
+          <p>
+            The steps name the object, the person who owes it, the handoff, and the promise on the title. They fit any one object: a painting, a card, a kite, a ball, a photograph, or something else. One example is filled in.
+          </p>
+        ) : null}
         <p>
-          {COIN_WORDS} The steps name the object, the person, the handoff, and the pitch. They fit any one object: a painting, a card, a kite, a ball, a photograph, or something else. One example is filled in.
-          The other examples use the same steps. A plain token is created on the home page and has no title.
-        </p>
-        <p>
-          The last step creates the master, then one edition. It does not create the coin. The master is sent to the
+          The last step creates the master, then one edition.
+          {withCoin === true ? " It does not create the coin." : ""} The master is sent to the
           program vault and stays frozen. That one edition is the title, and it is sent to the creator wallet.
           The NFT on the chain is the proof. PAR keeps a copy of those proofs. Both NFTs hold the record sheet, the meta sheet.
         </p>
         <button type="button" aria-pressed={lawOpen} onClick={() => setLawOpen((open) => !open)}>
           {lawOpen ? "Close the structure and the law" : "Structure and the law"}
         </button>
-        {lawOpen ? <LawRecord /> : null}
+        {lawOpen ? <LawRecord plain={withCoin !== true} /> : null}
         <div className="asset-nav">
           <Link href="/" className="asset-link">
             PAR
@@ -793,7 +806,9 @@ export function AssetDesk() {
           </div>
           <p className="note">
             {draft.marks === "own"
-              ? "The page can say this person is responsible for the object, and that Meteora did not issue the token."
+              ? withCoin
+                ? "The page can say this person is responsible for the object, and that Meteora did not issue the token."
+                : "The page can say this person is responsible for the object."
               : "Another project's mark needs that project's written permission before the page shows it."}
           </p>
         </form>
@@ -809,12 +824,12 @@ export function AssetDesk() {
             There is one asset and one title.{" "}
             {withCoin
               ? `${COIN_WORDS} The title can be bought ${draft.saleDays || "some"} ${waitUnit} after graduation. `
-              : "This title has no coin. After it is minted you can list it through Tensor, or put it in the escrow and name the token. "}
+              : "The token is what a buyer pays for this title. After it exists, the sale page takes a fixed price or a bid, and how many days before the sale opens. "}
             {withCoin && rail === "escrow"
               ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}%, pays you ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
               : withCoin
                 ? `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`
-                : "An auction, a burn from 0% to 98%, and up to three extra wallets are chosen on the sale page if you use the escrow. The PAR program keeps 2% of that sale."}
+                : "You can also name up to three wallets that take a fixed amount of that payment. The PAR program keeps 2% of an escrow sale."}
           </p>
           {withCoin ? <>
           <div className="segmented" role="group" aria-label="Title path">
@@ -973,7 +988,7 @@ export function AssetDesk() {
               </dl>
             </>
           ) : null}
-          </> : <p className="note">After this title exists, its sale page can put it in the escrow. You name the token, the burn, and any extra wallets there. The PAR program keeps 2%.</p>}
+          </> : <p className="note">The sale page is where you say how long before it opens. Zero opens the sale now. The highest is 365 days.</p>}
         </form>
       ) : null}
 
@@ -1069,7 +1084,7 @@ export function AssetDesk() {
       {step === "Price" ? (
         <form>
           <p className="note">
-            There is no coin and no curve. This token is the one a Tensor listing uses. USDC and SOL fill the known address. Any other ordinary token can be read. Token-2022 is refused. If you later use the escrow, the sale page asks for the token again.
+            Name the token a buyer pays with. USDC and SOL fill the known address. Any other ordinary token can be read. Token-2022 is refused. On the sale page you set a fixed price or a bid, and how long before the sale opens.
           </p>
           <div className="segmented" role="group" aria-label="Price token">
             <button type="button" onClick={() => void loadPay(cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>
@@ -1102,7 +1117,9 @@ export function AssetDesk() {
             Pitch
             <textarea value={draft.pitch} onChange={(event) => patch({ pitch: event.target.value })} rows={6} />
             <span className="note">
-              The pitch is the creator&apos;s words about the object and its meme. It locks on the record sheet. Do not write that the price will go up, or promise a return. That is what the SEC hammers. Leave it blank if there is no pitch.
+              {withCoin
+                ? "The pitch is the creator's words about the object and its meme. It locks on the record sheet. Do not write that the price will go up, or promise a return. That is what the SEC hammers. Leave it blank if there is no pitch."
+                : "The pitch is the creator's words about the object. It locks on the record sheet. Do not write that the price will go up, or promise a return. That is what the SEC hammers. Leave it blank if there is no pitch."}
             </span>
           </label>
         </form>
@@ -1162,17 +1179,18 @@ export function AssetDesk() {
               </div>
             </dl>
             <p className="note">
-              These words locked with the asset. They cannot be changed. A buyer buys into them. Meteora did not
-              issue this token. PAR does not hold the object, the tokens, or this payment. The person named here
+              These words locked with the asset. They cannot be changed. A buyer buys into them.
+              {withCoin ? " Meteora did not issue this token." : ""} PAR does not hold the object, the tokens, or this payment. The person named here
               owes what the card says.
             </p>
             <p className="note">
-              {COIN_WORDS} No vault or fund holds the object. What stands behind the handoff is the person named
+              {withCoin ? `${COIN_WORDS} ` : "The token named here is what a buyer pays for the title. "}
+              No vault or fund holds the object. What stands behind the handoff is the person named
               here, this card, and a record that cannot be changed.
             </p>
           </article>
           <article className="card">
-            <p className="eyebrow">{coin ? "The coin" : "The price token"}</p>
+            <p className="eyebrow">{coin ? "The coin" : "Payment"}</p>
             <h2>
               {coin?.name || pay?.name || "Token"} <span>{symbol}</span>
             </h2>
@@ -1198,34 +1216,38 @@ export function AssetDesk() {
                 <dt>Decimals</dt>
                 <dd>{coin?.decimals ?? pay?.decimals ?? "Unread"}</dd>
               </div>
-              <div>
-                <dt>Supply</dt>
-                <dd>{coin ? coin.supply : "No coin"}</dd>
-              </div>
-              <div>
-                <dt>Quote</dt>
-                <dd>{coin ? coin.quoteSymbol : pay ? "The price token is not a quote" : "Unread"}</dd>
-              </div>
-              <div>
-                <dt>Quote mint</dt>
-                <dd>{coin ? coin.quoteMint : "No coin"}</dd>
-              </div>
-              <div>
-                <dt>Pool</dt>
-                <dd>{coin ? poolAddress : pay ? "No coin" : "Unread"}</dd>
-              </div>
-              <div>
-                <dt>Opening price</dt>
-                <dd>{coin ? `${coin.startPrice} ${coin.quoteSymbol}` : "No coin"}</dd>
-              </div>
-              <div>
-                <dt>Pool price</dt>
-                <dd>{coin ? `${coin.endPrice} ${coin.quoteSymbol}` : "No coin"}</dd>
-              </div>
-              <div>
-                <dt>Fee</dt>
-                <dd>{coin ? `${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}` : "No coin"}</dd>
-              </div>
+              {coin ? (
+                <>
+                  <div>
+                    <dt>Supply</dt>
+                    <dd>{coin.supply}</dd>
+                  </div>
+                  <div>
+                    <dt>Quote</dt>
+                    <dd>{coin.quoteSymbol}</dd>
+                  </div>
+                  <div>
+                    <dt>Quote mint</dt>
+                    <dd>{coin.quoteMint}</dd>
+                  </div>
+                  <div>
+                    <dt>Pool</dt>
+                    <dd>{poolAddress}</dd>
+                  </div>
+                  <div>
+                    <dt>Opening price</dt>
+                    <dd>{`${coin.startPrice} ${coin.quoteSymbol}`}</dd>
+                  </div>
+                  <div>
+                    <dt>Pool price</dt>
+                    <dd>{`${coin.endPrice} ${coin.quoteSymbol}`}</dd>
+                  </div>
+                  <div>
+                    <dt>Fee</dt>
+                    <dd>{`${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}`}</dd>
+                  </div>
+                </>
+              ) : null}
               <div>
                 <dt>Sale path</dt>
                 <dd>
@@ -1233,14 +1255,14 @@ export function AssetDesk() {
                     ? `PAR escrow. ${draft.sale === "auction" ? "Auction" : "Fixed price"} at ${draft.titlePrice.trim() || "unset"} ${symbol || "tokens"}. Opens ${draft.saleDays} ${waitUnit} after graduation.`
                     : coin
                       ? `Tensor. Opens ${draft.saleDays} days after graduation. Listed from the PAR sale page. Paid in ${symbol}.`
-                      : `Tensor. Paid in ${symbol || "the token you read"}. There is no graduation wait.`}
+                      : `Fixed price or a bid, paid in ${symbol || "the token you read"}. You set how long before the sale opens.`}
                 </dd>
               </div>
             </dl>
             <p className="note">
               {coin
                 ? `The trading price is what buyers pay for ${coin.symbol}. The redemption rule is the other panel. One does not set the other.`
-                : "There is no coin to trade. The redemption rule is the other panel."}
+                : "This panel is the payment token. The redemption rule is the other panel."}
             </p>
             {sizeLine ? <p className="note">{sizeLine}</p> : null}
           </article>
@@ -1254,7 +1276,9 @@ export function AssetDesk() {
               ? draft.sale === "auction"
                 ? "Sale path: PAR escrow. These words say the title is auctioned only through the PAR escrow program, because Escrow is selected on Claim."
                 : "Sale path: PAR escrow. These words say the title is sold only through the PAR escrow program, because Escrow is selected on Claim."
-              : "Sale path: Tensor. These words say the title is listed through Tensor's marketplace program, because Tensor is selected on Claim."}
+              : withCoin
+                ? "Sale path: Tensor. These words say the title is listed through Tensor's marketplace program, because Tensor is selected on Claim."
+                : "Sale path: chosen on the sale page. A fixed price or a bid, paid in the token you named. You set how long before the sale opens."}
           </p>
           <p className="note">
             Both NFTs carry the picture, the token address, the sale page, and a link named full sheet. That link opens this sheet on Arweave. The sheet names the token and links to the sale page, where the title can be bought or bid on.

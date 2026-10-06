@@ -76,6 +76,23 @@ export const SOL_THIN_RAISE = 1;
 const SOL_RAISE_CHOICES = [...SOL_CLIMB_RAISES, SOL_THIN_RAISE] as const;
 export type RaiseChoice = (typeof RAISE_CHOICES)[number] | (typeof SOL_RAISE_CHOICES)[number];
 
+/** The meme climb stays one shape. The slider only moves how much quote locks. */
+export const MEME_LOCK = {
+  usdc: { min: 10_000, max: 50_000, step: 500, start: 25_000 },
+  sol: { min: 10, max: 50, step: 1, start: 25 },
+} as const;
+
+export function memeLockBounds(kind: QuoteKind): { min: number; max: number; step: number; start: number } {
+  return kind === "sol" ? MEME_LOCK.sol : MEME_LOCK.usdc;
+}
+
+export function clampMemeLock(kind: QuoteKind, value: number): number {
+  const bounds = memeLockBounds(kind);
+  if (!Number.isFinite(value)) return bounds.start;
+  const stepped = Math.round(value / bounds.step) * bounds.step;
+  return Math.min(bounds.max, Math.max(bounds.min, stepped));
+}
+
 export const CLIMB_PRESETS: { raise: (typeof CLIMB_RAISES)[number]; name: string; detail: string }[] = [
   {
     raise: 10_000,
@@ -113,7 +130,7 @@ export const SOL_CLIMB_PRESETS: { raise: (typeof SOL_CLIMB_RAISES)[number]; name
 ];
 
 export type LaunchChoice =
-  | { kind: "climb"; raise: RaiseChoice }
+  | { kind: "climb"; raise: number }
   | { kind: "par"; raise: RaiseChoice; parPrice: number; poolPrice: number; migratePercent?: number }
   | { kind: "fixed" }
   | { kind: "custom"; supply: number; openPrice: number; endPrice: number; migratePercent?: number }
@@ -714,7 +731,9 @@ function pictureFromClimb(config: ConfigParameters, raise: number, kind: QuoteKi
         : shareOfCurve < 0.1
           ? "a speck of the curve"
           : `${shareOfCurve.toLocaleString("en-US", { maximumFractionDigits: 1 })}% of the curve`,
-    keeper: keeperNote(raise, kind, extra),
+    keeper: reserved.isZero()
+      ? keeperNote(raise, kind, extra)
+      : "A creator bag is reserved. After the curve fills, you sign Lock the creator supply. The trading pool opens after that signature.",
     migratedTokens: reserved.isZero() ? 200_000_000 : Number(migrated.div(unit).toString()),
     migratedPercent: reserved.isZero() ? 20 : migrated.muln(10_000).div(new BN(BILLION_SUPPLY).mul(unit)).toNumber() / 100,
     creator,

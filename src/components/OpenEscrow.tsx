@@ -19,13 +19,31 @@ const EMPTY: Row[] = [
   { wallet: "", amount: "" },
 ];
 
-export function NoCoinChoice({ escrow, tensor }: { escrow: ReactNode; tensor: ReactNode }) {
+export function NoCoinChoice({
+  escrow,
+  tensor,
+  pageCluster,
+}: {
+  escrow: ReactNode;
+  tensor: ReactNode;
+  pageCluster: ClusterName;
+}) {
+  const escrowOpen = pageCluster === "devnet";
   const [path, setPath] = useState<"escrow" | "tensor" | null>(null);
   return (
     <>
-      <p className="note">This title has no coin. Choose one way to sell it. The other form stays closed until you switch.</p>
+      <p className="note">Choose one way to sell this title. The other form stays closed until you switch.</p>
       <div className="segmented" role="group" aria-label="How this title sells">
-        <button type="button" aria-pressed={path === "escrow"} onClick={() => setPath("escrow")}>Escrow</button>
+        <button
+          type="button"
+          aria-pressed={path === "escrow"}
+          disabled={!escrowOpen}
+          className={escrowOpen ? undefined : "fuzzed"}
+          onClick={() => setPath("escrow")}
+        >
+          Escrow
+          {escrowOpen ? null : <span className="soon-stamp">Coming soon</span>}
+        </button>
         <button type="button" aria-pressed={path === "tensor"} onClick={() => setPath("tensor")}>Tensor</button>
       </div>
       {path === null ? (

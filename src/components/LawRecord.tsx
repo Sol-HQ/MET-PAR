@@ -1,14 +1,22 @@
 /** Facts on the structure of a PAR real-world asset, and the published tests those facts sit beside. */
-export function LawRecord() {
+export function LawRecord({ plain = false }: { plain?: boolean }) {
   return (
     <article className="card law-record">
       <p className="eyebrow">Structure and the law</p>
-      <h2>The object, the title, and the coin</h2>
-      <p>
-        One object that already exists. One title is the claim to it. One coin trades on a Meteora bonding curve.
-        The coin is a payment token and a meme. Payment means the coin is how the title is bought. The meme is the
-        joy and heart of the object. The coin is not a share of the object, and it pays nothing.
-      </p>
+      <h2>{plain ? "The object and the title" : "The object, the title, and the coin"}</h2>
+      {plain ? (
+        <p>
+          One object that already exists. One title is the claim to it. A buyer pays for that title in a token the
+          creator names. USDC, SOL, or another ordinary token. The sale is a fixed price or a bid. The creator says
+          how many days before that sale opens.
+        </p>
+      ) : (
+        <p>
+          One object that already exists. One title is the claim to it. One coin trades on a Meteora bonding curve.
+          The coin is a payment token and a meme. Payment means the coin is how the title is bought. The meme is the
+          joy and heart of the object. The coin is not a share of the object, and it pays nothing.
+        </p>
+      )}
       <p>
         Two NFTs are made, and the record sheet is on both. The master is sent to the program vault and stays
         there, frozen. One edition is made. That edition is the title, and it is sent to the creator. The sheet
@@ -17,18 +25,31 @@ export function LawRecord() {
         interpretation, a white paper is a document that describes the technical design of a crypto project. This
         sheet is the locked record of one object.
       </p>
-      <p>
-        After graduation the coin trades for a number of days the creator set, from 1 to 365. The title can be sold
-        when those days end. The day is fixed when the coin graduates. On the Tensor path, the creator then lists
-        the title through Tensor&apos;s marketplace, paid only in this coin, and burns 25% of the price within 7
-        days. On the escrow path, the PAR escrow holds the title and sells it. (The escrow path is not a mainnet
-        option yet. Coming soon.) The creator hands the object to the holder of the title. PAR is software. It does
-        not hold, insure, or guarantee the object. The person named on the sheet owes the handoff.
-      </p>
-      <p>
-        The curve publishes par and the pool price before anyone buys. That path is the mechanism of the sale. The
-        pitch and the redemption card bar a line that the price will go up, or that a return is promised.
-      </p>
+      {plain ? (
+        <p>
+          After the title exists, the creator puts it up for sale and names the wait. On Tensor, the listing uses
+          the token already on the title, and PAR takes none of that sale. On the escrow path, the PAR escrow holds
+          the title and sells it for a fixed price or by bid. (The escrow path is not a mainnet option yet. Coming
+          soon.) The creator hands the object to the holder of the title. PAR is software. It does not hold, insure,
+          or guarantee the object. The person named on the sheet owes the handoff. The pitch and the redemption card
+          bar a line that the price will go up, or that a return is promised.
+        </p>
+      ) : (
+        <>
+          <p>
+            After graduation the coin trades for a number of days the creator set, from 1 to 365. The title can be sold
+            when those days end. The day is fixed when the coin graduates. On the Tensor path, the creator then lists
+            the title through Tensor&apos;s marketplace, paid only in this coin, and burns 25% of the price within 7
+            days. On the escrow path, the PAR escrow holds the title and sells it. (The escrow path is not a mainnet
+            option yet. Coming soon.) The creator hands the object to the holder of the title. PAR is software. It does
+            not hold, insure, or guarantee the object. The person named on the sheet owes the handoff.
+          </p>
+          <p>
+            The curve publishes par and the pool price before anyone buys. That path is the mechanism of the sale. The
+            pitch and the redemption card bar a line that the price will go up, or that a return is promised.
+          </p>
+        </>
+      )}
 
       <h2>What the courts call a security</h2>
       <p>
@@ -105,13 +126,23 @@ export function LawRecord() {
       </p>
 
       <h2>Where this structure sits</h2>
-      <p>
-        The payment use and the meme are written on the NFT when the coin is created. The record sheet on that NFT
-        pins them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The coin trades on Meteora,
-        on Solana. The title lists through Tensor after the day the clock sets, or through the PAR escrow. (The
-        escrow path is not a mainnet option yet. Coming soon.) The object moves when the named person keeps the
-        handoff. The form blocks a price promise and a promised return on the pitch and on the redemption card.
-      </p>
+      {plain ? (
+        <p>
+          The object, the person, the handoff, and the payment token are written on the NFT. The record sheet pins
+          them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The title sells at a fixed
+          price or by bid, through Tensor or the PAR escrow, after the day the creator sets. (The escrow path is not
+          a mainnet option yet. Coming soon.) The object moves when the named person keeps the handoff. The form
+          blocks a price promise and a promised return on the pitch and on the redemption card.
+        </p>
+      ) : (
+        <p>
+          The payment use and the meme are written on the NFT when the coin is created. The record sheet on that NFT
+          pins them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The coin trades on Meteora,
+          on Solana. The title lists through Tensor after the day the clock sets, or through the PAR escrow. (The
+          escrow path is not a mainnet option yet. Coming soon.) The object moves when the named person keeps the
+          handoff. The form blocks a price promise and a promised return on the pitch and on the redemption card.
+        </p>
+      )}
       <p className="note">
         <a href="https://www.sec.gov/files/rules/interp/2026/33-11412.pdf">Release No. 33-11412</a>
         {" · "}

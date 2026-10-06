@@ -24,6 +24,8 @@ import {
   checkClimbCustom,
   checkParPrices,
   type QuoteExtra,
+  clampMemeLock,
+  memeLockBounds,
   parForLockedRaise,
   poolForMigratingShare,
   priceField,
@@ -147,7 +149,7 @@ export function Desk() {
   const { cluster } = useCluster();
   const { connection } = useConnection();
   const { publicKey, signTransaction, signMessage } = useWallet();
-  const [preset, setPreset] = useState<"starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
+  const [preset, setPreset] = useState<"meme" | "starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
   const [onPar, setOnPar] = useState(true);
   const [supplyText, setSupplyText] = useState(String(BILLION_SUPPLY));
   const [openText, setOpenText] = useState("0.00001");
@@ -183,6 +185,7 @@ export function Desk() {
   const [reserveReleaseText, setReserveReleaseText] = useState("10");
   const [reserveClaimsText, setReserveClaimsText] = useState("2");
   const [quoteKind, setQuoteKind] = useState<QuoteKind>("usdc");
+  const [memeRaise, setMemeRaise] = useState(25_000);
   const [quoteMintText, setQuoteMintText] = useState("");
   const [quoteCheck, setQuoteCheck] = useState<QuoteCheck | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
@@ -222,6 +225,8 @@ export function Desk() {
           : preset === "thin"
             ? THIN_RAISE
             : 10_000;
+  const memeBounds = memeLockBounds(quoteKind);
+  const climbRaise = preset === "meme" ? memeRaise : raise;
   const presetLock = onPar && preset !== "custom" && preset !== "fixed";
   const reserveSupply = preset === "custom" && /^\d+$/.test(supplyText) ? Number(supplyText) : BILLION_SUPPLY;
   const reserve = useMemo((): CreatorReserve => {
@@ -243,7 +248,11 @@ export function Desk() {
       periods: claims,
     };
   }, [reservePercent, reserveTokenText, reserveWhen, reserveWaitText, reserveReleaseText, reserveClaimsText, reserveSupply]);
-  const reserveError = reserveProblem(reserve, reserveSupply);
+  const memeBagCap = tokensForPercent(BILLION_SUPPLY, 20);
+  const reserveError =
+    preset === "meme" && reserve.tokens > memeBagCap
+      ? "A meme bag stays at 20% of the supply or under. A larger bag leaves this card."
+      : reserveProblem(reserve, reserveSupply);
   const curveReserve = reserveError ? NO_RESERVE : reserve;
   const lockedPrices = useMemo(
     () => (presetLock ? parForLockedRaise(raise, shelfShare, quoteKind, quoteExtra, curveReserve) : null),
@@ -262,8 +271,8 @@ export function Desk() {
       return { kind: "custom", supply: Number(supplyText), openPrice: Number(openText), endPrice: Number(endText), ...share };
     }
     if (onPar) return { kind: "par", raise, parPrice: Number(shownPar), poolPrice: Number(shownPool), ...share };
-    return { kind: "climb", raise };
-  }, [preset, onPar, raise, supplyText, openText, endText, parText, poolText, shownPar, shownPool, migratePercent]);
+    return { kind: "climb", raise: climbRaise };
+  }, [preset, onPar, raise, climbRaise, supplyText, openText, endText, parText, poolText, shownPar, shownPool, migratePercent]);
   const openingBps = platform.openingFeeBps;
   let feeProblem = "";
   let parsedFeeBps = 0;
@@ -348,7 +357,7 @@ export function Desk() {
     quoteBadge: quoteCheck?.badge ?? "",
     preset,
     onPar,
-    raise,
+    raise: climbRaise,
     supplyText,
     openText,
     endText,
@@ -388,6 +397,34 @@ export function Desk() {
     setShareTokenText(String(picture.migratedTokens));
     setShareError("");
   }, [onPar, preset, picture.ok, picture.fair, picture.migratedPercent, picture.migratedTokens]);
+
+  function applyMeme() {
+    setPreset("meme");
+    setOnPar(false);
+    setFeeFlat(false);
+    setCurveFee("10");
+    setCurveFeeEdited(true);
+    setEndFee("1");
+    setFeeDecaySeconds(48 * 60 * 60);
+    setDynamicFee(false);
+    setStraightFall(false);
+    setCompoundOn(false);
+    setMigrationFeeBps(100);
+    setReservePercent(5);
+    setReserveWhen("open");
+    setMemeRaise(memeLockBounds(quoteKind).start);
+  }
+
+  function chooseQuote(next: QuoteKind) {
+    setMemeRaise((current) => {
+      const from = memeLockBounds(quoteKind);
+      const to = memeLockBounds(next);
+      const span = from.max - from.min;
+      const place = span === 0 ? 0 : (current - from.min) / span;
+      return clampMemeLock(next, to.min + place * (to.max - to.min));
+    });
+    setQuoteKind(next);
+  }
 
   function applySharePercent(percent: number, from: "percent" | "tokens" | "prices") {
     if (onPar && preset !== "custom" && preset !== "fixed") {
@@ -496,7 +533,7 @@ export function Desk() {
           baseMint: next.poolDraft.baseMint,
         });
         templateSaved = true;
-        setMessage("Template confirmed. Building the tokenâ€¦");
+        setMessage("Template confirmed. Building the token...");
         await waitForAccount(connection, next.poolDraft.config);
       }
       let prepared = next.prepared;
@@ -564,12 +601,18 @@ export function Desk() {
         preset: next.preset,
         cluster,
       });
-      void fetch("/api/listings", {
+      const listed = await fetch("/api/listings", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ pool: next.poolAddress, cluster }),
-      }).catch(() => undefined);
-      setMessage(`Pool created. Signature ${signature}`);
+      })
+        .then((response) => response.ok)
+        .catch(() => false);
+      setMessage(
+        listed
+          ? `Pool created. Signature ${signature}`
+          : `Pool created. Signature ${signature}. The pool list did not save this one.`,
+      );
       setName("");
       setSymbol("");
       setSymbolEdited(false);
@@ -1171,13 +1214,13 @@ export function Desk() {
           on the mint.
         </p>
         <div className="choices" role="group" aria-label="Quote token">
-          <button type="button" aria-pressed={quoteKind === "usdc"} onClick={() => setQuoteKind("usdc")}>
+          <button type="button" aria-pressed={quoteKind === "usdc"} onClick={() => chooseQuote("usdc")}>
             USDC
           </button>
-          <button type="button" aria-pressed={quoteKind === "sol"} onClick={() => setQuoteKind("sol")}>
+          <button type="button" aria-pressed={quoteKind === "sol"} onClick={() => chooseQuote("sol")}>
             SOL
           </button>
-          <button type="button" aria-pressed={quoteKind === "other"} onClick={() => setQuoteKind("other")}>
+          <button type="button" aria-pressed={quoteKind === "other"} onClick={() => chooseQuote("other")}>
             Stock or other
           </button>
         </div>
@@ -1233,7 +1276,7 @@ export function Desk() {
                   .finally(() => setQuoteBusy(false));
               }}
             >
-              {quoteBusy ? "Checkingâ€¦" : "Check this mint"}
+              {quoteBusy ? "Checking..." : "Check this mint"}
             </button>
             <p className={quoteCheck && !quoteCheck.ok ? "error" : "note"}>
               {quoteCheck?.message ||
@@ -1264,6 +1307,24 @@ export function Desk() {
               : "Buyers pay USDC. Thin test locks $750. On the real network, that is the smallest USDC curve Meteora opens by itself. Practice USDC from Circle is about $20, so a $750 curve cannot be filled from that faucet."}
         </p>
         <div className="presets launch" role="group" aria-label="Launch">
+          <button
+            type="button"
+            className={preset === "meme" ? "preset selected" : "preset"}
+            aria-pressed={preset === "meme"}
+            onClick={applyMeme}
+          >
+            <span className="preset-kicker">Meme</span>
+            <strong>
+              {quoteKind === "sol"
+                ? "10 to 50 SOL"
+                : quoteKind === "other"
+                  ? `10,000 to 50,000 ${unit}`
+                  : "$10,000 to $50,000"}
+            </strong>
+            <span>
+              One billion tokens. The climb stays one shape. The slider sets how much locks. The fee starts at 10% and falls on a curve to 1% over 48 hours, then 1% after the lock. A 5% bag unlocks when you sign the lock. Change the fee, the bag, or the claims below.
+            </span>
+          </button>
           {(quoteKind === "sol" ? SOL_CLIMB_PRESETS : CLIMB_PRESETS).map((item) => (
             <button
               key={item.raise}
@@ -1343,6 +1404,30 @@ export function Desk() {
             <span>{onPar ? "PAR is on. Type the supply and the two prices. A rejected number turns red." : "PAR is off. The price climbs from your opening price to your graduation price."}</span>
           </button>
         </div>
+        {preset === "meme" ? (
+          <label className="meme-span">
+            Lock
+            <input
+              type="range"
+              min={memeBounds.min}
+              max={memeBounds.max}
+              step={memeBounds.step}
+              value={memeRaise}
+              onChange={(event) => setMemeRaise(clampMemeLock(quoteKind, Number(event.target.value)))}
+              aria-valuemin={memeBounds.min}
+              aria-valuemax={memeBounds.max}
+              aria-valuenow={memeRaise}
+            />
+            <span className="note">
+              {quoteKind === "sol"
+                ? `${memeRaise} SOL locks.`
+                : quoteKind === "other"
+                  ? `${memeRaise.toLocaleString("en-US")} ${unit} locks.`
+                  : `$${memeRaise.toLocaleString("en-US")} locks.`}{" "}
+              The supply stays 1,000,000,000. The opening price and the graduation price move together, so the climb stays the same shape. A different supply or a different shape is the Custom card. The fee, the bag, and the claims below still change.
+            </span>
+          </label>
+        ) : null}
         {preset === "fixed" ? (
           <p className="note">
             {quoteKind === "sol"
@@ -1353,15 +1438,22 @@ export function Desk() {
           </p>
         ) : (
           <label className="par-switch">
-            <input type="checkbox" checked={onPar} onChange={(event) => setOnPar(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={onPar}
+              disabled={preset === "meme"}
+              onChange={(event) => setOnPar(event.target.checked)}
+            />
             <span>
               <strong>Keep the opening on par</strong>
               <span>
-                {onPar
-                  ? `PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks.`
-                  : preset === "custom"
-                    ? "PAR is off. The price climbs from your opening price to your graduation price. Turn this on to hold the opening near par."
-                    : `PAR is off. The price climbs from the first token to the last, and the ${unit} on the selected card is what locks. Turn this on to hold the opening near par.`}
+                {preset === "meme"
+                  ? "Meme keeps the climb. Pick another card for the shelf."
+                  : onPar
+                    ? `PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks.`
+                    : preset === "custom"
+                      ? "PAR is off. The price climbs from your opening price to your graduation price. Turn this on to hold the opening near par."
+                      : `PAR is off. The price climbs from the first token to the last, and the ${unit} on the selected card is what locks. Turn this on to hold the opening near par.`}
               </span>
             </span>
           </label>
@@ -1660,7 +1752,7 @@ export function Desk() {
           type="submit"
           disabled={busy || !picture.ok || feeProblem.length > 0 || endingProblem.length > 0 || compoundProblem.length > 0 || name.trim().length === 0}
         >
-          {busy ? "Buildingâ€¦" : "Review create"}
+          {busy ? "Building..." : "Review create"}
         </button>
         {picture.ok && paid?.fingerprint === formFingerprint ? (
           <p className="note">
@@ -1677,9 +1769,9 @@ export function Desk() {
       </form>
 
       <p className="note">
-        The tokens on this network are also on the <Link href="/pools">Pools</Link> page. Open one there to buy or sell it.
+        Tokens and real-world assets you create show here. Every launch on this platform is on the <Link href="/pools">Pools</Link> page.
       </p>
-      <PoolBoard watch={message} limit={24} />
+      <PoolBoard watch={message} limit={24} mine />
 
       {error ? (
         <p className="error" role="alert">

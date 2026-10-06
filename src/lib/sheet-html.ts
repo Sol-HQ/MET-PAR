@@ -14,7 +14,7 @@ export function sheetLead(input: {
 }): string {
   const token = input.attached
     ? `The token ${input.tokenName} (${input.symbol}) pays for this title. Token address ${input.mint}.`
-    : `This title has no coin. The price is paid in ${input.tokenName} (${input.symbol}). Token address ${input.mint}.`;
+    : `A buyer pays for this title in ${input.tokenName} (${input.symbol}). Token address ${input.mint}. The sale is a fixed price or a bid. The creator sets how long before it opens.`;
   return `${input.name}. ${token} The title is sold through ${input.soldThrough}. The sale page is ${input.salePage}.`;
 }
 
@@ -68,7 +68,7 @@ export function sheetPageHtml(input: {
 <p class="mark">PAR record</p>
 <h1>${escapeHtml(input.name)}</h1>
 ${image}
-<p>${input.attached ? "This picture is the record image. The coin keeps the image it was created with." : "This picture is the record image. This title has no coin."}</p>
+<p>${input.attached ? "This picture is the record image. The coin keeps the image it was created with." : "This picture is the record image."}</p>
 <p>${escapeHtml(sheetLead(input))}</p>
 <p>${sale}. ${escapeHtml(input.pathLine)}</p>
 <dl>

@@ -1,15 +1,17 @@
 "use client";
 
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import BN from "bn.js";
 import Link from "next/link";
 import type { AssetStanding } from "@/lib/asset-on-pool";
 import { useEffect, useState } from "react";
+import { LockReady } from "@/components/CurveHandoff";
 import { ListingActions } from "@/components/ListingActions";
 import { useCluster } from "@/lib/cluster";
 import { HIDDEN_POOLS, meteoraPoolUrl, type ClusterName } from "@/lib/constants";
 import { formatDollars, formatMoney } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
+import { poolPath } from "@/lib/title";
 
 const STORAGE_KEY = "par.listings.v1";
 
@@ -18,16 +20,18 @@ type Remembered = {
   name: string;
   symbol: string;
   mint: string;
+  creator?: string;
   cluster: ClusterName;
 };
 
 export type CardListing = {
   pool: string;
+  creator: string;
   name: string;
   symbol: string;
   mint: string;
   image: string;
-  filling: boolean;
+  stage: "filling" | "lock" | "pool" | "trading";
   percent: number;
   fullAt: string;
   supply: string;
@@ -61,26 +65,28 @@ function solNote(text: string, usdPerSol: number): string {
 
 type AssetStamp = {
   pool: string;
+  creator: string;
   title: string;
   name: string;
+  coin: "attached" | "none";
   standing: AssetStanding;
   status: string;
   titleHref: string;
 };
 
+function realPool(pool: string): boolean {
+  return Boolean(pool) && pool !== "none";
+}
+
+function coinLine(coin: "attached" | "none"): string {
+  return coin === "none" ? "No coin." : "Has a coin.";
+}
+
 function stampLine(items: AssetStamp[]): string {
   const labels = items.map((item) => {
-    const word =
-      item.standing === "sold"
-        ? "Sold"
-        : item.standing === "for-sale"
-          ? "For sale"
-          : item.standing === "waiting"
-            ? "Waiting on the sale"
-            : "Not sold";
-    return `${item.name} (${word})`;
+    return `${item.name}. ${coinLine(item.coin)} ${item.status}`;
   });
-  return `Real-world asset. ${labels.join(". ")}.`;
+  return labels.join(" ");
 }
 
 function ListingCard({
@@ -88,15 +94,18 @@ function ListingCard({
   cluster,
   solUsd,
   assets,
+  onLocked,
 }: {
   card: CardListing;
   cluster: ClusterName;
   solUsd: number;
   assets: AssetStamp[];
+  onLocked?: () => void;
 }) {
-  const sharePath = `/pool/${card.pool}`;
+  const sharePath = poolPath(card.pool, cluster);
+  const ready = card.stage === "lock";
   return (
-    <article className="card">
+    <article className={ready ? "card ready-call" : "card"}>
       {card.image ? <img className="token-preview" src={card.image} alt="" /> : null}
       <Link href={sharePath} className="card-link">
         <h3>
@@ -115,12 +124,19 @@ function ListingCard({
       </p>
       {assets?.length ? <p className="rule">{stampLine(assets)}</p> : null}
       <p className="note">
-        {card.filling
-          ? "Still on the curve. Open this token to buy or sell on this site. The Meteora pool is not open yet."
-          : cluster === "devnet"
-            ? "The curve is full. Open this token to buy or sell on this site. Meteora practice pool opens the practice site."
-            : "The curve is full. Open this token to buy or sell on this site. Meteora pool opens Meteora on the real network."}
+        {card.stage === "lock"
+          ? "The curve is full. Trading is stopped. Any wallet can lock the creator supply and pay the rent."
+          : card.stage === "pool"
+            ? cluster === "devnet"
+              ? "The creator supply is locked. Open this token to sign the trading pool. The practice network has no keepers."
+              : "The creator supply is locked. Meteora's keepers can open the trading pool. Open this token to sign it now."
+            : card.stage === "filling"
+              ? "Still on the curve. Open this token to buy or sell on this site. The Meteora pool is not open yet."
+              : cluster === "devnet"
+                ? "The trading pool is open. Open this token to buy or sell on this site. Meteora practice pool opens the practice site."
+                : "The trading pool is open. Open this token to buy or sell on this site. Meteora pool opens Meteora on the real network."}
       </p>
+      {ready ? <LockReady pool={card.pool} symbol={card.symbol} fullAt={card.fullAt} framed={false} compact onDone={onLocked} /> : null}
       <ListingActions
         name={card.name}
         mint={card.mint}
@@ -137,12 +153,26 @@ function ListingCard({
   );
 }
 
-export function PoolBoard({ watch = "", limit = 200, showAssets = false }: { watch?: string; limit?: number; showAssets?: boolean }) {
+export function PoolBoard({
+  watch = "",
+  limit = 200,
+  showAssets = false,
+  mine = false,
+}: {
+  watch?: string;
+  limit?: number;
+  showAssets?: boolean;
+  /** The front page. Only the connected wallet's launches. */
+  mine?: boolean;
+}) {
   const { cluster } = useCluster();
   const { connection } = useConnection();
+  const { publicKey } = useWallet();
+  const wallet = publicKey?.toBase58() || "";
   const [cards, setCards] = useState<CardListing[]>([]);
   const [assets, setAssets] = useState<AssetStamp[] | null>(null);
   const [solUsd, setSolUsd] = useState(0);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,19 +207,31 @@ export function PoolBoard({ watch = "", limit = 200, showAssets = false }: { wat
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const seeds = new Map<string, { name: string; symbol: string; mint: string }>();
+      const seeds = new Map<string, { name: string; symbol: string; mint: string; creator: string }>();
       for (const item of readRemembered(cluster)) {
-        seeds.set(item.pool, { name: item.name, symbol: item.symbol, mint: item.mint || "" });
+        seeds.set(item.pool, { name: item.name, symbol: item.symbol, mint: item.mint || "", creator: item.creator || "" });
       }
       const listed = await fetch(`/api/listings?cluster=${cluster}`)
         .then(async (response) => {
-          if (!response.ok) return [] as string[];
-          const body = (await response.json()) as { pools?: { pool?: string }[] };
-          return (body.pools || []).map((item) => item.pool).filter((pool): pool is string => typeof pool === "string" && !HIDDEN_POOLS.has(pool));
+          if (!response.ok) return [] as { pool: string; creator: string; name: string; symbol: string; mint: string }[];
+          const body = (await response.json()) as {
+            pools?: { pool?: string; creator?: string | null; name?: string | null; symbol?: string | null; mint?: string | null }[];
+          };
+          return (body.pools || []).flatMap((item) =>
+            item.pool && !HIDDEN_POOLS.has(item.pool)
+              ? [{ pool: item.pool, creator: item.creator || "", name: item.name || "", symbol: item.symbol || "", mint: item.mint || "" }]
+              : [],
+          );
         })
-        .catch(() => [] as string[]);
-      for (const pool of listed) {
-        if (!seeds.has(pool)) seeds.set(pool, { name: "Listing", symbol: "", mint: "" });
+        .catch(() => [] as { pool: string; creator: string; name: string; symbol: string; mint: string }[]);
+      for (const item of listed) {
+        const current = seeds.get(item.pool);
+        seeds.set(item.pool, {
+          name: current?.name && current.name !== "Listing" ? current.name : item.name || current?.name || "Listing",
+          symbol: current?.symbol || item.symbol,
+          mint: current?.mint || item.mint,
+          creator: item.creator || current?.creator || "",
+        });
       }
       const loaded = await Promise.all(
         [...seeds.entries()].slice(0, limit).map(async ([pool, seed]) => {
@@ -197,11 +239,12 @@ export function PoolBoard({ watch = "", limit = 200, showAssets = false }: { wat
             const snapshot = await loadPool(connection, pool);
             return {
               pool,
+              creator: snapshot.creator || seed.creator,
               name: snapshot.name || seed.name,
               symbol: snapshot.symbol || seed.symbol,
               mint: snapshot.baseMint,
               image: snapshot.image,
-              filling: !snapshot.isMigrated,
+              stage: snapshot.needsLocker ? "lock" : snapshot.canMigrate ? "pool" : snapshot.isMigrated ? "trading" : "filling",
               percent: snapshot.percent,
               fullAt: fullAtFor(snapshot.threshold, snapshot.quoteDecimals, snapshot.quoteSymbol),
               supply: snapshot.supply,
@@ -214,11 +257,12 @@ export function PoolBoard({ watch = "", limit = 200, showAssets = false }: { wat
           } catch {
             return {
               pool,
+              creator: seed.creator,
               name: seed.name,
               symbol: seed.symbol,
               mint: seed.mint,
               image: "",
-              filling: true,
+              stage: "filling",
               percent: 0,
               fullAt: "",
               supply: "",
@@ -237,48 +281,112 @@ export function PoolBoard({ watch = "", limit = 200, showAssets = false }: { wat
     return () => {
       cancelled = true;
     };
-  }, [cluster, connection, watch, limit]);
+  }, [cluster, connection, watch, limit, reload]);
 
-  const filling = cards.filter((card) => card.filling);
-  const trading = cards.filter((card) => !card.filling);
+  const shownCards = mine ? cards.filter((card) => wallet && card.creator === wallet) : cards;
+  const shownAssets = (assets || []).filter((item) => (mine ? wallet && item.creator === wallet : true));
+  const ready = shownCards.filter((card) => card.stage === "lock");
+  const waiting = shownCards.filter((card) => card.stage === "pool");
+  const filling = shownCards.filter((card) => card.stage === "filling");
+  const trading = shownCards.filter((card) => card.stage === "trading");
+  const listAssets = showAssets || mine;
 
   return (
     <section className="rows">
+      {mine && !wallet ? (
+        <p className="note">Connect a wallet. The tokens and real-world assets that wallet created show here. Every launch on this platform is on the Pools page.</p>
+      ) : null}
+      {mine && !wallet ? null : (
+      <>
+      {ready.length > 0 ? (
+        <div>
+          <h2>Ready to lock</h2>
+          <div className="card-grid">
+            {ready.map((card) => (
+              <ListingCard
+                key={card.pool}
+                card={card}
+                cluster={cluster}
+                solUsd={solUsd}
+                assets={shownAssets.filter((item) => realPool(item.pool) && item.pool === card.pool)}
+                onLocked={() => setReload((value) => value + 1)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {waiting.length > 0 ? (
+        <div>
+          <h2>Waiting on the trading pool</h2>
+          <div className="card-grid">
+            {waiting.map((card) => (
+              <ListingCard
+                key={card.pool}
+                card={card}
+                cluster={cluster}
+                solUsd={solUsd}
+                assets={shownAssets.filter((item) => realPool(item.pool) && item.pool === card.pool)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div>
         <h2>Filling</h2>
-        {filling.length === 0 ? <p className="note">No curve is filling.</p> : null}
+        {filling.length === 0 ? (
+          <p className="note">{mine ? "You have no token filling." : "No curve is filling."}</p>
+        ) : null}
         <div className="card-grid">
           {filling.map((card) => (
-            <ListingCard key={card.pool} card={card} cluster={cluster} solUsd={solUsd} assets={(assets || []).filter((item) => item.pool === card.pool)} />
+            <ListingCard
+              key={card.pool}
+              card={card}
+              cluster={cluster}
+              solUsd={solUsd}
+              assets={shownAssets.filter((item) => realPool(item.pool) && item.pool === card.pool)}
+            />
           ))}
         </div>
       </div>
       <div>
         <h2>Trading</h2>
-        {trading.length === 0 ? <p className="note">No trading pool is open yet.</p> : null}
+        {trading.length === 0 ? (
+          <p className="note">{mine ? "You have no token trading." : "No trading pool is open yet."}</p>
+        ) : null}
         <div className="card-grid">
           {trading.map((card) => (
-            <ListingCard key={card.pool} card={card} cluster={cluster} solUsd={solUsd} assets={(assets || []).filter((item) => item.pool === card.pool)} />
+            <ListingCard
+              key={card.pool}
+              card={card}
+              cluster={cluster}
+              solUsd={solUsd}
+              assets={shownAssets.filter((item) => realPool(item.pool) && item.pool === card.pool)}
+            />
           ))}
         </div>
       </div>
-      {showAssets ? (
+      </>
+      )}
+      {listAssets && !(mine && !wallet) ? (
         <div>
           <h2>Real-world assets</h2>
-          {assets && assets.length === 0 ? <p className="note">No titled object is on this network yet.</p> : null}
+          {assets && shownAssets.length === 0 ? (
+            <p className="note">{mine ? "You have no real-world asset." : "No real-world asset is on this network yet."}</p>
+          ) : null}
           <div className="card-grid">
-            {(assets || []).map((asset) => (
+            {shownAssets.map((asset) => (
               <article key={asset.title} className="card">
-                <Link href={`/pool/${asset.pool}`} className="card-link">
+                <Link href={asset.titleHref} className="card-link">
                   <h3>{asset.name}</h3>
                 </Link>
-                <p className="rule">{stampLine([asset])}</p>
-                <p>{asset.status}</p>
-                <p>
-                  <Link href={`/pool/${asset.pool}`}>Open the coin</Link>
-                  {" · "}
-                  <Link href={asset.titleHref}>Open the sales page</Link>
-                </p>
+                <p className="rule">{coinLine(asset.coin)}</p>
+                <p className="object-status">{asset.status}</p>
+                {realPool(asset.pool) ? (
+                  <p>
+                    {asset.standing === "sold" ? "The token can still be live. " : null}
+                    <Link href={poolPath(asset.pool, cluster)}>Open the coin</Link>
+                  </p>
+                ) : null}
               </article>
             ))}
           </div>

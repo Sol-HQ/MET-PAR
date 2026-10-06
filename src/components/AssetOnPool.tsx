@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { AssetStanding } from "@/lib/asset-on-pool";
+import { CLAIMED_STATUS, type AssetStanding } from "@/lib/asset-on-pool";
 import type { ClusterName } from "@/lib/constants";
 
 type AssetCard = {
@@ -69,10 +69,12 @@ export function AssetOnPool({ pool, cluster }: { pool: string; cluster: ClusterN
           <article key={asset.title} className="card object-card">
             <p className="eyebrow">Attached real-world asset{asset.symbol ? ` · ${asset.symbol}` : ""}</p>
             <h2>{asset.name}</h2>
-            <p>This token is attached to a real-world asset.</p>
+            <p>Has a coin. This token is the coin on this real-world asset.</p>
             <ObjectPicture src={asset.image} alt={asset.name} quiet />
             {blurb ? <p>{blurb}</p> : null}
-            <p className="object-status">{asset.status}</p>
+            <p className="object-status">
+              {asset.standing === "sold" ? `${CLAIMED_STATUS} The token can still be live.` : asset.status}
+            </p>
             <p>
               <Link href={asset.titleHref}>Open the sales page</Link>
             </p>
