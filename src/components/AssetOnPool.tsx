@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CLAIMED_STATUS, type AssetStanding } from "@/lib/asset-on-pool";
+import { objectPairing, titleSentence, type AssetStanding } from "@/lib/asset-on-pool";
 import type { ClusterName } from "@/lib/constants";
 
 type AssetCard = {
   title: string;
   name: string;
+  kind: string;
   symbol: string;
+  coin: "attached" | "none";
   image: string;
   standing: AssetStanding;
   status: string;
@@ -34,8 +36,16 @@ export function ObjectPicture({ src, alt, quiet = false }: { src: string; alt: s
   );
 }
 
-function blurbOf(lines: string[]): string {
-  const line = lines.find((item) => item.trim()) || "";
+function blurbOf(name: string, lines: string[]): string {
+  const lead = `${name.trim()}.`;
+  const line =
+    lines.find((item) => {
+      const text = item.trim();
+      if (!text || text.startsWith(lead)) return false;
+      if (text.startsWith("Claim:") || text.startsWith("Declared value:")) return false;
+      if (text.includes("Token address ") && text.includes("pays for this title")) return false;
+      return true;
+    }) || "";
   if (line.length <= 220) return line;
   return `${line.slice(0, 217).trimEnd()}…`;
 }
@@ -64,16 +74,17 @@ export function AssetOnPool({ pool, cluster }: { pool: string; cluster: ClusterN
   return (
     <section className="object-board" aria-label="Real-world asset">
       {assets.map((asset) => {
-        const blurb = blurbOf(asset.story);
+        const blurb = blurbOf(asset.name, asset.story);
         return (
           <article key={asset.title} className="card object-card">
-            <p className="eyebrow">Attached real-world asset{asset.symbol ? ` · ${asset.symbol}` : ""}</p>
+            <p className="eyebrow">Real-world asset</p>
             <h2>{asset.name}</h2>
-            <p>Has a coin. This token is the coin on this real-world asset.</p>
+            <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin || "attached", true)}</p>
             <ObjectPicture src={asset.image} alt={asset.name} quiet />
             {blurb ? <p>{blurb}</p> : null}
             <p className="object-status">
-              {asset.standing === "sold" ? `${CLAIMED_STATUS} The token can still be live.` : asset.status}
+              {titleSentence(asset.status)}
+              {asset.standing === "sold" ? " The token can still be traded." : ""}
             </p>
             <p>
               <Link href={asset.titleHref}>Open the sales page</Link>

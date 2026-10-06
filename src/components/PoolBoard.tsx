@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import { LockReady } from "@/components/CurveHandoff";
 import { ListingActions } from "@/components/ListingActions";
 import { useCluster } from "@/lib/cluster";
+import { ObjectPicture } from "@/components/AssetOnPool";
+import { objectPairing, titleSentence, tokenPairing } from "@/lib/asset-on-pool";
 import { HIDDEN_POOLS, meteoraPoolUrl, type ClusterName } from "@/lib/constants";
 import { formatDollars, formatMoney } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
@@ -68,6 +70,9 @@ type AssetStamp = {
   creator: string;
   title: string;
   name: string;
+  kind: string;
+  symbol: string;
+  image: string;
   coin: "attached" | "none";
   standing: AssetStanding;
   status: string;
@@ -76,17 +81,6 @@ type AssetStamp = {
 
 function realPool(pool: string): boolean {
   return Boolean(pool) && pool !== "none";
-}
-
-function coinLine(coin: "attached" | "none"): string {
-  return coin === "none" ? "No coin." : "Has a coin.";
-}
-
-function stampLine(items: AssetStamp[]): string {
-  const labels = items.map((item) => {
-    return `${item.name}. ${coinLine(item.coin)} ${item.status}`;
-  });
-  return labels.join(" ");
 }
 
 function ListingCard({
@@ -122,7 +116,14 @@ function ListingCard({
         full at {card.fullAt}
         {card.quoteSymbol === "SOL" ? solNote(String(parseFloat(card.fullAt)), solUsd) : ""}
       </p>
-      {assets?.length ? <p className="rule">{stampLine(assets)}</p> : null}
+      {assets?.map((asset) => (
+        <Link key={asset.titleHref} href={asset.titleHref} className="attached-object">
+          <ObjectPicture src={asset.image} alt={asset.name} quiet />
+          <span>
+            {tokenPairing(asset.name, asset.kind || "")} {titleSentence(asset.status)}
+          </span>
+        </Link>
+      ))}
       <p className="note">
         {card.stage === "lock"
           ? "The curve is full. Trading is stopped. Any wallet can lock the creator supply and pay the rent."
@@ -171,6 +172,7 @@ export function PoolBoard({
   const wallet = publicKey?.toBase58() || "";
   const [cards, setCards] = useState<CardListing[]>([]);
   const [assets, setAssets] = useState<AssetStamp[] | null>(null);
+  const [assetNote, setAssetNote] = useState("Reading the records.");
   const [solUsd, setSolUsd] = useState(0);
   const [reload, setReload] = useState(0);
 
@@ -193,14 +195,27 @@ export function PoolBoard({
   useEffect(() => {
     let cancelled = false;
     async function loadAssets() {
-      const response = await fetch(`/api/asset?cluster=${cluster}`, { cache: "no-store" });
-      if (!response.ok || cancelled) return;
-      const body = (await response.json()) as { assets?: AssetStamp[] };
-      if (!cancelled) setAssets(body.assets || []);
+      try {
+        const response = await fetch(`/api/asset?cluster=${cluster}`, { cache: "no-store" });
+        if (cancelled) return;
+        if (!response.ok) {
+          setAssetNote("The records could not be read.");
+          return;
+        }
+        const body = (await response.json()) as { assets?: AssetStamp[]; error?: string };
+        if (cancelled) return;
+        const next = body.assets || [];
+        setAssets(next);
+        setAssetNote(body.error && next.length === 0 ? body.error : "");
+      } catch {
+        if (!cancelled) setAssetNote("The records could not be read.");
+      }
     }
-    void loadAssets().catch(() => undefined);
+    void loadAssets();
+    const timer = setInterval(() => void loadAssets(), 20_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [cluster]);
 
@@ -370,21 +385,23 @@ export function PoolBoard({
       {listAssets && !(mine && !wallet) ? (
         <div>
           <h2>Real-world assets</h2>
-          {assets && shownAssets.length === 0 ? (
+          {assetNote ? <p className="note">{assetNote}</p> : null}
+          {assets && shownAssets.length === 0 && !assetNote ? (
             <p className="note">{mine ? "You have no real-world asset." : "No real-world asset is on this network yet."}</p>
           ) : null}
           <div className="card-grid">
             {shownAssets.map((asset) => (
               <article key={asset.title} className="card">
+                <ObjectPicture src={asset.image} alt={asset.name} />
                 <Link href={asset.titleHref} className="card-link">
                   <h3>{asset.name}</h3>
                 </Link>
-                <p className="rule">{coinLine(asset.coin)}</p>
-                <p className="object-status">{asset.status}</p>
+                <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin)}</p>
+                <p className="object-status">{titleSentence(asset.status)}</p>
                 {realPool(asset.pool) ? (
                   <p>
-                    {asset.standing === "sold" ? "The token can still be live. " : null}
-                    <Link href={poolPath(asset.pool, cluster)}>Open the coin</Link>
+                    {asset.standing === "sold" ? "The token can still be traded. " : null}
+                    <Link href={poolPath(asset.pool, cluster)}>Open the token</Link>
                   </p>
                 ) : null}
               </article>
