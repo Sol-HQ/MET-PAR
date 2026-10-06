@@ -98,15 +98,114 @@ function titleName(assetName: string): string {
   return `${assetName} title`;
 }
 
+/** These lines are the proof. A mint that would leave one off stops. */
+const LOCKED_ON_NFT = [
+  "full sheet",
+  "mint",
+  "sale page",
+  "sold through",
+  "sheet sha256",
+  "image sha256",
+  "creator",
+  "title held by",
+  "held by",
+  "title",
+  "record",
+  "coin",
+  "pool",
+  "sale opens",
+  "paid in",
+  "escrow program",
+  "sale",
+];
+
+function field(rows: { key: string; value: string }[], key: string): string {
+  return rows.find((row) => row.key === key)?.value ?? "";
+}
+
+/** Stops the mint when the sheet, the record, and the title would not say the same thing. */
+function assertOneStory(input: {
+  sheet: string;
+  recordRows: { key: string; value: string }[];
+  titleRows: { key: string; value: string }[];
+  held: string;
+  creator: string;
+  mint: string;
+  pool: string;
+  record: string;
+  title: string;
+  coin: string;
+  sheetSha256: string;
+  imageSha256: string;
+  imageUrl: string;
+  htmlUrl: string;
+  noCoin: boolean;
+  saleOpens: string;
+  delayDays: number;
+}) {
+  const parsed = JSON.parse(input.sheet) as {
+    image?: string;
+    record?: {
+      creator?: string;
+      address?: string;
+      image?: { sha256?: string; arweave?: string };
+      readableSheet?: string;
+      token?: { mint?: string; pool?: string };
+      title?: { address?: string; heldBy?: string; sale?: { opensDaysAfterGraduation?: number | null } };
+    };
+  };
+  const story = parsed.record;
+  const problems: string[] = [];
+  const expect = (label: string, got: string, want: string) => {
+    if (got !== want) problems.push(label);
+  };
+  expect("record holder", field(input.recordRows, "title held by"), input.held);
+  expect("title holder", field(input.titleRows, "held by"), input.held);
+  expect("sheet holder", story?.title?.heldBy || "", input.held);
+  expect("record creator", field(input.recordRows, "creator"), input.creator);
+  expect("title creator", field(input.titleRows, "creator"), input.creator);
+  expect("sheet creator", story?.creator || "", input.creator);
+  expect("record mint", field(input.recordRows, "mint"), input.mint);
+  expect("title mint", field(input.titleRows, "mint"), input.mint);
+  expect("sheet mint", story?.token?.mint || "", input.mint);
+  expect("record pool", field(input.recordRows, "pool"), input.pool);
+  expect("title pool", field(input.titleRows, "pool"), input.pool);
+  expect("sheet pool", story?.token?.pool || "", input.pool);
+  expect("record coin", field(input.recordRows, "coin"), input.coin);
+  expect("title coin", field(input.titleRows, "coin"), input.coin);
+  expect("record title", field(input.recordRows, "title"), input.title);
+  expect("title record", field(input.titleRows, "record"), input.record);
+  expect("sheet record", story?.address || "", input.record);
+  expect("sheet title", story?.title?.address || "", input.title);
+  expect("sheet hash", field(input.recordRows, "sheet sha256"), input.sheetSha256);
+  expect("image hash", field(input.recordRows, "image sha256"), input.imageSha256);
+  expect("sheet image hash", story?.image?.sha256 || "", input.imageSha256);
+  expect("picture", parsed.image || "", input.imageUrl);
+  expect("sheet picture", story?.image?.arweave || "", input.imageUrl);
+  expect("record sheet link", field(input.recordRows, "full sheet"), input.htmlUrl);
+  expect("title sheet link", field(input.titleRows, "full sheet"), input.htmlUrl);
+  expect("readable sheet", story?.readableSheet || "", input.htmlUrl);
+  expect("sale opens", field(input.titleRows, "sale opens"), input.saleOpens);
+  if (!input.noCoin && story?.title?.sale?.opensDaysAfterGraduation !== input.delayDays) problems.push("sale wait");
+  if (problems.length) {
+    throw new Error(`The record sheet and the NFTs do not say the same thing (${problems.join(", ")}). Nothing was minted.`);
+  }
+}
+
 function keepSheet(rows: { key: string; value: string }[], omit: string[]) {
-  const kept = rows.filter((row) => row.key === "full sheet" || row.key === "mint" || row.key === "sale page" || row.key === "sold through" || !omit.includes(row.key));
-  for (const key of ["full sheet", "mint", "sale page", "sold through"]) {
-    if (!kept.some((row) => row.key === key)) throw new Error(`The NFT is missing ${key}.`);
+  const kept = rows.filter((row) => LOCKED_ON_NFT.includes(row.key) || !omit.includes(row.key));
+  for (const row of rows) {
+    if (LOCKED_ON_NFT.includes(row.key) && !kept.some((item) => item.key === row.key && item.value === row.value)) {
+      throw new Error(`The NFT would leave off ${row.key}. That line stays.`);
+    }
   }
   return kept;
 }
 
-/** Other traits can come off. The full sheet link and the two hashes stay until nothing else can. */
+/**
+ * Price lines and the long description can come off the short on-chain list.
+ * They stay on the Arweave sheet. The proof lines never come off.
+ */
 const DROP_BEFORE_SHEET = [
   "auction",
   "burned",
@@ -114,18 +213,12 @@ const DROP_BEFORE_SHEET = [
   "maker",
   "declared",
   "handoff days",
-  "escrow program",
-  "sale opens",
-  "paid in",
-  "held by",
-  "title held by",
+  "par",
+  "pool price",
+  "quote",
+  "supply",
+  "decimals",
   "vault",
-  "creator",
-  "title",
-  "record",
-  "sale",
-  "image sha256",
-  "sheet sha256",
 ];
 
 type Progress = { label: string; done: boolean; link?: string };
@@ -153,6 +246,7 @@ function sheetJson(input: {
   const { draft, plan } = input;
   const mint = plan.mint;
   const symbol = plan.symbol;
+  const shortClock = input.cluster === "devnet" && plan.rail === "escrow";
   const saleKind = plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor";
   return JSON.stringify(
     {
@@ -254,6 +348,7 @@ function sheetJson(input: {
             soldThroughProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[input.cluster === "devnet" ? "devnet" : "mainnet-beta"] : TENSOR_MARKETPLACE,
             payIn: mint,
             opensDaysAfterGraduation: plan.noCoin ? null : Number(draft.saleDays),
+            opensUnit: plan.noCoin ? null : shortClock ? "seconds" : "days",
             burnPercent: plan.noCoin ? null : burnOf(draft),
             creatorPercent: plan.noCoin ? null : plan.rail === "escrow" ? creatorSalePercent(burnOf(draft)) : 100 - burnOf(draft),
             programPercent: plan.noCoin ? null : plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
@@ -264,9 +359,11 @@ function sheetJson(input: {
                 ? {
                     reserve: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "",
                     clockStarts: "on the first bid at or above the reserve",
-                    hours: AUCTION_HOURS,
-                    extendHours: AUCTION_EXTEND_HOURS,
-                    sitDaysWithoutBid: AUCTION_SIT_DAYS,
+                    unit: shortClock ? "seconds" : "hours",
+                    length: AUCTION_HOURS,
+                    extend: shortClock ? 1 : AUCTION_EXTEND_HOURS,
+                    sitWithoutBid: shortClock ? 60 : AUCTION_SIT_DAYS,
+                    sitUnit: shortClock ? "seconds" : "days",
                     finish: "This site sends the finish when the clock ends. The creator and the bidder do not send it.",
                   }
                 : null,
@@ -294,6 +391,7 @@ export function RecordCreate({
   preparedKeys,
   coin,
   pay,
+  onCreated,
 }: {
   draft: Draft;
   rows: [string, string][];
@@ -304,6 +402,7 @@ export function RecordCreate({
   preparedKeys: Keys;
   coin: CoinFacts | null;
   pay: PayFacts | null;
+  onCreated?: () => void;
 }) {
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -477,7 +576,9 @@ export function RecordCreate({
           if (bytes === null) throw new Error(`The ${label} could not be measured.`);
           if (bytes <= 1232) return { prepared, bytes, omitted };
           const drop = DROP_BEFORE_SHEET.find((key) => current.some((row) => row.key === key));
-          if (!drop) throw new Error(`The ${label} is ${bytes} bytes with the full sheet link. The limit is 1232.`);
+          if (!drop || LOCKED_ON_NFT.includes(drop)) {
+            throw new Error(`The ${label} is ${bytes} bytes. The limit is 1232. The proof lines stay on the NFT.`);
+          }
           current = current.filter((row) => row.key !== drop);
           omitted.push(drop);
         }
@@ -727,6 +828,69 @@ export function RecordCreate({
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 
+      const shortClock = cluster === "devnet" && plan.rail === "escrow";
+      const held = railWords(plan.rail);
+      const coinWord = plan.noCoin ? "none" : "attached";
+      const recordRows = recordAttributes({
+        mint,
+        pool,
+        vault,
+        creator: payer.toBase58(),
+        symbol: plan.symbol,
+        supply: plan.supply,
+        decimals: String(plan.decimals),
+        quote: plan.quoteSymbol,
+        par: plan.par,
+        poolPrice: plan.poolPrice,
+        handoffDays: draft.shipDays,
+        declared: draft.declared,
+        sheetSha256,
+        imageSha256,
+        title: titleAddress,
+        titleHeldBy: held,
+        serial: draft.serial,
+        makerName: draft.makerName,
+        escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
+        sheet: htmlArweave,
+        salePage: plan.venue,
+        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+        coin: coinWord,
+      });
+      const titleRows = titleAttributes({
+        record: recordAddress,
+        mint,
+        pool,
+        creator: payer.toBase58(),
+        rail: plan.rail,
+        delayDays: Number(draft.saleDays),
+        burnPercent: burnOf(draft),
+        venue: plan.venue,
+        program: ESCROW_PROGRAM[cluster],
+        sale: draft.sale,
+        shortClock,
+        sheet: htmlArweave,
+        noCoin: plan.noCoin,
+      });
+      assertOneStory({
+        sheet,
+        recordRows,
+        titleRows,
+        held,
+        creator: payer.toBase58(),
+        mint,
+        pool,
+        record: recordAddress,
+        title: titleAddress,
+        coin: coinWord,
+        sheetSha256,
+        imageSha256,
+        imageUrl: imageArweave,
+        htmlUrl: htmlArweave,
+        noCoin: plan.noCoin,
+        saleOpens: plan.noCoin ? "the day the creator sets" : `${Number(draft.saleDays)} ${shortClock ? "seconds" : "days"} after graduation`,
+        delayDays: Number(draft.saleDays),
+      });
+
       const recordTx = new Transaction().add(
         ...recordInstruction({
           endpoint: connection.rpcEndpoint,
@@ -735,31 +899,7 @@ export function RecordCreate({
           vault: new PublicKey(vault),
           name: draft.assetName,
           uri: sheetArweave,
-          attributes: keepSheet(recordAttributes({
-            mint,
-            pool,
-            vault,
-            creator: payer.toBase58(),
-            symbol: plan.symbol,
-            supply: plan.supply,
-            decimals: String(plan.decimals),
-            quote: plan.quoteSymbol,
-            par: plan.par,
-            poolPrice: plan.poolPrice,
-            handoffDays: draft.shipDays,
-            declared: draft.declared,
-            sheetSha256,
-            imageSha256,
-            title: titleAddress,
-            titleHeldBy: railWords(plan.rail),
-            serial: draft.serial,
-            makerName: draft.makerName,
-            escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
-            sheet: htmlArweave,
-            salePage: plan.venue,
-            soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
-            coin: plan.noCoin ? "none" : "attached",
-          }), plan.omitRecord),
+          attributes: keepSheet(recordRows, plan.omitRecord),
         }),
       );
       const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction);
@@ -772,21 +912,7 @@ export function RecordCreate({
           creator: payer,
           name: titleName(draft.assetName),
           uri: sheetArweave,
-          attributes: keepSheet(titleAttributes({
-            record: recordAddress,
-            mint,
-            pool,
-            creator: payer.toBase58(),
-            rail: plan.rail,
-            delayDays: Number(draft.saleDays),
-            burnPercent: burnOf(draft),
-            venue: plan.venue,
-            program: ESCROW_PROGRAM[cluster],
-            sale: draft.sale,
-            shortClock: cluster === "devnet" && plan.rail === "escrow",
-            sheet: htmlArweave,
-            noCoin: plan.noCoin,
-          }), plan.omitTitle),
+          attributes: keepSheet(titleRows, plan.omitTitle),
         }),
       );
       const titleSig = await sendPrepared(connection, await prepareTransaction(connection, payer, titleTx, [keys.title]), signTransaction);
@@ -839,6 +965,7 @@ export function RecordCreate({
           body: JSON.stringify({ pool, cluster }),
         }).catch(() => undefined);
       }
+      onCreated?.();
       setFinished({ pool, record: recordAddress, title: titleAddress });
       setPlan(null);
     } catch (cause) {

@@ -88,6 +88,21 @@ export function railWords(rail: TitleRail): string {
   return rail === "escrow" ? "escrow program" : "creator wallet";
 }
 
+/** The same holder, read from whichever NFT still carries the line. Two different lines is no agreement. */
+export function agreedHolder(recordHolder: string | undefined, titleHolder: string | undefined): TitleRail | null {
+  if (recordHolder && titleHolder && recordHolder !== titleHolder) return null;
+  const value = titleHolder || recordHolder || "";
+  if (value === "escrow program") return "escrow";
+  if (value === "creator wallet") return "creator";
+  return null;
+}
+
+/** The same creator, read from whichever NFT still carries the address. Two different addresses is no agreement. */
+export function agreedCreator(recordCreator: string | undefined, titleCreator: string | undefined): string {
+  if (recordCreator && titleCreator && recordCreator !== titleCreator) return "";
+  return recordCreator || titleCreator || "";
+}
+
 export function saleVenueWords(rail: TitleRail): string {
   return rail === "escrow" ? "PAR escrow program" : "Tensor marketplace program";
 }
@@ -556,11 +571,12 @@ export type TitleCheck = { label: string; ok: boolean };
 
 export type TitleStatus = {
   address: string;
-  rail: TitleRail;
+  rail: TitleRail | null;
   owner: string;
   name: string;
   sheet: string;
   listing: string | null;
+  creator: string;
   tensor: TensorListing | null;
   checks: TitleCheck[];
   ok: boolean;
@@ -575,23 +591,35 @@ export async function titleStatus(
   const address = record.attributes.title;
   if (!address) return null;
   const read = await readTitle(endpoint, address);
-  const heldBy = `${read.attributes["held by"] || ""} ${record.attributes["title held by"] || ""}`;
-  const rail: TitleRail = heldBy.includes("escrow") ? "escrow" : "creator";
+  const rail = agreedHolder(record.attributes["title held by"], read.attributes["held by"]);
+  const creator = agreedCreator(record.attributes.creator, read.attributes.creator);
   const program = ESCROW_PROGRAM[cluster];
   const listing = rail === "escrow" && program ? listingAddress(new PublicKey(address), new PublicKey(program)).toBase58() : null;
-  const creator = record.attributes.creator;
   const tensor =
     rail === "creator" && read.exists && read.owner === tensorListAddress(new PublicKey(address)).toBase58()
       ? await readTensorListing(new Connection(endpoint, "confirmed"), new PublicKey(address)).catch(() => null)
       : null;
   const listedByCreator = Boolean(tensor) && tensor?.seller === creator;
-  const holderOk = rail === "escrow" ? Boolean(listing) && read.owner === listing : read.owner === creator || listedByCreator;
+  const holderOk =
+    rail === "escrow"
+      ? Boolean(listing) && read.owner === listing
+      : rail === "creator" && Boolean(creator) && (read.owner === creator || listedByCreator);
+  const recordHolder = record.attributes["title held by"] || "";
+  const titleHolder = read.attributes["held by"] || "";
+  const recordCreator = record.attributes.creator || "";
+  const titleCreator = read.attributes.creator || "";
   const checks: TitleCheck[] = [
     { label: "The title exists on chain", ok: read.exists },
     {
       label: "The title names this record and token",
       ok: read.attributes.title === TITLE_KIND && read.attributes.record === record.address && read.attributes.mint === record.attributes.mint,
     },
+    recordHolder && titleHolder
+      ? { label: "The record and the title name the same holder", ok: recordHolder === titleHolder }
+      : { label: "The title names who holds it", ok: rail !== null },
+    recordCreator && titleCreator
+      ? { label: "The record and the title name the same creator", ok: recordCreator === titleCreator }
+      : { label: "The title names the creator", ok: Boolean(creator) },
     { label: "Nobody can change the title", ok: read.locked },
     { label: "No plugin lets anyone else move, burn, or freeze it", ok: read.clean },
     {
@@ -612,6 +640,7 @@ export async function titleStatus(
     name: read.name,
     sheet: read.uri,
     listing,
+    creator,
     tensor,
     checks,
     ok: checks.every((check) => check.ok),

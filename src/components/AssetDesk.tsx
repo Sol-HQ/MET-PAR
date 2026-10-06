@@ -14,6 +14,7 @@ import { shrinkImageUnder } from "@/lib/image";
 import { BILLION_SUPPLY, type LaunchChoice } from "@/lib/launch";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import { FREE_UPLOAD_BYTES } from "@/lib/record";
+import { clearRwaDraft, rwaDraftKey } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
@@ -36,6 +37,64 @@ const PLAIN_STEPS = ["Object", "Maker", "Price", "Names", "Claim", "Redemption",
 const STEPS = [...COIN_STEPS, "Price"] as const;
 
 type Step = (typeof STEPS)[number];
+
+type SavedDraft = {
+  step: Step;
+  example: ExampleId;
+  draft: Draft;
+  withCoin: boolean | null;
+  coinInput: string;
+  coin: CoinFacts | null;
+  payInput: string;
+  pay: PayFacts | null;
+  pictureCopy: string;
+  pictureNote: string;
+  pictureBase64: string;
+};
+
+function isStep(value: unknown): value is Step {
+  return typeof value === "string" && (STEPS as readonly string[]).includes(value);
+}
+
+function readSavedDraft(): SavedDraft | null {
+  try {
+    const raw = sessionStorage.getItem(rwaDraftKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedDraft>;
+    if (!parsed.draft || typeof parsed.draft !== "object" || typeof parsed.draft.objectName !== "string") return null;
+    if (!isStep(parsed.step)) return null;
+    return {
+      step: parsed.step,
+      example: parsed.example === "kite" || parsed.example === "card" || parsed.example === "painting" ? parsed.example : "painting",
+      draft: { ...EXAMPLES.painting, ...parsed.draft },
+      withCoin: parsed.withCoin === true || parsed.withCoin === false ? parsed.withCoin : null,
+      coinInput: typeof parsed.coinInput === "string" ? parsed.coinInput : "",
+      coin: parsed.coin && typeof parsed.coin.mint === "string" ? parsed.coin : null,
+      payInput: typeof parsed.payInput === "string" ? parsed.payInput : "",
+      pay: parsed.pay && typeof parsed.pay.mint === "string" ? parsed.pay : null,
+      pictureCopy: typeof parsed.pictureCopy === "string" ? parsed.pictureCopy : "",
+      pictureNote: typeof parsed.pictureNote === "string" ? parsed.pictureNote : "",
+      pictureBase64: typeof parsed.pictureBase64 === "string" ? parsed.pictureBase64 : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunks: string[] = [];
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + 0x8000)));
+  }
+  return btoa(chunks.join(""));
+}
+
+function base64ToBlob(value: string): Blob {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: "image/jpeg" });
+}
 
 export type Draft = {
   objectName: string;
@@ -397,6 +456,7 @@ export function AssetDesk() {
   const [payInput, setPayInput] = useState("");
   const [pay, setPay] = useState<PayFacts | null>(null);
   const [payNote, setPayNote] = useState("");
+  const [restored, setRestored] = useState(false);
   const symbol = (coin?.symbol || pay?.symbol || draft.symbol).trim().toUpperCase();
   const escrowLive = escrowDepositAllowed(cluster, publicKey?.toBase58());
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
@@ -411,6 +471,63 @@ export function AssetDesk() {
   const steps: Step[] = withCoin === false ? [...PLAIN_STEPS] : [...COIN_STEPS];
   const shortClock = cluster === "devnet" && rail === "escrow";
   const waitUnit = shortClock ? "seconds" : "days";
+
+  useEffect(() => {
+    const saved = readSavedDraft();
+    if (saved) {
+      setStep(saved.step);
+      setExample(saved.example);
+      setDraft(saved.draft);
+      setWithCoin(saved.withCoin);
+      setCoinInput(saved.coinInput);
+      setCoin(saved.coin);
+      setPayInput(saved.payInput);
+      setPay(saved.pay);
+      setPictureCopy(saved.pictureCopy);
+      setPictureNote(saved.pictureNote);
+      if (saved.pictureBase64) {
+        const blob = base64ToBlob(saved.pictureBase64);
+        setPicture(blob);
+        setPictureView(URL.createObjectURL(blob));
+      }
+    }
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    let cancel = false;
+    void (async () => {
+      let pictureBase64 = "";
+      if (picture) {
+        pictureBase64 = bytesToBase64(new Uint8Array(await picture.arrayBuffer()));
+      }
+      if (cancel) return;
+      try {
+        sessionStorage.setItem(
+          rwaDraftKey(),
+          JSON.stringify({
+            step,
+            example,
+            draft,
+            withCoin,
+            coinInput,
+            coin,
+            payInput,
+            pay,
+            pictureCopy,
+            pictureNote,
+            pictureBase64,
+          } satisfies SavedDraft),
+        );
+      } catch {
+        /* A full picture can exceed the browser's storage. The fields still stay for this visit. */
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [restored, step, example, draft, withCoin, coinInput, coin, payInput, pay, picture, pictureCopy, pictureNote]);
 
   useEffect(() => {
     if (escrowLive) {
@@ -591,12 +708,21 @@ export function AssetDesk() {
     if (next) go(next);
   }
 
+  if (!restored) {
+    return (
+      <div className="desk asset-desk">
+        <p className="note">Opening the draft.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="desk asset-desk">
       <section className="lede">
         <p className="eyebrow">Template</p>
         <h1>Real-world asset</h1>
         <p className="tagline">One object. One title.</p>
+        <p className="note">What you type stays in this browser until the record is created. You can open the pool page, copy the token address, and come back.</p>
         <p>
           {withCoin === false
             ? "This page makes one title for one object. The token you name is what a buyer pays. After the title exists, you put it up at a fixed price or by bid, and you say how long before that sale opens."
@@ -1307,6 +1433,7 @@ export function AssetDesk() {
             preparedKeys={preparedKeys}
             coin={coin}
             pay={pay}
+            onCreated={clearRwaDraft}
           />
         </div>
       ) : null}

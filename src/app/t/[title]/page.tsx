@@ -1,15 +1,15 @@
 import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
-import { CLAIMED_STATUS } from "@/lib/asset-on-pool";
+import { CLAIMED_STATUS, titleWasPurchased } from "@/lib/asset-on-pool";
 import { ObjectPicture } from "@/components/AssetOnPool";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
-import { DBC_PROGRAM_ID, explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
+import { explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
 import { formatMoney, shortAddress } from "@/lib/format";
-import { loadPool } from "@/lib/load-pool";
+import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { creatorSalePercent, ESCROW_PROGRAM, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
@@ -25,8 +25,6 @@ function formatUnits(amount: bigint, decimals: number): string {
 export const dynamic = "force-dynamic";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const POOL_MIGRATED_AT = 305;
-const POOL_FINISHED_AT = 344;
 
 type Sheet = {
   name?: string;
@@ -101,16 +99,6 @@ function attributeList(heading: string, rows: Record<string, string>) {
   );
 }
 
-async function poolSale(connection: Connection, pool: string): Promise<{ graduated: boolean; finishedAt: number } | null> {
-  try {
-    const info = await connection.getAccountInfo(new PublicKey(pool), "confirmed");
-    if (!info || info.owner.toBase58() !== DBC_PROGRAM_ID || info.data.length < POOL_FINISHED_AT + 8) return null;
-    return { graduated: info.data[POOL_MIGRATED_AT] === 1, finishedAt: Number(info.data.readBigUInt64LE(POOL_FINISHED_AT)) };
-  } catch {
-    return null;
-  }
-}
-
 function day(seconds: number): string {
   return new Date(seconds * 1000).toUTCString().replace(/:\d\d GMT$/, " UTC");
 }
@@ -176,7 +164,7 @@ export default async function SalePage({
   ]);
   const noCoin = record?.attributes.coin === "none";
   const pool = ADDRESS.test(record?.attributes.pool || "") ? record?.attributes.pool || "" : "";
-  const sale = pool ? await poolSale(connection, pool) : null;
+  const sale = pool ? await curveSale(connection, pool) : null;
   const snapshot = pool ? await loadPool(connection, pool).catch(() => null) : null;
   const graduated = sale ? sale.graduated : null;
   const finishedAt = sale?.finishedAt ?? 0;
@@ -239,14 +227,21 @@ export default async function SalePage({
   const tokenDecimals = Number.parseInt(record?.attributes.decimals || "", 10);
   const decimals = Number.isFinite(tokenDecimals) ? tokenDecimals : snapshot?.baseDecimals ?? 6;
   const tensorOpen = noCoin ? Boolean(status?.tensor) : Boolean(status?.tensor && saleOpen);
+  const creatorAccount = status?.creator || "";
   const creatorHolds = Boolean(
-    status?.rail === "creator" && record && status.owner === record.attributes.creator && !status.tensor,
+    status?.rail === "creator" && creatorAccount && status.owner === creatorAccount && !status.tensor,
   );
-  const sold =
+  const leftSeller =
     leftEscrow ||
     Boolean(
-      status?.rail === "creator" && record && status.owner && status.owner !== record.attributes.creator && !status.tensor,
+      status?.rail === "creator" && creatorAccount && status.owner && status.owner !== creatorAccount && !status.tensor,
     );
+  const sold = titleWasPurchased({
+    coin: noCoin ? "none" : "attached",
+    graduated,
+    saleOpen,
+    leftSeller,
+  });
   const auction = listing?.sale === "auction";
   const clockOver = Boolean(auction && listing && listing.endsAt > 0 && now >= listing.endsAt && inEscrow);
   const forSaleNow = (inEscrow && opensAt > 0 && now >= opensAt && !clockOver) || tensorOpen;
@@ -342,7 +337,7 @@ export default async function SalePage({
                 pageCluster={cluster}
                 title={address}
                 mint={record.attributes.mint}
-                creator={record.attributes.creator}
+                creator={creatorAccount}
                 symbol={symbol}
                 burn={Number.isFinite(burn) ? burn : 0}
                 delayDays={Number.isFinite(delay) ? delay : 0}
@@ -375,7 +370,7 @@ export default async function SalePage({
             pageCluster={cluster}
             title={address}
             mint={record.attributes.mint}
-            creator={record.attributes.creator}
+            creator={creatorAccount}
             symbol={symbol}
             burn={Number.isFinite(burn) ? burn : 0}
             delayDays={Number.isFinite(delay) ? delay : 0}

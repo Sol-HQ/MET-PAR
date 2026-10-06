@@ -4,7 +4,7 @@ import { acceptedQuoteMints, rpcUrl, type ClusterName } from "@/lib/constants";
 import { readCopy, writeCopy } from "@/lib/record-copy";
 import { readRecord, RECORD_VAULT, sha256Hex } from "@/lib/record";
 import { hasIndex, hasItem, saveItem } from "@/lib/store";
-import { ESCROW_PROGRAM, listingAddress, readTitle, TITLE_KIND, type TitleRail } from "@/lib/title";
+import { ESCROW_PROGRAM, listingAddress, readTitle, TITLE_KIND, agreedCreator, agreedHolder } from "@/lib/title";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
@@ -12,6 +12,7 @@ const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 type Sheet = {
   name?: string;
   record?: {
+    creator?: string;
     token?: { config?: string; quoteMint?: string };
     title?: { address?: string; heldBy?: string; sale?: { opensDaysAfterGraduation?: number; burnPercent?: number } };
   };
@@ -58,13 +59,21 @@ export async function POST(request: Request) {
 
   const parsed = JSON.parse(sheet) as Sheet;
   const facts = record.attributes;
-  const rail: TitleRail = facts["title held by"] === "escrow program" ? "escrow" : "creator";
   const title = await readTitle(endpoint, titleAddress);
   if (!title.exists) return fail("The title is not on chain yet.", 404);
   if (title.attributes.title !== TITLE_KIND || title.attributes.record !== asset || title.attributes.mint !== facts.mint) {
     return fail("The title does not name this record and token.", 409);
   }
-  if (title.attributes["held by"] !== facts["title held by"]) return fail("The title and record disagree on who holds the title.", 409);
+  const rail = agreedHolder(facts["title held by"], title.attributes["held by"]);
+  if (!rail) return fail("The title and record disagree on who holds the title.", 409);
+  const said = rail === "escrow" ? "escrow program" : "creator wallet";
+  if (parsed.record?.title?.heldBy && parsed.record.title.heldBy !== said) {
+    return fail("The title and record disagree on who holds the title.", 409);
+  }
+  const creator = agreedCreator(facts.creator, title.attributes.creator);
+  if (!creator || (parsed.record?.creator && parsed.record.creator !== creator)) {
+    return fail("The title and record disagree on the creator.", 409);
+  }
   if (!title.locked || !title.clean) return fail("The title can still be changed, moved, or frozen by someone.", 409);
   if (parsed.record?.title?.address !== titleAddress) return fail("The record sheet names a different title.", 409);
 
@@ -73,7 +82,7 @@ export async function POST(request: Request) {
     if (cluster !== "devnet" || !ESCROW_PROGRAM[cluster]) return fail("The escrow is not on this network.", 409);
     listing = listingAddress(new PublicKey(titleAddress), new PublicKey(ESCROW_PROGRAM[cluster])).toBase58();
     if (title.owner !== listing) return fail("The escrow does not hold the title yet.", 409);
-  } else if (title.owner !== facts.creator) {
+  } else if (title.owner !== creator) {
     return fail("The creator wallet does not hold the title.", 409);
   }
 
@@ -107,7 +116,7 @@ export async function POST(request: Request) {
       mint: facts.mint,
       pool: facts.pool,
       config,
-      creator: facts.creator,
+      creator,
       vault: record.owner,
       rail,
       listing,

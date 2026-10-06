@@ -10,7 +10,7 @@ import {
 import { CpAmm, getPriceFromSqrtPrice as dammPriceFromSqrt, getTokenProgram } from "@meteora-ag/cp-amm-sdk";
 import { Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import { MIGRATION_FEE_BPS_BY_OPTION, USDC_DEVNET, USDC_MAINNET, WSOL } from "./constants";
+import { DBC_PROGRAM_ID, MIGRATION_FEE_BPS_BY_OPTION, USDC_DEVNET, USDC_MAINNET, WSOL } from "./constants";
 import { formatTokenPrice, rawToUi } from "./format";
 import { PUBLIC_ORIGIN } from "./record";
 
@@ -326,4 +326,18 @@ export async function loadDammMarket(connection: Connection, snapshot: PoolSnaps
     baseVault: (aIsBase ? state.tokenAVault : state.tokenBVault).toBase58(),
     quoteVault: (aIsBase ? state.tokenBVault : state.tokenAVault).toBase58(),
   };
+}
+
+const POOL_MIGRATED_AT = 305;
+const POOL_FINISHED_AT = 344;
+
+/** Whether this curve has graduated, and the second it did. The sale clock starts there. */
+export async function curveSale(connection: Connection, pool: string): Promise<{ graduated: boolean; finishedAt: number } | null> {
+  try {
+    const info = await connection.getAccountInfo(new PublicKey(pool), "confirmed");
+    if (!info || info.owner.toBase58() !== DBC_PROGRAM_ID || info.data.length < POOL_FINISHED_AT + 8) return null;
+    return { graduated: info.data[POOL_MIGRATED_AT] === 1, finishedAt: Number(info.data.readBigUInt64LE(POOL_FINISHED_AT)) };
+  } catch {
+    return null;
+  }
 }

@@ -1,5 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { rpcUrl, type ClusterName } from "./constants";
+import { curveSale } from "./load-pool";
 import { readCopy } from "./record-copy";
 import { RECORD_VAULT, readRecord } from "./record";
 import {
@@ -150,6 +151,18 @@ async function loadSheet(cluster: ClusterName, record: string, uri: string): Pro
 
 export const CLAIMED_STATUS = "Claimed. Still awaiting handoff.";
 
+/** A purchase can only be true after the sale was allowed to open and the title actually left. */
+export function titleWasPurchased(input: {
+  coin: "attached" | "none";
+  graduated: boolean | null;
+  saleOpen: boolean;
+  leftSeller: boolean;
+}): boolean {
+  if (!input.leftSeller) return false;
+  if (input.coin === "none") return true;
+  return input.graduated === true && input.saleOpen;
+}
+
 function standingOf(
   rail: "escrow" | "creator",
   owner: string,
@@ -158,16 +171,41 @@ function standingOf(
   listing: Listing | null,
   tensorAmount: bigint | null,
   coin: "attached" | "none",
+  graduated: boolean | null,
+  saleOpen: boolean,
 ): { standing: AssetStanding; status: string } {
   const pay = coin === "none" ? "the payment token" : "this coin";
-  if (rail === "escrow" && listingAddress && owner && owner !== listingAddress) {
-    return { standing: "sold", status: CLAIMED_STATUS };
+  const leftEscrow = Boolean(rail === "escrow" && listingAddress && owner && owner !== listingAddress);
+  const leftCreator = Boolean(rail === "creator" && owner && creator && owner !== creator && tensorAmount === null);
+  const purchased = titleWasPurchased({ coin, graduated, saleOpen, leftSeller: leftEscrow || leftCreator });
+  if (purchased) return { standing: "sold", status: CLAIMED_STATUS };
+  if (coin === "attached" && graduated === null) {
+    return { standing: "waiting", status: "The coin could not be read. This title is not marked claimed." };
+  }
+  if (coin === "attached" && graduated === false) {
+    if (rail === "escrow" && listingAddress && owner === listingAddress) {
+      return { standing: "waiting", status: "Waiting for graduation. The escrow holds the title." };
+    }
+    if (rail === "creator" && tensorAmount !== null) {
+      return { standing: "waiting", status: "Waiting for graduation. The title is listed on Tensor. The sale has not opened." };
+    }
+    if (rail === "creator" && (!creator || owner === creator)) {
+      return { standing: "waiting", status: "Waiting for graduation. The creator holds the title." };
+    }
+    if (leftEscrow) return { standing: "waiting", status: "Waiting for graduation. The title is not in the escrow." };
+    return { standing: "waiting", status: "Waiting for graduation. The title is not in the creator wallet." };
+  }
+  if (coin === "attached" && graduated === true && !saleOpen) {
+    const holder =
+      rail === "escrow" && listingAddress && owner === listingAddress
+        ? "The escrow holds the title."
+        : creator && owner === creator
+          ? "The creator holds the title."
+          : "The title is not in the creator wallet.";
+    return { standing: "waiting", status: `The coin has graduated. The sale has not opened. ${holder}` };
   }
   if (rail === "creator" && tensorAmount !== null) {
     return { standing: "for-sale", status: `For sale on Tensor for ${tokenAmount(tensorAmount)} of ${pay}.` };
-  }
-  if (rail === "creator" && owner && creator && owner !== creator) {
-    return { standing: "sold", status: CLAIMED_STATUS };
   }
   if (rail === "creator") {
     return { standing: "held", status: "The creator holds the title. It is not listed." };
@@ -196,34 +234,43 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
     titleStatus(endpoint, cluster, { address: row.record, attributes: row.attributes }),
     loadSheet(cluster, row.record, row.uri),
   ]);
-  if (!status || !title.exists) return null;
+  if (!status || !title.exists || !status.rail) return null;
   const program = ESCROW_PROGRAM[cluster];
   const listing =
     status.rail === "escrow" && program
       ? await readListing(connection, new PublicKey(program), new PublicKey(status.address)).catch(() => null)
       : null;
   const coin = row.attributes.coin === "none" ? "none" : "attached";
-  const sale = standingOf(
+  const creator = status.creator;
+  const opens = title.attributes["sale opens"] || "";
+  const delay = Number.parseInt(opens, 10);
+  const sale = coin === "attached" && row.attributes.pool && row.attributes.pool !== "none" ? await curveSale(connection, row.attributes.pool) : null;
+  const finishedAt = sale?.finishedAt ?? 0;
+  const waitSeconds = Number.isFinite(delay) ? (opens.includes("second") ? delay : delay * 86_400) : 0;
+  const saleOpen = Boolean(sale?.graduated) && finishedAt > 0 && waitSeconds > 0 && Math.floor(Date.now() / 1000) >= finishedAt + waitSeconds;
+  const result = standingOf(
     status.rail,
     status.owner,
-    row.attributes.creator || "",
+    creator,
     status.listing,
     listing,
     status.tensor ? status.tensor.amount : null,
     coin,
+    sale ? sale.graduated : coin === "attached" ? null : true,
+    coin === "none" ? true : saleOpen,
   );
   const network = cluster === "devnet" ? "?c=devnet" : "";
   return {
     pool: row.attributes.pool,
     record: row.record,
     title: status.address,
-    creator: row.attributes.creator || "",
+    creator,
     coin,
     name: sheet.name || sheet.record?.object?.name || row.name || title.name,
     symbol: row.attributes.symbol || "",
     image: typeof sheet.image === "string" ? sheet.image : "",
-    standing: sale.standing,
-    status: sale.status,
+    standing: result.standing,
+    status: result.status,
     titleTerms: rowsOf(title.attributes),
     recordTerms: rowsOf(row.attributes),
     story: storyLines(sheet),
