@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 export function MainnetGate({
   title,
   lines,
@@ -15,6 +17,32 @@ export function MainnetGate({
   onConfirm: () => void;
   kicker?: string;
 }) {
+  const [copied, setCopied] = useState(false);
+  const review = [kicker, title, "", "These are the amounts this signature will use. Nothing is sent until you confirm.", "", ...lines].join("\n");
+
+  async function copyReview() {
+    try {
+      await navigator.clipboard.writeText(review);
+    } catch {
+      try {
+        const area = document.createElement("textarea");
+        area.value = review;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.select();
+        const copiedNow = document.execCommand("copy");
+        area.remove();
+        if (!copiedNow) return;
+      } catch {
+        return;
+      }
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <div className="gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
       <div className="gate-card">
@@ -27,6 +55,9 @@ export function MainnetGate({
           ))}
         </ul>
         <div className="actions">
+          <button type="button" onClick={() => void copyReview()}>
+            {copied ? "Copied" : "Copy"}
+          </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>

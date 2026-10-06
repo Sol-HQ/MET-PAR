@@ -7,7 +7,7 @@ import { useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { explorerTx, type ClusterName } from "@/lib/constants";
-import { prepareTransaction, sendPrepared } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 import {
   buyOnTensorTransaction,
   buyerTotal,
@@ -57,7 +57,7 @@ export function SaleTrade({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
-  const [gate, setGate] = useState<{ title: string; lines: string[]; transaction: Transaction } | null>(null);
+  const [gate, setGate] = useState<{ title: string; lines: string[]; prepared: PreparedTransaction } | null>(null);
 
   const opensAt = finishedAt > 0 ? finishedAt + delayDays * 86_400 : 0;
   const open = noCoin || (graduated && opensAt > 0 && Math.floor(Date.now() / 1000) >= opensAt);
@@ -71,13 +71,13 @@ export function SaleTrade({
       ? `The list button opens ${new Date(opensAt * 1000).toUTCString().replace(/:\d\d GMT$/, " UTC")}.`
       : "The pool does not show when the token graduated, so the list button stays closed.";
 
-  async function send(transaction: Transaction) {
-    if (!publicKey || !signTransaction) return;
+  async function send(prepared: PreparedTransaction) {
+    if (!signTransaction) return;
     setBusy(true);
     setError("");
     setGate(null);
     try {
-      const signature = await sendPrepared(connection, await prepareTransaction(connection, publicKey, transaction, []), signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction);
       setDone(explorerTx(signature, pageCluster));
       router.refresh();
     } catch (cause) {
@@ -87,9 +87,25 @@ export function SaleTrade({
     }
   }
 
-  function confirm(titleText: string, lines: string[], transaction: Transaction) {
-    if (cluster === "mainnet-beta") setGate({ title: titleText, lines, transaction });
-    else void send(transaction);
+  async function confirm(titleText: string, lines: string[], transaction: Transaction) {
+    if (!publicKey) return;
+    setBusy(true);
+    setError("");
+    try {
+      const prepared = await prepareTransaction(connection, publicKey, transaction, []);
+      if (cluster === "mainnet-beta") {
+        setGate({ title: titleText, lines: [...lines, landingCost(prepared)], prepared });
+        return;
+      }
+      if (!signTransaction) return;
+      const signature = await sendPrepared(connection, prepared, signTransaction);
+      setDone(explorerTx(signature, pageCluster));
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The wallet did not finish.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function list() {
@@ -209,7 +225,7 @@ export function SaleTrade({
           lines={gate.lines}
           confirmLabel="Open wallet"
           onCancel={() => setGate(null)}
-          onConfirm={() => void send(gate.transaction)}
+          onConfirm={() => void send(gate.prepared)}
         />
       ) : null}
     </div>

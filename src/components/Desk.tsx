@@ -47,7 +47,7 @@ import {
   parseFeePercent,
   type PlatformSettings,
 } from "@/lib/platform";
-import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { landingCost, landingCostMany, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 import {
   DAY_SECONDS,
   NO_RESERVE,
@@ -584,7 +584,7 @@ export function Desk() {
             ),
             "Action: createPool",
             "The template is already on chain. This signature creates the token.",
-            `Network fee: ${formatLamports(prepared.feeLamports)}`,
+            landingCost(prepared),
             "Quote token spent: 0",
           ],
         });
@@ -798,10 +798,10 @@ export function Desk() {
             ? `After the lock, the pool fee is ${bpsToPercent(curveShapeValue.compound.poolFeeBps)}. ${bpsToPercent(curveShapeValue.compound.compoundingBps)} of that fee is put back into the pool. The liquidity stays locked.`
             : `After migration the pool charges ${migrationFeeLabel(migrationFeeBps)} on every swap. Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%, platform ${platformFeePercent}%, token creator ${creatorPercent}%. Those fee shares wait until they are claimed. The claim buttons on this site withdraw the curve fee from before migration.`,
           prepared
-            ? `Network fee: ${formatLamports((configPrepared?.feeLamports ?? 0) + prepared.feeLamports)}`
-            : `Template network fee: ${formatLamports(configPrepared?.feeLamports ?? 0)}. The second signature pays the mint and pool rent, about 0.021 SOL, and the wallet shows that exact amount.`,
+            ? landingCostMany([configPrepared, prepared])
+            : `Template network fee: ${formatLamports(configPrepared?.feeLamports ?? 0)}${configPrepared?.tipLamports ? `. Jito tip: ${formatLamports(configPrepared.tipLamports)}. The tip sits inside this transaction, so it is paid when the transaction lands.` : ""}. The second signature pays 0.01058164 SOL rent for the mint, metadata, pool, and two token vaults, plus its own network fee${configPrepared?.tipLamports ? " and a 0.0002 SOL Jito tip" : ""}. The wallet shows that exact amount.`,
           configPrepared
-            ? "Meteora writes the supply, prices, and fee into a template account and does not let that account be edited, so this create pays about 0.005984 SOL rent for a new one. The platform fee claimer stays the platform wallet."
+            ? "Meteora writes the supply, prices, and fee into a template account and does not let that account be edited, so this create pays 0.00597408 SOL rent for a new one. The platform fee claimer stays the platform wallet."
             : "Rent for the new mint, metadata, pool, and token vaults is charged in SOL on top of that network fee.",
         ],
       };
@@ -1761,7 +1761,7 @@ export function Desk() {
           </p>
         ) : picture.ok ? (
           <p className="note">
-            Creating it signs twice and pays about 0.006 SOL of rent for a new template. The supply and prices
+            Creating it signs twice. A new template costs 0.00597408 SOL of rent. The mint, metadata, pool, and vaults cost another 0.01058164 SOL. The supply and prices
             are written into that template and cannot be edited later.
             {paid ? " Changing these numbers after a paid template charges that rent again." : ""}
           </p>

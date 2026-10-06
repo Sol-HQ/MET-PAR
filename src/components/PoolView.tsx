@@ -26,11 +26,11 @@ import { RecordPanel } from "@/components/RecordPanel";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
 import { explorerAccount, explorerTx, feeDecayLabel, meteoraPoolUrl } from "@/lib/constants";
-import { bpsToPercent, dollarsToSol, formatDollars, formatLamports, formatMoney, pricePerToken, rawToUi, shortAddress, uiToRaw } from "@/lib/format";
+import { bpsToPercent, dollarsToSol, formatDollars, formatMoney, pricePerToken, rawToUi, shortAddress, uiToRaw } from "@/lib/format";
 import { loadDammMarket, loadPool, type DammMarket, type PoolSnapshot } from "@/lib/load-pool";
 import { loadHolders, loadTrades, type HolderRow, type TradeRow } from "@/lib/pool-book";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
-import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 import { poolPath } from "@/lib/title";
 import { loadCreatorClaim, nextUnlockSeconds, publicSchedule, storyFromRaw, type CreatorClaim } from "@/lib/vesting";
 
@@ -493,7 +493,7 @@ export function PoolView({ address }: { address: string }) {
         `Protocol fee: ${preview.protocolFee} ${snapshot.quoteSymbol}`,
         `Returned to your wallet: ${preview.unspent} ${unit}`,
         `Slippage: ${bpsToPercent(preview.slippageBps)} (${preview.slippageBps} bps). This is not a fee.`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines });
@@ -548,7 +548,7 @@ export function PoolView({ address }: { address: string }) {
           : `${snapshot.symbol} sent to this wallet: ${rawToUi(baseFee, snapshot.baseDecimals)}`,
         `Receiver: ${publicKey.toBase58()}`,
         "This withdraws the creator share of the curve fee. It does not take tokens out of the locked pool.",
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines });
@@ -602,7 +602,7 @@ export function PoolView({ address }: { address: string }) {
           : `${snapshot.symbol} sent to the platform wallet: ${rawToUi(baseFee, snapshot.baseDecimals)}`,
         `Receiver: ${publicKey.toBase58()}`,
         "This withdraws the platform share of the curve fee. It does not take tokens out of the locked pool.",
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines });
@@ -650,7 +650,7 @@ export function PoolView({ address }: { address: string }) {
         `Receiver: ${snapshot.leftoverReceiver}`,
         "These tokens were left on the curve. They are not taken out of the locked pool.",
         `${snapshot.quoteSymbol} spent: 0`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines });
@@ -698,7 +698,7 @@ export function PoolView({ address }: { address: string }) {
         `Receiver: ${publicKey.toBase58()}`,
         "This is the reserved supply that the schedule has unlocked. It does not take tokens out of the trading pool.",
         `${snapshot.quoteSymbol} spent: 0`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines });

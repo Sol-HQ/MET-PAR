@@ -837,6 +837,7 @@ input.bad {
 }
 
 .gate-card {
+  user-select: text;
   width: min(38rem, 100%);
   max-height: calc(100dvh - 2rem);
   margin-top: auto;

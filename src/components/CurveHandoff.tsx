@@ -6,8 +6,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
-import { bpsToPercent, formatLamports } from "@/lib/format";
-import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { bpsToPercent } from "@/lib/format";
+import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 
 type Pending = { prepared: PreparedTransaction; lines: string[]; done: string };
 
@@ -98,7 +98,7 @@ export function LockReady({
         `Token: ${symbol}`,
         "These tokens come out of the curve and stay reserved for the creator.",
         "Quote spent: 0",
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
         "The wallet also pays the SOL rent for the locker. The wallet shows that amount before you approve.",
       ];
       const done =
@@ -184,7 +184,7 @@ export function OpenPool({
         `Curve: ${pool}`,
         `Pool fee after it opens: ${bpsToPercent(feeBps)}`,
         `${quoteSymbol} spent: 0`,
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
         `The tokens and ${quoteSymbol} that move into the pool stay locked. This signature opens the pool.`,
       ];
       await gateOrSend(prepared, lines, "The trading pool is open.");

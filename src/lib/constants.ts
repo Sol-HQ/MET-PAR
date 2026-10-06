@@ -81,11 +81,24 @@ export function feeDecayLabel(seconds: number): string {
 
 export type ClusterName = "devnet" | "mainnet-beta";
 
+/** The practice Helius address and the real-network Helius address are the same key. The host is the only change. */
+function mainnetFromSharedRpc(devnetUrl: string): string | null {
+  try {
+    const url = new URL(devnetUrl);
+    if (url.hostname !== "devnet.helius-rpc.com") return null;
+    url.hostname = "mainnet.helius-rpc.com";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function rpcUrl(cluster: ClusterName): string {
   if (cluster === "devnet") {
     return process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
   }
-  return process.env.NEXT_PUBLIC_MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
+  if (process.env.NEXT_PUBLIC_MAINNET_RPC_URL) return process.env.NEXT_PUBLIC_MAINNET_RPC_URL;
+  return mainnetFromSharedRpc(process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "") || "https://api.mainnet-beta.solana.com";
 }
 
 export function quoteDecimalsFor(kind: QuoteKind): number {

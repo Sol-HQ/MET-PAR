@@ -9,8 +9,7 @@ import { useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { explorerTx, type ClusterName } from "@/lib/constants";
-import { formatLamports } from "@/lib/format";
-import { prepareTransaction, sendPrepared } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
 import { escrowBidInstruction, escrowBuyInstruction, escrowSetPriceInstruction, markGraduatedInstruction, SALE_PROGRAM_FEE_PERCENT, type SaleMode } from "@/lib/title";
 
@@ -116,7 +115,7 @@ export function EscrowTrade({
       markGraduatedInstruction(new PublicKey(program), new PublicKey(title), new PublicKey(pool)),
     );
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
-    confirm("Mark graduation", [`Network: ${pageCluster}`, `Title: ${title}`, `Network fee: ${formatLamports(prepared.feeLamports)}`, "Quote token spent: 0"], prepared.transaction);
+    confirm("Mark graduation", [`Network: ${pageCluster}`, `Title: ${title}`, landingCost(prepared), "Quote token spent: 0"], prepared.transaction);
   }
 
   async function buy() {
@@ -153,7 +152,7 @@ export function EscrowTrade({
       `${showAmount(creatorPaid)} ${symbol} goes to the creator.`,
       `${showAmount(parts.fee)} ${symbol} goes to the PAR program.`,
       "The title moves to your wallet.",
-      `Network fee: ${formatLamports(prepared.feeLamports)}`,
+      landingCost(prepared),
     ], prepared.transaction);
   }
 
@@ -182,7 +181,7 @@ export function EscrowTrade({
     confirm("Change the title price", [
       `The price becomes ${showAmount(next)} ${symbol}.`,
       sale === "auction" ? "This is the reserve. It can change until the first bid." : "A fixed price can change until a buyer pays.",
-      `Network fee: ${formatLamports(prepared.feeLamports)}`,
+      landingCost(prepared),
     ], prepared.transaction);
   }
 
@@ -209,7 +208,7 @@ export function EscrowTrade({
     confirm("Bid on this title", [
       `You bid ${showAmount(amount)} ${symbol}. The coins stay in the escrow until the clock ends.`,
       leading > BigInt(0) ? `The current bid is ${showAmount(leading)} ${symbol}. That bidder is repaid if you lead.` : "This is the first bid. It starts the clock.",
-      `Network fee: ${formatLamports(prepared.feeLamports)}`,
+      landingCost(prepared),
     ], prepared.transaction);
   }
 

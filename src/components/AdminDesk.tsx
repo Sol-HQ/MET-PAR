@@ -11,9 +11,9 @@ import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
 import { FEE_DECAY_CHOICES, HIDDEN_POOLS } from "@/lib/constants";
 import { creatorSalePercent, poolPath, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
-import { formatLamports, formatMoney, rawToUi, shortAddress } from "@/lib/format";
+import { formatMoney, rawToUi, shortAddress } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
-import { prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 import {
   assertPlatformFeePercent,
   creatorSharePercent,
@@ -216,7 +216,7 @@ export function AdminDesk() {
           : `${row.symbol} sent to the platform wallet: ${rawToUi(row.partnerBaseFee, row.baseDecimals)}`,
         `Receiver: ${publicKey.toBase58()}`,
         "This withdraws the platform share of the curve fee. It does not take tokens out of the locked pool.",
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines, title: "Claim this platform fee on mainnet?" });
@@ -263,7 +263,7 @@ export function AdminDesk() {
         `Receiver: ${PLATFORM_FEE_CLAIMER}`,
         "These tokens were left on the curve. They are not taken out of the locked pool.",
         "Quote token spent: 0",
-        `Network fee: ${formatLamports(prepared.feeLamports)}`,
+        landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
         setPending({ prepared, lines, title: "Withdraw leftover tokens on mainnet?" });

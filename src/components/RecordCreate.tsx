@@ -20,7 +20,7 @@ import {
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
-import { prepareTransaction, sendPrepared } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared } from "@/lib/send";
 import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
@@ -598,8 +598,8 @@ export function RecordCreate({
         draftPlan.noCoin
           ? "The PAR program keeps 2% of an escrow sale. A Tensor sale pays you the full price."
           : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
-        `Record rent: ${formatLamports(recordRent)}. Record network fee: ${formatLamports(recordPrepared.feeLamports)}. Record transaction: ${recordBytes} of 1232 bytes.`,
-        `Title rent: ${formatLamports(titleRent)}. Title network fee: ${formatLamports(titlePrepared.feeLamports)}. Title transaction: ${titleBytes} of 1232 bytes.`,
+        `Record rent: ${formatLamports(recordRent)}. ${landingCost(recordPrepared)} Record transaction: ${recordBytes} of 1232 bytes.`,
+        `Title rent: ${formatLamports(titleRent)}. ${landingCost(titlePrepared)} Title transaction: ${titleBytes} of 1232 bytes.`,
         "The record locks at creation. Its name, link, and attributes cannot be changed, and no plugin can be added. The vault never burns it.",
         "The title locks at creation too. Nobody can change its name, link, or attributes. It can only be moved by whoever holds it.",
       ];
