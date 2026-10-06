@@ -3,6 +3,8 @@ import {
   buildCurveWithCustomSqrtPrices,
   buildCurveWithMarketCap,
   buildCurveWithTwoSegments,
+  feeNumeratorToBps,
+  getBaseFeeNumeratorByPeriod,
   getPriceFromSqrtPrice,
   getSqrtPriceFromPrice,
   MAX_SQRT_PRICE,
@@ -11,7 +13,7 @@ import {
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { Keypair } from "@solana/web3.js";
 import BN from "bn.js";
-import { BASE_DECIMALS, quoteLabel, type QuoteKind } from "./constants";
+import { BASE_DECIMALS, feeDecayLabel, quoteLabel, type QuoteKind } from "./constants";
 import { formatTokenPrice, plainDecimal } from "./format";
 import { curveBase, type CurveShape } from "./curve";
 import { NO_RESERVE, reserveToParams, storyFromRaw, type CreatorReserve } from "./vesting";
@@ -803,6 +805,137 @@ function describeFair(
 ): LaunchPicture {
   const built = buildFair(supply, par, pool, openingFeeBps, endingFeeBps, platformFeePercent, feeDurationSeconds, migrationFeeBps, kind, reserve, extra, shape);
   return finishPicture(built.config, built.read, supply, kind, extra);
+}
+
+export type LaunchChart = {
+  prices: number[];
+  openLabel: string;
+  endLabel: string;
+  /** Percent of tokens sold where a shelf ends. Empty when the price climbs the whole way. */
+  shelfAt: number | null;
+  line: string;
+  feePercents: number[];
+  feeLine: string;
+};
+
+function tokensBetween(lower: BN, upper: BN, liquidity: BN): BN {
+  if (liquidity.isZero() || !upper.gt(lower)) return new BN(0);
+  return liquidity.mul(upper.sub(lower)).div(lower.mul(upper));
+}
+
+function sqrtAfterTokens(lower: BN, liquidity: BN, tokens: BN): BN {
+  const denom = liquidity.sub(tokens.mul(lower));
+  if (!denom.gt(new BN(0))) return lower;
+  return liquidity.mul(lower).div(denom);
+}
+
+function feePercentText(percent: number): string {
+  const rounded = Math.round(percent * 100) / 100;
+  if (Number.isInteger(rounded)) return String(rounded);
+  return rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** Price and fee points from the config this card would sign. */
+export function sampleLaunchChart(
+  choice: LaunchChoice,
+  openingFeeBps: number,
+  endingFeeBps: number,
+  platformFeePercent: number,
+  feeDurationSeconds: number,
+  migrationFeeBps = 25,
+  kind: QuoteKind = "usdc",
+  reserve: CreatorReserve = NO_RESERVE,
+  extra?: QuoteExtra,
+  shape?: CurveShape,
+): LaunchChart | null {
+  try {
+    const config = buildLaunchConfig(
+      choice,
+      openingFeeBps,
+      endingFeeBps,
+      platformFeePercent,
+      feeDurationSeconds,
+      migrationFeeBps,
+      kind,
+      reserve,
+      extra,
+      shape,
+    );
+    const decimals = dec(kind, extra);
+    const start = new BN(config.sqrtStartPrice.toString());
+    const tail = new BN(MAX_SQRT_PRICE.toString());
+    let cursor = start;
+    const spans: { lo: BN; hi: BN; liquidity: BN; tokens: BN }[] = [];
+    for (const point of config.curve) {
+      const next = new BN(point.sqrtPrice.toString());
+      const liquidity = new BN(point.liquidity.toString());
+      if (liquidity.isZero() || next.eq(tail) || !next.gt(cursor)) continue;
+      spans.push({ lo: cursor, hi: next, liquidity, tokens: tokensBetween(cursor, next, liquidity) });
+      cursor = next;
+    }
+    if (spans.length === 0) return null;
+    let sold = new BN(0);
+    for (const span of spans) sold = sold.add(span.tokens);
+    if (sold.isZero()) return null;
+    const steps = 21;
+    const prices: number[] = [];
+    for (let step = 0; step < steps; step += 1) {
+      let left = sold.muln(step).divn(steps - 1);
+      let sqrt = start;
+      for (const span of spans) {
+        if (left.lte(new BN(0))) break;
+        if (left.gte(span.tokens)) {
+          left = left.sub(span.tokens);
+          sqrt = span.hi;
+          continue;
+        }
+        sqrt = sqrtAfterTokens(span.lo, span.liquidity, left);
+        left = new BN(0);
+      }
+      const price = getPriceFromSqrtPrice(sqrt, BASE_DECIMALS, decimals).toNumber();
+      if (!Number.isFinite(price) || price <= 0) return null;
+      prices.push(price);
+    }
+    const open = getPriceFromSqrtPrice(start, BASE_DECIMALS, decimals);
+    const end = getPriceFromSqrtPrice(spans[spans.length - 1].hi, BASE_DECIMALS, decimals);
+    const openLabel = tokenPrice(open, kind, extra);
+    const endLabel = tokenPrice(end, kind, extra);
+    const shelfPrice = getPriceFromSqrtPrice(spans[0].hi, BASE_DECIMALS, decimals).toNumber();
+    const openNumber = open.toNumber();
+    const shelfLift = openNumber > 0 ? shelfPrice / openNumber : 0;
+    const shelfShare = spans[0].tokens.muln(10_000).div(sold).toNumber() / 100;
+    const shelfAt = spans.length > 1 && shelfLift > 1.05 && shelfLift < 1.16 ? Math.round(shelfShare * 10) / 10 : null;
+    const line =
+      shelfAt === null
+        ? `The price rises from ${openLabel} to ${endLabel} as the tokens are bought.`
+        : `${shelfAt}% of the tokens buyers receive stay within 10% of ${openLabel}. The last slice finishes at ${endLabel}.`;
+    const fee = config.poolFees.baseFee;
+    const periods = Number(fee.firstFactor);
+    const cliff = new BN(fee.cliffFeeNumerator.toString());
+    const reduction = new BN(fee.thirdFactor.toString());
+    const feePercents: number[] = [];
+    if (periods <= 0) {
+      const flat = Math.round((feeNumeratorToBps(cliff) / 100) * 100) / 100;
+      for (let step = 0; step < steps; step += 1) feePercents.push(flat);
+    } else {
+      for (let step = 0; step < steps; step += 1) {
+        const period = Math.round((periods * step) / (steps - 1));
+        const numerator = getBaseFeeNumeratorByPeriod(cliff, periods, new BN(period), reduction, fee.baseFeeMode);
+        feePercents.push(Math.round((feeNumeratorToBps(numerator) / 100) * 100) / 100);
+      }
+    }
+    const firstFee = feePercentText(feePercents[0]);
+    const lastFee = feePercentText(feePercents[feePercents.length - 1]);
+    const feeLine =
+      periods <= 0 || firstFee === lastFee
+        ? `The fee stays at ${firstFee}% for the whole sale.`
+        : shape?.straightFall
+          ? `The fee steps from ${firstFee}% to ${lastFee}% over ${feeDecayLabel(feeDurationSeconds)}.`
+          : `The fee falls on a curve from ${firstFee}% to ${lastFee}% over ${feeDecayLabel(feeDurationSeconds)}.`;
+    return { prices, openLabel, endLabel, shelfAt, line, feePercents, feeLine };
+  } catch {
+    return null;
+  }
 }
 
 export function describeLaunch(

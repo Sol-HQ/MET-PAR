@@ -20,6 +20,9 @@ export default function PoolsPage() {
           <Link href="/asset" className="asset-link">
             Real-world asset
           </Link>
+          <Link href="/faqs" className="asset-link">
+            FAQs
+          </Link>
         </div>
       </section>
       <PoolBoard showAssets />

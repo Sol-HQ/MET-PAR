@@ -40,6 +40,9 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link href="/pools" className="admin-link">
             Pools
           </Link>
+          <Link href="/faqs" className="admin-link">
+            FAQs
+          </Link>
           {admin ? (
             <Link href="/admin" className="admin-link">
               Admin

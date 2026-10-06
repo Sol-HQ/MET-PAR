@@ -5,6 +5,7 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { CurveSketch } from "@/components/CurveSketch";
 import { MainnetGate } from "@/components/MainnetGate";
 import { PoolBoard } from "@/components/PoolBoard";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
@@ -20,6 +21,7 @@ import {
   SOL_THIN_RAISE,
   THIN_RAISE,
   describeLaunch,
+  sampleLaunchChart,
   buildLaunchConfig,
   checkClimbCustom,
   checkParPrices,
@@ -350,6 +352,22 @@ export function Desk() {
     if (!reserveError) return built;
     return { ...built, ok: false, creator: "", error: reserveError };
   }, [customMarks, choice, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, reserveError, quoteExtra, quoteCheck, curveShapeValue]);
+  const chart = useMemo(
+    () =>
+      sampleLaunchChart(
+        choice,
+        openingFeeForShape,
+        endingForCurve,
+        platform.platformFeePercent ?? 20,
+        feeDecaySeconds,
+        migrationFeeBps,
+        quoteKind,
+        curveReserve,
+        quoteExtra,
+        curveShapeValue,
+      ),
+    [choice, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra, curveShapeValue],
+  );
   const formFingerprint = JSON.stringify({
     cluster,
     quoteKind,
@@ -830,53 +848,12 @@ export function Desk() {
         <p className="eyebrow">Meteora bonding curve</p>
         <h1>PAR</h1>
         <p className="tagline">Buyers come in at one price.</p>
-        <details className="specs">
-          <summary>PAR and the curve fee</summary>
-          <div className="specs-body">
-            <h2>PAR</h2>
-            <p>
-              PAR is the price. You set one price. Most of the tokens buyers receive stay within 10% of it, so a
-              buyer now and a buyer later pay nearly the same price. That part of the sale is the shelf. It is a
-              share of the tokens, and it lasts until those tokens are bought.
-            </p>
-            <p>
-              After the shelf is bought, the last slice of the sale walks the price up to the pool price you set.
-              Both prices are on the sheet before anyone buys.
-            </p>
-            <p>
-              Leave PAR off and the price climbs from the first token to the last. Starter, Solid, Deep, and Thin
-              then use the {unit} printed on the card.
-            </p>
-            <h2>Curve fee</h2>
-            <p>
-              The curve fee is what a trade pays while the coin is still for sale. It can fall, or it can stay flat.
-            </p>
-            <p>
-              A falling fee starts at the percent you type and steps down to the ending fee you type. The fall can
-              be curved or straight. You pick the clock: 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days.
-              A buy at the open pays the opening fee. A buy after the clock pays the ending fee.
-            </p>
-            <p>A flat fee stays at the percent you type for the whole sale.</p>
-            <h2>How they work together</h2>
-            <p>
-              The shelf ends when its tokens are bought. The curve fee ends when its clock runs out. Each one ends
-              on its own.
-            </p>
-            <p>If buying is slow, the fee can already be at the ending fee while the price is still on the shelf.</p>
-            <p>If the shelf sells out quickly, the price can already be walking up to the pool while the fee is still falling.</p>
-            <h2>Graduation</h2>
-            <p>
-              Graduation is the lock. The sale is full. The {unit} raised and the tokens still left move into a
-              Meteora DAMM v2 pool. That pool is locked, so the {unit} and those tokens cannot be withdrawn. Later
-              buys can move the price up, and later sells can move it down.
-            </p>
-            <p>
-              The curve fee stops at graduation, even if time is left on the clock. From then on, every trade pays
-              the pool fee you pick below. The default is 0.25%. You can also put a share of that fee back into the pool. The liquidity stays locked either way.
-            </p>
-            <p>The prices and the fee are written into the template. They cannot be edited later.</p>
-          </div>
-        </details>
+        <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
+        <p>
+          PAR on keeps most of the sale within 10% of one price, then the last slice rises to the pool. PAR off rises
+          the whole way. Both lock when the curve is full. The full account of each part is on the{" "}
+          <Link href="/faqs">FAQs</Link> page.
+        </p>
         <div className="asset-nav">
           <Link href="/pools" className="asset-link">
             Pools
@@ -884,37 +861,26 @@ export function Desk() {
           <Link href="/asset" className="asset-link">
             Real-world asset
           </Link>
+          <Link href="/faqs" className="asset-link">
+            FAQs
+          </Link>
         </div>
-        <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
-        <p>PAR on keeps buyers near one price. PAR off lets the price rise the whole way. Both end at the same lock.</p>
-        <p>
-          The lock is graduation. When the curve is full, the {unit} raised on the sale and the tokens still left
-          move into a Meteora DAMM v2 pool. That pool is locked. The {unit} and those tokens stay in it.
-        </p>
         <div className="beats pair">
           <article>
             <strong>1. The climb, PAR on</strong>
-            <span>
-              You set one price. Most tokens buyers receive stay within 10% of it, so a buyer now and a buyer later pay nearly the same. The last slice rises to the pool price. Both prices are on the sheet before anyone buys.
-            </span>
+            <span>Most of the sale stays within 10% of one price. The last slice rises to the pool price.</span>
           </article>
           <article>
             <strong>2. The climb, PAR off</strong>
-            <span>
-              The price rises from the first token to the last. The opening price and the pool price are on the sheet, and that rise is the whole sale. Starter, Solid, Deep, and Thin put the {unit} printed on the card into that lock.
-            </span>
+            <span>The price rises from the first token to the last. The opening price and the pool price stay on the form.</span>
           </article>
           <article>
             <strong>3. The lock</strong>
-            <span>
-              The lock is graduation. It happens when the curve is full, with PAR on and with PAR off. Meteora moves the {unit} raised on the sale and the tokens still left into a DAMM v2 pool. DAMM v2 is the Meteora pool this page uses. The pool is locked, so the {unit} and those tokens cannot be withdrawn. It opens at the pool price on the sheet.
-            </span>
+            <span>When the curve is full, the quote and the remaining tokens move into a locked Meteora pool and stay there.</span>
           </article>
           <article>
             <strong>4. After the lock</strong>
-            <span>
-              Trading continues from that pool price on the DAMM v2 pool. A buy can move it up. A sell can move it down. Buy and sell here, on Meteora, and on Jupiter, Axiom, and Photon. Those screens trade this DAMM v2 pool. The curve fee has stopped. Every trade pays the pool fee you set. The default is 0.25%.
-            </span>
+            <span>Trading continues here, on Meteora, Jupiter, Axiom, and Photon. Every trade pays the pool fee.</span>
           </article>
         </div>
       </section>
@@ -1008,6 +974,21 @@ export function Desk() {
             : "Falls means this percent is the opening fee. The ending fee and the clock below set where it lands."}{" "}
           {feeStory} Meteora writes it into the template and does not let it be edited later.
         </p>
+        <div className="choices" role="group" aria-label="How the fee falls">
+          <button type="button" aria-pressed={!straightFall} onClick={() => setStraightFall(false)}>
+            Curved fall
+          </button>
+          <button type="button" aria-pressed={straightFall} onClick={() => setStraightFall(true)}>
+            Straight fall
+          </button>
+        </div>
+        <p className="note">
+          {feeFlat
+            ? "The price curve above is still there. A flat fee is a level line at the percent in the box. Curved fall and straight fall stay here for when the fee falls."
+            : straightFall
+              ? "A straight fall drops by the same amount on each step of the clock."
+              : "A curved fall drops faster at the start, then slows as it nears the ending fee."}
+        </p>
         {feeFlat ? null : (
           <>
             <label>
@@ -1021,19 +1002,6 @@ export function Desk() {
               />
               {endingProblem ? <span className="field-error">{endingProblem}</span> : null}
             </label>
-            <div className="choices" role="group" aria-label="How the fee falls">
-              <button type="button" aria-pressed={!straightFall} onClick={() => setStraightFall(false)}>
-                Curved fall
-              </button>
-              <button type="button" aria-pressed={straightFall} onClick={() => setStraightFall(true)}>
-                Straight fall
-              </button>
-            </div>
-            <p className="note">
-              {straightFall
-                ? "A straight fall drops by the same amount on each step of the clock."
-                : "A curved fall drops faster at the start, then slows as it nears the ending fee."}
-            </p>
             <div className="choices" role="group" aria-label="How long the opening fee falls">
               {FEE_DECAY_CHOICES.map((choice) => (
                 <button
@@ -1104,6 +1072,13 @@ export function Desk() {
             </p>
           </>
         )}
+        <details className="tokenomics">
+          <summary>
+            <span>Here is your coin tokenomics with your current settings</span>
+            <span className="tokenomics-dots" aria-hidden="true">
+              ···
+            </span>
+          </summary>
         <dl className="fee-sheet">
           <div>
             <dt>Supply</dt>
@@ -1209,6 +1184,7 @@ export function Desk() {
             </dd>
           </div>
         </dl>
+        </details>
         <p className="note">
           Symbol {shownSymbol || "none yet"}. Wallets read the name, symbol, and image from the metadata link stored
           on the mint.
@@ -1404,6 +1380,7 @@ export function Desk() {
             <span>{onPar ? "PAR is on. Type the supply and the two prices. A rejected number turns red." : "PAR is off. The price climbs from your opening price to your graduation price."}</span>
           </button>
         </div>
+        <CurveSketch chart={chart} />
         {preset === "meme" ? (
           <label className="meme-span">
             Lock

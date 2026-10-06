@@ -678,6 +678,9 @@ export function AssetDesk() {
           <Link href="/pools" className="asset-link">
             Pools
           </Link>
+          <Link href="/faqs" className="asset-link">
+            FAQs
+          </Link>
         </div>
         <div className="asset-examples">
           <p className="eyebrow">Examples</p>
