@@ -113,7 +113,6 @@ export function creatorPromises(input: {
   delayDays: number;
   burnPercent: number;
   handoffDays: string;
-  venue: string;
   sale?: SaleMode;
   /** Practice program only. Each entered day is one second on chain. */
   shortClock?: boolean;
@@ -135,11 +134,11 @@ export function creatorPromises(input: {
     "The title is the one claim to the item. Whoever holds the title can claim the item from me.",
     escrow
       ? auction
-        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. This site finishes it when the clock ends.`
-        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it, from the PAR sale page (${input.venue}) or any other tool.`
+        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. PAR platform finishes it when the clock ends.`
+        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
       : attached
-        ? `I will list the title from the PAR sale page (${input.venue}), through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
-        : `I will put this title up for sale from the PAR sale page (${input.venue}). I name the payment token, a fixed price or a bid, and how many days before the sale opens. I can list it through Tensor or put it in the PAR escrow.`,
+        ? `I will list the title through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
+        : `I will put this title up for sale on PAR platform. I name the payment token, a fixed price or a bid, and how many days before the sale opens. I can list it through Tensor or put it in the PAR escrow.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : attached
@@ -213,8 +212,8 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     rows.push({
       key: "auction",
       value: facts.shortClock
-        ? "72 seconds after the first bid at the reserve. A bid in the last second extends 1 second. Sits 60 seconds if no bid. This site finishes it."
-        : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. This site finishes it.`,
+        ? "72 seconds after the first bid at the reserve. A bid in the last second extends 1 second. Sits 60 seconds if no bid. PAR platform finishes it when the clock ends."
+        : `${AUCTION_HOURS} hours after the first bid at the reserve. A bid in the last hour extends ${AUCTION_EXTEND_HOURS} hour. Sits ${AUCTION_SIT_DAYS} days if no bid. PAR platform finishes it when the clock ends.`,
     });
   }
   return rows;

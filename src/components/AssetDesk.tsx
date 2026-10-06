@@ -1410,7 +1410,7 @@ export function AssetDesk() {
                 : "Sale path: chosen on the sale page. A fixed price or a bid, paid in the token you named. You set how long before the sale opens."}
           </p>
           <p className="note">
-            Both NFTs carry the picture, the token address, the sale page, and a link named full sheet. That link opens this sheet on Arweave. The sheet names the token and links to the sale page, where the title can be bought or bid on.
+            Both NFTs carry the token address, sale page PAR platform, and a link named full sheet. That link opens this sheet on Arweave.
           </p>
           <ol className="beats asset-beats">
             {sheet.map(([title, body]) => (

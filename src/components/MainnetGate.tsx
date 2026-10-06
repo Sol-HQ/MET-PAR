@@ -9,6 +9,7 @@ export function MainnetGate({
   onCancel,
   onConfirm,
   kicker = "Mainnet confirmation",
+  note = "These are the amounts this signature will use. Nothing is sent until you confirm.",
 }: {
   title: string;
   lines: string[];
@@ -16,9 +17,10 @@ export function MainnetGate({
   onCancel: () => void;
   onConfirm: () => void;
   kicker?: string;
+  note?: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const review = [kicker, title, "", "These are the amounts this signature will use. Nothing is sent until you confirm.", "", ...lines].join("\n");
+  const review = [kicker, title, "", note, "", ...lines].join("\n");
 
   async function copyReview() {
     try {
@@ -48,7 +50,7 @@ export function MainnetGate({
       <div className="gate-card">
         <p className="eyebrow">{kicker}</p>
         <h2 id="gate-title">{title}</h2>
-        <p>These are the amounts this signature will use. Nothing is sent until you confirm.</p>
+        <p>{note}</p>
         <ul>
           {lines.map((line) => (
             <li key={line}>{line}</li>

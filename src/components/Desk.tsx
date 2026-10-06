@@ -36,11 +36,11 @@ import {
   type LaunchChoice,
   type RaiseChoice,
 } from "@/lib/launch";
-import { bpsToPercent, formatDollars, formatLamports, plainDecimal } from "@/lib/format";
+import { bpsToPercent, formatDollars, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
 import { readCurveShape } from "@/lib/curve";
-import { metadataUriForChain } from "@/lib/metadata";
+import { arweaveUrl } from "@/lib/record";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
   assertCurveFee,
@@ -50,7 +50,7 @@ import {
   parseFeePercent,
   type PlatformSettings,
 } from "@/lib/platform";
-import { landingCost, landingCostMany, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
 import {
   DAY_SECONDS,
   NO_RESERVE,
@@ -76,7 +76,11 @@ type PoolDraft = {
   config: PublicKey;
   name: string;
   symbol: string;
-  uri: string;
+  /** The picture to store when the create is confirmed. */
+  image: string;
+  description: string;
+  /** Set after confirm, once the metadata file has an address. */
+  metadataUri: string;
   tokenBadge?: PublicKey;
 };
 
@@ -86,6 +90,7 @@ type PendingCreate = {
   poolDraft?: PoolDraft;
   fingerprint: string;
   lines: string[];
+  note?: string;
   poolAddress: string;
   name: string;
   symbol: string;
@@ -562,26 +567,69 @@ export function Desk() {
     }
   }
 
+  async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string }> {
+    if (!publicKey || !signMessage || !signTransaction) {
+      throw new Error("Connect a wallet to store the image and the metadata.");
+    }
+    const { TurboFactory } = await import("@ardrive/turbo-sdk/web");
+    const turbo = TurboFactory.authenticated({
+      token: "solana",
+      walletAdapter: { publicKey, signMessage, signTransaction },
+    });
+    let imageUri = "";
+    if (draft.image) {
+      const response = await fetch(draft.image);
+      if (!response.ok) throw new Error("The image could not be read.");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const type = response.headers.get("content-type") || "";
+      const contentType = type.startsWith("image/") ? type.split(";")[0] : "image/jpeg";
+      const imageUpload = await turbo.upload({
+        data: bytes,
+        dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
+      });
+      imageUri = arweaveUrl(imageUpload.id);
+    }
+    const body: { name: string; symbol: string; image?: string; description?: string; platform: string } = {
+      name: draft.name,
+      symbol: draft.symbol,
+      platform: "PAR platform",
+    };
+    if (imageUri) body.image = imageUri;
+    if (draft.description) body.description = draft.description;
+    const metadataUpload = await turbo.upload({
+      data: JSON.stringify(body),
+      dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
+    });
+    const metadata = arweaveUrl(metadataUpload.id);
+    if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
+    return { image: imageUri, metadata };
+  }
+
   async function finish(next: PendingCreate): Promise<"created" | "paused"> {
     if (!publicKey || !signTransaction) throw new Error("This wallet cannot sign transactions.");
     const sentTemplate = Boolean(next.configPrepared);
     let templateSaved = false;
     try {
-      if (next.configPrepared && next.poolDraft) {
+      let prepared = next.prepared;
+      let draft = next.poolDraft;
+      if (!prepared && draft && !draft.metadataUri) {
+        setMessage("Storing the image and the metadata on Arweave...");
+        const stored = await storeWithToken(draft);
+        draft = { ...draft, image: stored.image, metadataUri: stored.metadata };
+      }
+      if (next.configPrepared && draft) {
         await sendPrepared(connection, next.configPrepared, signTransaction);
         setPaid({
           fingerprint: next.fingerprint,
-          config: next.poolDraft.config,
-          baseMint: next.poolDraft.baseMint,
+          config: draft.config,
+          baseMint: draft.baseMint,
         });
         templateSaved = true;
         setMessage("Template confirmed. Building the token...");
-        await waitForAccount(connection, next.poolDraft.config);
+        await waitForAccount(connection, draft.config);
       }
-      let prepared = next.prepared;
       if (!prepared) {
-        const draft = next.poolDraft;
-        if (!draft) throw new Error("The pool transaction was not built.");
+        if (!draft || !draft.metadataUri) throw new Error("The metadata address is missing.");
         const client = DynamicBondingCurveClient.create(connection, "confirmed");
         let transaction = null;
         let lastError: unknown;
@@ -592,7 +640,7 @@ export function Desk() {
               config: draft.config,
               name: draft.name,
               symbol: draft.symbol,
-              uri: draft.uri,
+              uri: draft.metadataUri,
               payer: publicKey,
               poolCreator: publicKey,
               tokenBadge: draft.tokenBadge,
@@ -610,27 +658,37 @@ export function Desk() {
         }
         prepared = await prepareTransaction(connection, publicKey, transaction, [draft.baseMint]);
       }
-      if (cluster === "mainnet-beta" && sentTemplate) {
+      if (cluster === "mainnet-beta" && !next.prepared) {
+        if (!draft?.metadataUri) throw new Error("The metadata address is missing.");
+        const templateNote = sentTemplate
+          ? "The template signature just landed."
+          : "The template for these numbers is already on chain.";
         setPending({
           ...next,
           prepared,
           configPrepared: undefined,
-          poolDraft: undefined,
+          poolDraft: draft,
+          note: `${templateNote} The picture and the metadata are already on Arweave. This signature creates the token and writes the metadata address below. Cancel leaves the token uncreated.`,
           lines: [
-            ...next.lines.filter(
-              (line) =>
-                !line.startsWith("Action:") &&
-                !line.startsWith("Template network fee") &&
-                !line.startsWith("Network fee") &&
-                !line.startsWith("This opening percent"),
-            ),
-            "Action: createPool",
-            "The template is already on chain. This signature creates the token.",
+            "Action: createPool. This signature creates the token.",
+            `Network: ${cluster}`,
+            `Name: ${draft.name}`,
+            `Symbol: ${draft.symbol}`,
+            ...(draft.description ? [`Description: ${draft.description}`] : []),
+            "Platform: PAR platform",
+            `Image: ${draft.image || "none"}`,
+            `Metadata: ${draft.metadataUri}`,
+            `Config: ${draft.config.toBase58()}`,
+            `Base mint: ${draft.baseMint.publicKey.toBase58()}`,
+            `Pool: ${next.poolAddress}`,
             landingCost(prepared),
             "Quote token spent: 0",
+            draft.image
+              ? "This signature writes the name, the symbol, and the metadata address on the token. The image address is inside that metadata file."
+              : "This signature writes the name, the symbol, and the metadata address on the token.",
           ],
         });
-        setMessage("Template confirmed. Review the token signature.");
+        setMessage("Review the token signature. That is the signature that creates the token.");
         return "paused";
       }
       const signature = await sendPrepared(connection, prepared, signTransaction);
@@ -708,18 +766,6 @@ export function Desk() {
       setError("Image must be an https link.");
       return;
     }
-    let trimmedUri = "";
-    try {
-      trimmedUri = metadataUriForChain(window.location.origin, {
-        name: trimmedName,
-        symbol: trimmedSymbol,
-        image: trimmedImage,
-        description: trimmedDescription,
-      });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Metadata link is too long.");
-      return;
-    }
 
     const platformFeePercent = platform.platformFeePercent ?? 20;
     const creatorPercent = creatorSharePercent(platformFeePercent);
@@ -747,23 +793,6 @@ export function Desk() {
         configPrepared = await prepareTransaction(connection, publicKey, configTransaction, [freshConfig]);
         configKey = freshConfig.publicKey;
       }
-      const prepared = reuse
-        ? await prepareTransaction(
-            connection,
-            publicKey,
-            await client.creator.createPool({
-              baseMint: baseMint.publicKey,
-              config: configKey,
-              name: trimmedName,
-              symbol: trimmedSymbol,
-              uri: trimmedUri,
-              payer: publicKey,
-              poolCreator: publicKey,
-              tokenBadge,
-            }),
-            [baseMint],
-          )
-        : undefined;
       const poolAddress = deriveDbcPoolAddress(
         quoteMint,
         baseMint.publicKey,
@@ -773,36 +802,50 @@ export function Desk() {
         curveFeeBps === endingFeeBps
           ? `Curve fee: ${bpsToPercent(curveFeeBps)} on every trade until migration.`
           : `Curve fee: starts at ${bpsToPercent(curveFeeBps)} and falls ${straightFall ? "in a straight line" : "on a curve"} to ${bpsToPercent(endingFeeBps)} over ${feeDecayLabel(feeDecaySeconds)}.`;
+      const stores = trimmedImage
+        ? "Confirming this stores the picture and these words on Arweave"
+        : "Confirming this stores these words on Arweave";
+      const mainnet = cluster === "mainnet-beta";
       const next: PendingCreate = {
-        prepared,
         configPrepared,
         fingerprint,
-        poolDraft: prepared
-          ? undefined
-          : {
-              baseMint,
-              config: configKey,
-              name: trimmedName,
-              symbol: trimmedSymbol,
-              uri: trimmedUri,
-              tokenBadge,
-            },
+        poolDraft: {
+          baseMint,
+          config: configKey,
+          name: trimmedName,
+          symbol: trimmedSymbol,
+          image: trimmedImage,
+          description: trimmedDescription,
+          metadataUri: "",
+          tokenBadge,
+        },
         poolAddress,
         name: trimmedName,
         symbol: trimmedSymbol,
         mint: baseMint.publicKey.toBase58(),
         preset,
+        note: mainnet
+          ? reuse
+            ? `${stores}. The template for these numbers is already on chain. The next check shows the Arweave address, and that signature creates the token.`
+            : `${stores}, then signs the template. The token is created by the next check, which shows the Arweave address that signature writes.`
+          : reuse
+            ? `${stores}, then creates the token. The template for these numbers is already on chain.`
+            : `${stores}, then signs the template and creates the token.`,
         lines: [
           reuse
-            ? "Action: createPool. The template for these numbers is already on chain."
+            ? mainnet
+              ? `Action: ${stores}. The template for these numbers is already on chain. The token signature is the next check.`
+              : `Action: ${stores}, then create the token. The template for these numbers is already on chain.`
             : configPrepared
-              ? "Action: createConfig, then createPool. The wallet opens twice."
-              : "Action: createPool",
+              ? mainnet
+                ? `Action: ${stores}, then sign the template. This confirmation does not create the token.`
+                : `Action: ${stores}, then sign the template and the token.`
+              : `Action: ${stores}, then create the token.`,
           `Network: ${cluster}`,
           `Name: ${trimmedName}`,
           `Symbol: ${trimmedSymbol}`,
-          `Image: ${trimmedImage || "none"}`,
-          `Metadata: ${trimmedUri}`,
+          ...(trimmedDescription ? [`Description: ${trimmedDescription}`] : []),
+          "Platform: PAR platform",
           `Config: ${configKey.toBase58()}`,
           `Base mint: ${baseMint.publicKey.toBase58()}`,
           `Pool: ${poolAddress}`,
@@ -838,13 +881,13 @@ export function Desk() {
           dynamicFee ? "A volatility fee can add on top of the curve fee when the price moves fast. The total still stops at 99%." : "The curve fee is the base fee only.",
           curveShapeValue.compound
             ? `After the lock, the pool fee is ${bpsToPercent(curveShapeValue.compound.poolFeeBps)}. ${bpsToPercent(curveShapeValue.compound.compoundingBps)} of that fee is put back into the pool. The liquidity stays locked.`
-            : `After migration the pool charges ${migrationFeeLabel(migrationFeeBps)} on every swap. Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%, platform ${platformFeePercent}%, token creator ${creatorPercent}%. Those fee shares wait until they are claimed. The claim buttons on this site withdraw the curve fee from before migration.`,
-          prepared
-            ? landingCostMany([configPrepared, prepared])
-            : `Template network fee: ${formatLamports(configPrepared?.feeLamports ?? 0)}${configPrepared?.tipLamports ? `. Jito tip: ${formatLamports(configPrepared.tipLamports)}. The tip sits inside this transaction, so it is paid when the transaction lands.` : ""}. The second signature pays 0.01058164 SOL rent for the mint, metadata, pool, and two token vaults, plus its own network fee${configPrepared?.tipLamports ? " and a 0.0002 SOL Jito tip" : ""}. The wallet shows that exact amount.`,
-          configPrepared
-            ? "Meteora writes the supply, prices, and fee into a template account and does not let that account be edited, so this create pays 0.00597408 SOL rent for a new one. The platform fee claimer stays the platform wallet."
-            : "Rent for the new mint, metadata, pool, and token vaults is charged in SOL on top of that network fee.",
+            : `After migration the pool charges ${migrationFeeLabel(migrationFeeBps)} on every swap. Of that fee: Meteora ${METEORA_TRADING_FEE_PERCENT}%, platform ${platformFeePercent}%, token creator ${creatorPercent}%. Those fee shares wait until they are claimed. The claim buttons withdraw the curve fee from before migration.`,
+          ...(configPrepared
+            ? [
+                landingCost(configPrepared),
+                `This signature writes the supply, prices, and fee into template ${configKey.toBase58()}. That account cannot be edited. The platform fee claimer is ${PLATFORM_FEE_CLAIMER}.`,
+              ]
+            : ["The template for these numbers is already on chain. This confirmation does not pay template rent again."]),
         ],
       };
       setPending(next);
@@ -1821,7 +1864,7 @@ export function Desk() {
           </p>
         ) : picture.ok ? (
           <p className="note">
-            Creating it signs twice. A new template costs 0.00597408 SOL of rent. The mint, metadata, pool, and vaults cost another 0.01058164 SOL. The supply and prices
+            Creating it stores the picture and the metadata on Arweave, then signs a new template, then signs the token. The check shows the network fee before each signature. The supply and prices
             are written into that template and cannot be edited later.
             {paid ? " Changing these numbers after a paid template charges that rent again." : ""}
           </p>
@@ -1858,6 +1901,7 @@ export function Desk() {
           kicker={cluster === "devnet" ? "Practice check" : "Real network check"}
           title={cluster === "devnet" ? "Create this token on the practice network?" : "Create this token on the real network?"}
           lines={pending.lines}
+          note={pending.note}
           confirmLabel="Open wallet"
           onCancel={() => setPending(null)}
           onConfirm={() => {

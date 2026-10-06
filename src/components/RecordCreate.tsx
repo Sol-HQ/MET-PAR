@@ -12,7 +12,6 @@ import { bpsToPercent, formatLamports } from "@/lib/format";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import {
   FREE_UPLOAD_BYTES,
-  PUBLIC_ORIGIN,
   RECORD_KIND,
   RECORD_VAULT,
   arweaveUrl,
@@ -39,7 +38,6 @@ import {
   creatorSalePercent,
   poolPath,
   salePath,
-  saleUrl,
   saleVenueWords,
   CREATOR_BURN_DAYS,
   ESCROW_COMING,
@@ -295,7 +293,6 @@ function sheetJson(input: {
           uri: plan.tokenUri,
           image: input.image.arweave,
           pool: plan.pool,
-          poolPage: plan.noCoin ? "" : `${PUBLIC_ORIGIN}${poolPath(plan.pool, input.cluster === "devnet" ? "devnet" : "mainnet-beta")}`,
           config: plan.config,
           quote: plan.quoteSymbol,
           quoteMint: input.quoteMint,
@@ -364,7 +361,7 @@ function sheetJson(input: {
                     extend: shortClock ? 1 : AUCTION_EXTEND_HOURS,
                     sitWithoutBid: shortClock ? 60 : AUCTION_SIT_DAYS,
                     sitUnit: shortClock ? "seconds" : "days",
-                    finish: "This site sends the finish when the clock ends. The creator and the bidder do not send it.",
+                    finish: "PAR platform sends the finish when the clock ends. The creator and the bidder do not send it.",
                   }
                 : null,
           },
@@ -421,7 +418,6 @@ export function RecordCreate({
     delayDays: Number(draft.saleDays),
     burnPercent: burnOf(draft),
     handoffDays: draft.shipDays,
-    venue: "the sale page named on this record sheet",
     sale: draft.sale,
     shortClock: cluster === "devnet" && rail === "escrow",
     attached: Boolean(coin),
@@ -480,14 +476,13 @@ export function RecordCreate({
       const title = keys.title.publicKey.toBase58();
       const payerKey = wallet.publicKey;
       const creator = payerKey.toBase58();
-      const venue = saleUrl(title, cluster);
+      const venue = "PAR platform";
       const attached = Boolean(read);
       const promises = creatorPromises({
         rail: attached ? rail : "creator",
         delayDays: Number(draft.saleDays),
         burnPercent: burnOf(draft),
         handoffDays: draft.shipDays,
-        venue,
         sale: draft.sale,
         shortClock: cluster === "devnet" && rail === "escrow",
         attached,
@@ -684,14 +679,16 @@ export function RecordCreate({
         `Title: ${title}`,
         `Platform vault: ${vault}`,
         draftPlan.noCoin
-          ? `The title stays in your wallet (${creator}). On its sale page you choose Tensor or the PAR escrow. PAR tracks it at ${venue}`
-          : `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. PAR tracks it at ${venue}`,
+          ? `The title stays in your wallet (${creator}). On the sale you choose Tensor or the PAR escrow. Sale page written on the record and the title: ${venue}.`
+          : `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. Sale page written on the record and the title: ${venue}.`,
         useRail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
             ? `On the sale page you set a fixed price or a bid in ${draftPlan.symbol}, and how many days before the sale opens. Tensor pays you the full price and PAR takes none of that sale. In the escrow you can also name a burn from 0% to 98% and up to three extra wallets. The PAR program keeps 2% of an escrow sale.`
             : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
-        `The record and the title each carry the token address ${mint}, the sale page, and a full sheet link. That link is the readable page on Arweave.`,
+        `The record and the title each carry the token address ${mint}, sale page ${venue}, and a full sheet link. That link is the readable page on Arweave.`,
+        "The wallet signs this message. These are the words, in this order.",
+        ...sampleMessage.split("\n"),
         draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : `Payment token: ${draftPlan.tokenName} (${draftPlan.symbol}).`,
         `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         draftPlan.noCoin
@@ -762,6 +759,8 @@ export function RecordCreate({
       const titleAddress = keys.title.publicKey.toBase58();
       const mint = plan.mint;
       const message = promiseMessage({ promises: plan.promises, record: recordAddress, title: titleAddress, mint, creator: payer.toBase58() });
+      const shown = plan.lines.slice(plan.lines.indexOf("PAR creator promise"), plan.lines.indexOf("PAR creator promise") + message.split("\n").length).join("\n");
+      if (shown !== message) throw new Error("The wallet message does not match the review. Press Review create again.");
       const signed = await signMessage(new TextEncoder().encode(message));
       const promise: Promise_ = { message, signature: Buffer.from(signed).toString("base64") };
       mark("Promises signed by your wallet");
@@ -1091,6 +1090,7 @@ export function RecordCreate({
         <MainnetGate
           title="Create this record on the real network?"
           lines={plan.lines}
+          note="Nothing is written until you confirm. The lines below are what this confirmation writes."
           confirmLabel="Open wallet"
           onCancel={() => setGateOpen(false)}
           onConfirm={() => {
