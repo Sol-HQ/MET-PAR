@@ -759,10 +759,22 @@ input.bad {
   text-transform: none;
 }
 
-.token-preview,
 .card-shot {
   width: 100%;
   height: 12rem;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  margin: 0 0 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.token-preview {
+  width: 12rem;
+  height: 12rem;
+  max-width: 100%;
   object-fit: contain;
   object-position: center;
   display: block;
