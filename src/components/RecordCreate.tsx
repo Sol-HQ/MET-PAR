@@ -783,6 +783,7 @@ export function RecordCreate({
       });
       const imageArweave = arweaveUrl(imageUpload.id);
       mark("Picture stored on Arweave", imageArweave);
+      const imageReady = bytesMatch(imageArweave, imageSha256);
 
       const pathLine = plan.noCoin
         ? "Sale path: a fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens. Tensor, or the PAR escrow."
@@ -810,6 +811,7 @@ export function RecordCreate({
       });
       const htmlArweave = arweaveUrl(htmlUpload.id);
       mark("Readable sheet stored on Arweave", htmlArweave);
+      const htmlReady = bytesMatch(htmlArweave, htmlSha256);
 
       const sheet = sheetJson({
         draft,
@@ -831,22 +833,27 @@ export function RecordCreate({
       });
       const sheetArweave = arweaveUrl(sheetUpload.id);
       mark("Record sheet stored on Arweave", sheetArweave);
+      const sheetReady = bytesMatch(sheetArweave, sheetSha256);
       setProgress((current) => [
         ...current,
-        { label: "Checking the picture and the record are readable at the addresses the record and the title will store", done: false },
+        {
+          label: "Waiting for the public addresses to return the picture and the record. The mint is not signed yet",
+          done: false,
+        },
       ]);
-      if (!(await bytesMatch(imageArweave, imageSha256))) {
+      const [imageOk, htmlOk, sheetOk] = await Promise.all([imageReady, htmlReady, sheetReady]);
+      if (!imageOk) {
         throw new Error(`The picture is not readable at ${imageArweave}. That is the address the record and the title would store. Nothing was minted.`);
       }
-      if (!(await bytesMatch(htmlArweave, htmlSha256))) {
+      if (!htmlOk) {
         throw new Error(`The readable sheet is not at ${htmlArweave}. Nothing was minted.`);
       }
-      if (!(await bytesMatch(sheetArweave, sheetSha256))) {
+      if (!sheetOk) {
         throw new Error(`The record file is not readable at ${sheetArweave}. That file holds the picture address and the record. Nothing was minted.`);
       }
       setProgress((current) =>
         current.map((item) =>
-          item.label.startsWith("Checking the picture") ? { ...item, done: true } : item,
+          item.label.startsWith("Waiting for the public addresses") ? { ...item, done: true } : item,
         ),
       );
 

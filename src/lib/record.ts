@@ -50,14 +50,14 @@ export const REMOVED_TITLES = new Set(["Fbn8wewPmDiXGgeLcKGNdTa1cnRN2todeQDtesHq
  */
 export async function bytesMatch(url: string, sha256: string): Promise<boolean> {
   if (!url || !sha256) return false;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       const response = await fetch(url);
       if (response.ok && (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256) return true;
     } catch {
       /* The gateway can lag behind the upload. */
     }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return false;
 }

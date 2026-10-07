@@ -596,6 +596,7 @@ export function Desk() {
       });
       imageUri = arweaveUrl(imageUpload.id);
     }
+    const imageReady = imageUri ? bytesMatch(imageUri, imageSha) : Promise.resolve(true);
     const body: { name: string; symbol: string; image?: string; description?: string; platform: string } = {
       name: draft.name,
       symbol: draft.symbol,
@@ -611,14 +612,25 @@ export function Desk() {
     });
     const metadata = arweaveUrl(metadataUpload.id);
     if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
+    const [imageOk, metadataOk] = await Promise.all([imageReady, bytesMatch(metadata, metadataSha)]);
+    if (imageUri && !imageOk) {
+      throw new Error(`The picture is not readable at ${imageUri}. That is the address the token would store. The token was not created.`);
+    }
+    if (!metadataOk) {
+      throw new Error(`The metadata file is not readable at ${metadata}. That file holds the name, the symbol, and the picture address. The token was not created.`);
+    }
     return { image: imageUri, metadata, imageSha, metadataSha };
   }
 
   async function storedReads(draft: PoolDraft): Promise<void> {
-    if (draft.image && !(await bytesMatch(draft.image, draft.imageSha))) {
+    const [imageOk, metadataOk] = await Promise.all([
+      draft.image ? bytesMatch(draft.image, draft.imageSha) : Promise.resolve(true),
+      bytesMatch(draft.metadataUri, draft.metadataSha),
+    ]);
+    if (draft.image && !imageOk) {
       throw new Error(`The picture is not readable at ${draft.image}. That is the address the token would store. The token was not created.`);
     }
-    if (!(await bytesMatch(draft.metadataUri, draft.metadataSha))) {
+    if (!metadataOk) {
       throw new Error(`The metadata file is not readable at ${draft.metadataUri}. That file holds the name, the symbol, and the picture address. The token was not created.`);
     }
   }
