@@ -38,6 +38,7 @@ import {
   creatorSalePercent,
   poolPath,
   salePath,
+  saleUrl,
   saleVenueWords,
   CREATOR_BURN_DAYS,
   ESCROW_COMING,
@@ -476,7 +477,7 @@ export function RecordCreate({
       const title = keys.title.publicKey.toBase58();
       const payerKey = wallet.publicKey;
       const creator = payerKey.toBase58();
-      const venue = "PAR platform";
+      const venue = saleUrl(title, cluster);
       const attached = Boolean(read);
       const promises = creatorPromises({
         rail: attached ? rail : "creator",

@@ -1410,7 +1410,7 @@ export function AssetDesk() {
                 : "Sale path: chosen on the sale page. A fixed price or a bid, paid in the token you named. You set how long before the sale opens."}
           </p>
           <p className="note">
-            Both NFTs carry the token address, sale page PAR platform, and a link named full sheet. That link opens this sheet on Arweave.
+            Both NFTs carry the token address, the sale page on www.meteora.surf, and a link named full sheet. That link opens this sheet on Arweave. The review names the exact sale page this confirmation writes.
           </p>
           <ol className="beats asset-beats">
             {sheet.map(([title, body]) => (

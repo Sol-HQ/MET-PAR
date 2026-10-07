@@ -5,7 +5,20 @@ import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi
 import type { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import type { ClusterName } from "./constants";
 
-export const PUBLIC_ORIGIN = "https://metpar-ten.vercel.app";
+export const PUBLIC_ORIGIN = "https://www.meteora.surf";
+
+/** A path this site serves. A link that still names a removed host is read on this site. */
+export function sitePath(uri: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  const host = url.hostname;
+  if (host !== "www.meteora.surf" && host !== "meteora.surf" && !host.endsWith(".vercel.app")) return null;
+  return `${url.pathname}${url.search}`;
+}
 export const CORE_PROGRAM_ID = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
 export const RECORD_KIND = "PAR asset record v1";
 /** Arweave Turbo stores items up to 105 KiB without payment. */

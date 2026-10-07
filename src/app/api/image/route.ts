@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import nacl from "tweetnacl";
 import { PublicKey } from "@solana/web3.js";
 import { pictureMessage } from "@/lib/picture";
+import { PUBLIC_ORIGIN } from "@/lib/record";
 import { countRecentPictures, hasIndex, savePicture } from "@/lib/store";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -45,8 +46,5 @@ export async function POST(request: Request) {
   }
   const id = randomBytes(6).toString("hex");
   await savePicture(id, bytes, wallet, sha256);
-  const origin = new URL(request.url).origin;
-  const host = new URL(origin).hostname;
-  const base = host === "localhost" || host === "127.0.0.1" ? "https://metpar-ten.vercel.app" : origin;
-  return Response.json({ url: `${base}/i/${id}` }, { headers: { "cache-control": "no-store" } });
+  return Response.json({ url: `${PUBLIC_ORIGIN}/i/${id}` }, { headers: { "cache-control": "no-store" } });
 }

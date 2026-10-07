@@ -1,5 +1,7 @@
 # PAR
 
+The site is [www.meteora.surf](https://www.meteora.surf).
+
 PAR is a Meteora Dynamic Bonding Curve launch where most tokens sold to buyers stay within 10% of one price. You set that price. A buyer now and a buyer later can pay nearly the same. The shelf is a share of the sale, and it lasts until those tokens are bought. The trading fee can fall over 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days, so a rush at the open costs more while the price is still near par. The last slice of the sale walks the price to the pool you set. The pool locks. Later buys can move the price higher, and later sells can move it lower.
 
 Leave PAR off and the price climbs from the first token to the last.
