@@ -10,7 +10,7 @@ import { SaleTrade } from "@/components/SaleTrade";
 import { explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
 import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
-import { RECORD_VAULT, readRecord } from "@/lib/record";
+import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { creatorSalePercent, ESCROW_PROGRAM, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
@@ -96,6 +96,14 @@ export default async function SalePage({
     return (
       <section className="card">
         <h2>That is not a title address</h2>
+      </section>
+    );
+  }
+  if (REMOVED_TITLES.has(address)) {
+    return (
+      <section className="card">
+        <h2>That record is off this site</h2>
+        <p>The token it was paired with is still listed.</p>
       </section>
     );
   }

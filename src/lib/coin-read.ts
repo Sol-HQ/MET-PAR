@@ -34,6 +34,8 @@ export type CoinFacts = {
   creatorFeePercent: number;
   isMigrated: boolean;
   uri: string;
+  /** The picture written on the coin. Empty when the coin has none. */
+  image: string;
 };
 
 /** The token a no-coin title is priced in. */
@@ -99,6 +101,7 @@ export async function readCoin(connection: Connection, mint: string): Promise<Co
     creatorFeePercent: shares.creator,
     isMigrated: snapshot.isMigrated,
     uri: snapshot.uri,
+    image: snapshot.image,
   };
 }
 

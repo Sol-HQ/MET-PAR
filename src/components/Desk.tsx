@@ -40,7 +40,7 @@ import { bpsToPercent, formatDollars, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
 import { readCurveShape } from "@/lib/curve";
-import { arweaveUrl } from "@/lib/record";
+import { arweaveUrl, bytesMatch, sha256Hex } from "@/lib/record";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
   assertCurveFee,
@@ -81,6 +81,10 @@ type PoolDraft = {
   description: string;
   /** Set after confirm, once the metadata file has an address. */
   metadataUri: string;
+  /** Hash of the picture bytes stored at image. Empty when the token has no picture. */
+  imageSha: string;
+  /** Hash of the metadata file stored at metadataUri. */
+  metadataSha: string;
   tokenBadge?: PublicKey;
 };
 
@@ -567,7 +571,7 @@ export function Desk() {
     }
   }
 
-  async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string }> {
+  async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string; imageSha: string; metadataSha: string }> {
     if (!publicKey || !signMessage || !signTransaction) {
       throw new Error("Connect a wallet to store the image and the metadata.");
     }
@@ -577,10 +581,13 @@ export function Desk() {
       walletAdapter: { publicKey, signMessage, signTransaction },
     });
     let imageUri = "";
+    let imageSha = "";
     if (draft.image) {
       const response = await fetch(draft.image);
       if (!response.ok) throw new Error("The image could not be read.");
       const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length < 32 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error("The picture is not a JPEG, so it was not stored.");
+      imageSha = await sha256Hex(bytes);
       const type = response.headers.get("content-type") || "";
       const contentType = type.startsWith("image/") ? type.split(";")[0] : "image/jpeg";
       const imageUpload = await turbo.upload({
@@ -596,13 +603,24 @@ export function Desk() {
     };
     if (imageUri) body.image = imageUri;
     if (draft.description) body.description = draft.description;
+    const metadataText = JSON.stringify(body);
+    const metadataSha = await sha256Hex(new TextEncoder().encode(metadataText));
     const metadataUpload = await turbo.upload({
-      data: JSON.stringify(body),
+      data: metadataText,
       dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
     });
     const metadata = arweaveUrl(metadataUpload.id);
     if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
-    return { image: imageUri, metadata };
+    return { image: imageUri, metadata, imageSha, metadataSha };
+  }
+
+  async function storedReads(draft: PoolDraft): Promise<void> {
+    if (draft.image && !(await bytesMatch(draft.image, draft.imageSha))) {
+      throw new Error(`The picture is not readable at ${draft.image}. That is the address the token would store. The token was not created.`);
+    }
+    if (!(await bytesMatch(draft.metadataUri, draft.metadataSha))) {
+      throw new Error(`The metadata file is not readable at ${draft.metadataUri}. That file holds the name, the symbol, and the picture address. The token was not created.`);
+    }
   }
 
   async function finish(next: PendingCreate): Promise<"created" | "paused"> {
@@ -615,7 +633,15 @@ export function Desk() {
       if (!prepared && draft && !draft.metadataUri) {
         setMessage("Storing the image and the metadata on Arweave...");
         const stored = await storeWithToken(draft);
-        draft = { ...draft, image: stored.image, metadataUri: stored.metadata };
+        draft = {
+          ...draft,
+          image: stored.image,
+          imageSha: stored.imageSha,
+          metadataUri: stored.metadata,
+          metadataSha: stored.metadataSha,
+        };
+        setMessage("Checking the picture and the token file are readable at the addresses the token will store...");
+        await storedReads(draft);
       }
       if (next.configPrepared && draft) {
         await sendPrepared(connection, next.configPrepared, signTransaction);
@@ -691,6 +717,9 @@ export function Desk() {
         setMessage("Review the token signature. That is the signature that creates the token.");
         return "paused";
       }
+      if (!draft) throw new Error("The metadata address is missing.");
+      setMessage("Checking the picture and the token file are readable at the addresses the token will store...");
+      await storedReads(draft);
       const signature = await sendPrepared(connection, prepared, signTransaction);
       setPaid(null);
       remember({
@@ -817,6 +846,8 @@ export function Desk() {
           image: trimmedImage,
           description: trimmedDescription,
           metadataUri: "",
+          imageSha: "",
+          metadataSha: "",
           tokenBadge,
         },
         poolAddress,
@@ -1902,6 +1933,7 @@ export function Desk() {
           title={cluster === "devnet" ? "Create this token on the practice network?" : "Create this token on the real network?"}
           lines={pending.lines}
           note={pending.note}
+          filename="par-token-review.txt"
           confirmLabel="Open wallet"
           onCancel={() => setPending(null)}
           onConfirm={() => {

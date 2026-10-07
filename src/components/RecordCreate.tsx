@@ -5,7 +5,7 @@ import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.j
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type Draft } from "@/components/AssetDesk";
-import { MainnetGate } from "@/components/MainnetGate";
+import { MainnetGate, ReviewFile, reviewText } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { explorerAccount, explorerTx } from "@/lib/constants";
 import { bpsToPercent, formatLamports } from "@/lib/format";
@@ -15,6 +15,7 @@ import {
   RECORD_KIND,
   RECORD_VAULT,
   arweaveUrl,
+  bytesMatch,
   recordAttributes,
   recordInstruction,
   sha256Hex,
@@ -69,6 +70,8 @@ type Plan = {
   quoteSymbol: string;
   compoundingFeeBps: number;
   tokenUri: string;
+  /** The coin's own picture. The record picture is a separate file. */
+  coinImage: string;
   openingBps: number;
   endingBps: number;
   migrationFeeBps: number;
@@ -292,7 +295,7 @@ function sheetJson(input: {
           decimals: plan.decimals,
           supply: plan.supply,
           uri: plan.tokenUri,
-          image: input.image.arweave,
+          image: plan.coinImage,
           pool: plan.pool,
           config: plan.config,
           quote: plan.quoteSymbol,
@@ -511,6 +514,7 @@ export function RecordCreate({
         quoteMint: read?.quoteMint || paid?.mint || "",
         compoundingFeeBps: read?.compoundingFeeBps ?? 0,
         tokenUri: read?.uri || "",
+        coinImage: read?.image || "",
         openingBps: read?.openingFeeBps ?? 0,
         endingBps: read?.endingFeeBps ?? 0,
         migrationFeeBps: read?.migrationFeeBps ?? 0,
@@ -785,21 +789,23 @@ export function RecordCreate({
         : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
           : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
+      const html = sheetPageHtml({
+        name: draft.assetName,
+        tokenName: plan.tokenName,
+        symbol: plan.symbol,
+        mint,
+        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+        salePage: plan.venue,
+        pool: plan.pool,
+        pathLine,
+        rows,
+        promises: plan.promises,
+        imageUrl: imageArweave,
+        attached: !plan.noCoin,
+      });
+      const htmlSha256 = await sha256Hex(new TextEncoder().encode(html));
       const htmlUpload = await turbo.upload({
-        data: sheetPageHtml({
-          name: draft.assetName,
-          tokenName: plan.tokenName,
-          symbol: plan.symbol,
-          mint,
-          soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
-          salePage: plan.venue,
-          pool: plan.pool,
-          pathLine,
-          rows,
-          promises: plan.promises,
-          imageUrl: imageArweave,
-          attached: !plan.noCoin,
-        }),
+        data: html,
         dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
       });
       const htmlArweave = arweaveUrl(htmlUpload.id);
@@ -825,6 +831,24 @@ export function RecordCreate({
       });
       const sheetArweave = arweaveUrl(sheetUpload.id);
       mark("Record sheet stored on Arweave", sheetArweave);
+      setProgress((current) => [
+        ...current,
+        { label: "Checking the picture and the record are readable at the addresses the record and the title will store", done: false },
+      ]);
+      if (!(await bytesMatch(imageArweave, imageSha256))) {
+        throw new Error(`The picture is not readable at ${imageArweave}. That is the address the record and the title would store. Nothing was minted.`);
+      }
+      if (!(await bytesMatch(htmlArweave, htmlSha256))) {
+        throw new Error(`The readable sheet is not at ${htmlArweave}. Nothing was minted.`);
+      }
+      if (!(await bytesMatch(sheetArweave, sheetSha256))) {
+        throw new Error(`The record file is not readable at ${sheetArweave}. That file holds the picture address and the record. Nothing was minted.`);
+      }
+      setProgress((current) =>
+        current.map((item) =>
+          item.label.startsWith("Checking the picture") ? { ...item, done: true } : item,
+        ),
+      );
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 
@@ -1029,6 +1053,10 @@ export function RecordCreate({
             ))}
           </ul>
           <div className="asset-nav">
+            <ReviewFile
+              text={reviewText(coin ? "Token, record, and title" : "Record and title", plan.lines)}
+              filename="par-record-review.txt"
+            />
             <button
               type="button"
               disabled={busy}
@@ -1092,6 +1120,7 @@ export function RecordCreate({
           title="Create this record on the real network?"
           lines={plan.lines}
           note="Nothing is written until you confirm. The lines below are what this confirmation writes."
+          filename="par-record-review.txt"
           confirmLabel="Open wallet"
           onCancel={() => setGateOpen(false)}
           onConfirm={() => {

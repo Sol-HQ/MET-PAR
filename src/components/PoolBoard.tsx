@@ -100,7 +100,6 @@ function ListingCard({
   const ready = card.stage === "lock";
   return (
     <article className={ready ? "card ready-call" : "card"}>
-      {card.image ? <img className="token-preview" src={card.image} alt="" /> : null}
       <Link href={sharePath} className="card-link">
         <h3>
           {card.name} {card.symbol ? <span>{card.symbol}</span> : null}
@@ -116,6 +115,7 @@ function ListingCard({
         full at {card.fullAt}
         {card.quoteSymbol === "SOL" ? solNote(String(parseFloat(card.fullAt)), solUsd) : ""}
       </p>
+      {card.image ? <img className="card-shot" src={card.image} alt="" /> : null}
       {assets?.map((asset) => (
         <Link key={asset.titleHref} href={asset.titleHref} className="attached-object">
           <ObjectPicture src={asset.image} alt={asset.name} quiet />

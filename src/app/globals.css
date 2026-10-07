@@ -759,13 +759,21 @@ input.bad {
   text-transform: none;
 }
 
-.token-preview {
-  width: 4.5rem;
-  height: 4.5rem;
+.token-preview,
+.card-shot,
+.attached-object .object-shot {
+  width: 100%;
+  max-height: 12rem;
   object-fit: cover;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--paper);
+}
+
+.card-shot,
+.attached-object .object-shot {
+  display: block;
+  margin: 0.6rem 0;
 }
 
 .object-board {
@@ -780,12 +788,6 @@ input.bad {
   text-decoration: none;
 }
 
-.attached-object .object-shot {
-  width: 100%;
-  max-height: 12rem;
-  object-fit: cover;
-  margin: 0;
-}
 
 .object-shot {
   width: min(100%, 20rem);
@@ -1071,6 +1073,7 @@ textarea {
 
 .asset-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
   margin-top: 1rem;
 }
@@ -1162,6 +1165,7 @@ textarea {
   margin: 0;
   padding-left: 18px;
   overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .record-checks {

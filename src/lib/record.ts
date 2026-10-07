@@ -40,6 +40,28 @@ export function arweaveUrl(id: string): string {
   return `https://arweave.net/${id}`;
 }
 
+/** Taken off the site. The chain copies stay where they were minted. The paired token stays. */
+export const REMOVED_RECORDS = new Set(["tQ3CWLiAHD88vseUKmFjRz9APUtEM9Q7d6Z4SZtMN1G"]);
+export const REMOVED_TITLES = new Set(["Fbn8wewPmDiXGgeLcKGNdTa1cnRN2todeQDtesHqGvrk"]);
+
+/**
+ * The address written on a mint has to return these exact bytes before that mint is signed.
+ * Wallets fetch that address once and keep the first answer, so a miss at sign time stays blank.
+ */
+export async function bytesMatch(url: string, sha256: string): Promise<boolean> {
+  if (!url || !sha256) return false;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (response.ok && (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256) return true;
+    } catch {
+      /* The gateway can lag behind the upload. */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return false;
+}
+
 /** The frozen token link. It names the record before the record exists, so the token and the record point at each other. */
 export function recordTokenUri(asset: string, mint: string, cluster: ClusterName): string {
   const network = cluster === "devnet" ? "c=devnet&" : "";

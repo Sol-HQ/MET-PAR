@@ -12,7 +12,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { DBC_PROGRAM_ID, MIGRATION_FEE_BPS_BY_OPTION, USDC_DEVNET, USDC_MAINNET, WSOL } from "./constants";
 import { formatTokenPrice, rawToUi } from "./format";
-import { sitePath } from "./record";
+import { PUBLIC_ORIGIN, sitePath } from "./record";
 
 export type PoolSnapshot = {
   address: string;
@@ -140,17 +140,23 @@ export async function readTokenName(
   }
 }
 
+/** A file this site still serves. Older links name a host that is no longer attached. */
+function hostedFile(uri: string): string | null {
+  const path = sitePath(uri);
+  if (!path || !(path.startsWith("/r/") || path.startsWith("/m") || path.startsWith("/i/"))) return null;
+  return typeof window === "undefined" ? `${PUBLIC_ORIGIN}${path}` : path;
+}
+
 async function readOffChain(uri: string): Promise<{ image: string; description: string }> {
   if (!uri.startsWith("http")) return { image: "", description: "" };
-  const path = typeof window !== "undefined" ? sitePath(uri) : null;
   try {
-    const response = await fetch(path?.startsWith("/r/") ? path : uri);
+    const response = await fetch(hostedFile(uri) || uri);
     if (!response.ok) return { image: "", description: "" };
     const body = (await response.json()) as { image?: string; description?: string };
     const image = typeof body.image === "string" ? body.image : "";
-    const imagePath = sitePath(image);
+    const imageFile = hostedFile(image);
     return {
-      image: imagePath?.startsWith("/i/") ? imagePath : image,
+      image: imageFile?.includes("/i/") ? imageFile : image,
       description: typeof body.description === "string" ? body.description.trim() : "",
     };
   } catch {

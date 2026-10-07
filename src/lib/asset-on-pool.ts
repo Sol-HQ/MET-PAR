@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { rpcUrl, type ClusterName } from "./constants";
 import { curveSale } from "./load-pool";
 import { readCopy } from "./record-copy";
-import { readRecord } from "./record";
+import { REMOVED_RECORDS, readRecord } from "./record";
 import {
   ESCROW_PROGRAM,
   readListing,
@@ -101,7 +101,7 @@ async function readIds(endpoint: string, ids: string[]): Promise<Indexed[]> {
 }
 
 async function indexedRecords(cluster: ClusterName, records: string[]): Promise<Indexed[]> {
-  const ids = [...new Set(records.filter(Boolean))];
+  const ids = [...new Set(records.filter((id) => id && !REMOVED_RECORDS.has(id)))];
   return readIds(rpcUrl(cluster), ids);
 }
 

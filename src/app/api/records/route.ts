@@ -2,7 +2,7 @@ import { deriveDbcPoolAddress } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { PublicKey } from "@solana/web3.js";
 import { acceptedQuoteMints, rpcUrl, type ClusterName } from "@/lib/constants";
 import { readCopy, writeCopy } from "@/lib/record-copy";
-import { readRecord, RECORD_VAULT, sha256Hex } from "@/lib/record";
+import { REMOVED_RECORDS, readRecord, RECORD_VAULT, sha256Hex } from "@/lib/record";
 import { hasIndex, hasItem, saveItem } from "@/lib/store";
 import { ESCROW_PROGRAM, listingAddress, readTitle, TITLE_KIND, agreedCreator, agreedHolder } from "@/lib/title";
 
@@ -33,6 +33,7 @@ export async function POST(request: Request) {
   const sheet = body?.sheet || "";
   const cluster: ClusterName = body?.cluster === "devnet" ? "devnet" : "mainnet-beta";
   if (!ADDRESS.test(asset) || !sheet || sheet.length > 110_000) return fail("Send the record address and its record sheet.", 400);
+  if (REMOVED_RECORDS.has(asset)) return fail("That record is off this site.", 410);
   if (!hasIndex() && !process.env.BLOB_READ_WRITE_TOKEN) return fail("The PAR copy is not configured.", 503);
 
   const already = hasIndex() ? await hasItem(cluster, asset) : Boolean(await readCopy(cluster, asset));

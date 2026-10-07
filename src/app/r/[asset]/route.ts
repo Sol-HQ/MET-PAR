@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { rpcUrl, type ClusterName } from "@/lib/constants";
 import { readTokenName } from "@/lib/load-pool";
 import { readCopy } from "@/lib/record-copy";
-import { PUBLIC_ORIGIN, RECORD_VAULT, readRecord, recordChecks, sha256Hex } from "@/lib/record";
+import { PUBLIC_ORIGIN, RECORD_VAULT, REMOVED_RECORDS, readRecord, recordChecks, sha256Hex } from "@/lib/record";
 import { poolPath, salePath, titleStatus } from "@/lib/title";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -25,7 +25,7 @@ export async function GET(request: Request, context: { params: Promise<{ asset: 
   const url = new URL(request.url);
   const cluster: ClusterName = url.searchParams.get("c") === "devnet" ? "devnet" : "mainnet-beta";
   const mint = url.searchParams.get("m") || "";
-  if (!ADDRESS.test(asset) || !ADDRESS.test(mint)) return new Response("Not found", { status: 404 });
+  if (!ADDRESS.test(asset) || !ADDRESS.test(mint) || REMOVED_RECORDS.has(asset)) return new Response("Not found", { status: 404 });
 
   const endpoint = rpcUrl(cluster);
   const [read, token] = await Promise.all([
