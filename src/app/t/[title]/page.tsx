@@ -172,17 +172,17 @@ export default async function SalePage({
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
   const saleLine = noCoin
-    ? "The creator lists this title at a fixed price or by bid, and sets how long before the sale opens."
+    ? "The creator lists this title (NFT) at a fixed price or by bid, and sets how long before the sale opens."
     : !title.exists
-    ? "This title is not on chain."
+    ? "This title (NFT) is not on chain."
     : !Number.isFinite(delay) || !Number.isFinite(burn)
-      ? "This title does not state its sale terms. Treat it as unverified."
+      ? "This title (NFT) does not state its sale terms. Treat it as unverified."
     : graduated === null
       ? "The pool could not be read."
       : !graduated
-        ? `The token has not graduated. The sale opens ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} after it does.`
+        ? `The sale opens ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} after the token graduates.`
         : leftEscrow
-          ? "The sale finished. The title has left the escrow."
+          ? "The sale finished. The title (NFT) has left the escrow."
           : opensAt && now >= opensAt
             ? listing?.sale === "auction"
               ? `The auction is open. It opened ${day(opensAt)}.`
@@ -218,7 +218,7 @@ export default async function SalePage({
   const clockOver = Boolean(auction && listing && listing.endsAt > 0 && now >= listing.endsAt && inEscrow);
   const forSaleNow = (inEscrow && opensAt > 0 && now >= opensAt && !clockOver) || tensorOpen;
   const stateLine = !title.exists
-    ? "This title is not on chain."
+    ? "This title (NFT) is not on chain."
     : sold
       ? CLAIMED_STATUS
       : clockOver
@@ -232,17 +232,17 @@ export default async function SalePage({
               : inEscrow
                 ? "Waiting for the sale to open."
                 : creatorHolds
-                  ? "The creator holds this title. It is not listed."
+                  ? "The creator holds this title (NFT). It is not listed."
                   : saleLine;
   const holderLine = !title.exists
-    ? "The title is not on chain."
+    ? "The title (NFT) is not on chain."
     : inEscrow
-      ? "The PAR escrow holds this title."
+      ? "The PAR escrow holds this title (NFT)."
       : status?.tensor
-        ? "Tensor's marketplace program holds this title."
+        ? "Tensor's marketplace program holds this title (NFT)."
         : creatorHolds
-          ? "The creator wallet holds this title."
-          : `The wallet ${shortAddress(title.owner)} holds this title.`;
+          ? "The creator wallet holds this title (NFT)."
+          : `The wallet ${shortAddress(title.owner)} holds this title (NFT).`;
   const vault = record?.attributes.vault || RECORD_VAULT[cluster];
   const tokenName = sheet.record?.token?.name || snapshot?.name || (symbol !== "the token" ? symbol : "This token");
   const namedObject = (sheet.record?.object?.name || sheet.name || "").trim();
@@ -277,14 +277,16 @@ export default async function SalePage({
     `${tokenLabel} trades on a curve${snapshot ? `, quoted in ${snapshot.quoteSymbol}` : ""}.`,
     snapshot?.supply ? `The supply is ${Number(snapshot.supply).toLocaleString("en-US")}.` : "",
     saleKind === "paired"
-      ? "It is not a share of the RWA, and it pays nothing. A buyer uses this token to pay for the title."
+      ? "It is not a share of this RWA, and it pays nothing. A buyer uses this token to pay for the title (NFT)."
       : "Buys and sells on the token page move the price.",
     burnLine,
   ]
     .filter(Boolean)
     .join(" ");
   const rwaSentence = [
-    `The RWA ${saleKind === "paired" ? "paired with this token" : "for sale here"} is ${namedObject || "this object"}.`,
+    saleKind === "paired"
+      ? `The token paired with this RWA is ${tokenLabel}.`
+      : `This RWA is ${namedObject || "this object"}.`,
     objectKind ? sentence(objectKind) : "",
     existsNow === true ? "It exists now." : existsNow === false ? "It does not exist yet." : "",
     objectHolder
@@ -316,7 +318,7 @@ export default async function SalePage({
           {showPitch ? <p>{pitch}</p> : null}
           <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
           {story ? <p>{story}</p> : null}
-          {showClaim ? <p>The holder of the title can claim this RWA. {claimText}</p> : null}
+          {showClaim ? <p>The holder of the title (NFT) can claim this RWA. {claimText}</p> : null}
           {showHandoff ? <p>{handoffText}</p> : null}
         </>
       ) : null}
@@ -397,7 +399,7 @@ export default async function SalePage({
                   <p className="note">
                     {waitStart > 0
                       ? leftWords(waitSeconds - waitGone)
-                      : `These ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} start when the token graduates. The title stays where it is until then.`}
+                      : `These ${delay} ${cluster === "devnet" && status?.rail === "escrow" ? "seconds" : "days"} start when the token graduates. The title (NFT) stays where it is until then.`}
                   </p>
                 </article>
               ) : null}
@@ -409,7 +411,7 @@ export default async function SalePage({
         <>
           <h2>Claimed</h2>
           <p>
-            This title has been purchased.
+            This title (NFT) has been purchased.
             {saleKind === "token"
               ? " This sale is finished."
               : " The handoff of the RWA is still the promise above. This sale is finished."}
@@ -422,8 +424,8 @@ export default async function SalePage({
           <h2>{forSaleNow ? (auction ? "In auction" : "Available for purchase") : "Purchase"}</h2>
           <p className="note">
             {forSaleNow
-              ? `This title is available for purchase from the PAR escrow, paid in ${symbol}.`
-              : `The PAR escrow holds this title. Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
+              ? `This title (NFT) is available for purchase from the PAR escrow, paid in ${symbol}.`
+              : `The PAR escrow holds this title (NFT). Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
           </p>
           <EscrowTrade
             pageCluster={cluster}
@@ -482,10 +484,10 @@ export default async function SalePage({
           <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
           <p className="note">
             {tensorOpen
-              ? `This title is available for purchase through Tensor's program, paid in ${symbol}.`
+              ? `This title (NFT) is available for purchase through Tensor's program, paid in ${symbol}.`
               : noCoin
-                ? `The creator lists this title through Tensor, paid in ${symbol}.`
-                : `The creator lists this title through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
+                ? `The creator lists this title (NFT) through Tensor, paid in ${symbol}.`
+                : `The creator lists this title (NFT) through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
           </p>
           <SaleTrade
             pageCluster={cluster}
@@ -517,14 +519,14 @@ export default async function SalePage({
             (<a href={explorerTx(recordMint.signature, cluster)} target="_blank" rel="noreferrer">record mint</a>)
           </>
         ) : null}
-        . The title was minted {titleMint?.at ? day(titleMint.at) : "at a time the chain did not return"}
+        . The title (NFT) was minted {titleMint?.at ? day(titleMint.at) : "at a time the chain did not return"}
         {titleMint ? (
           <>
             {" "}
             (<a href={explorerTx(titleMint.signature, cluster)} target="_blank" rel="noreferrer">title mint</a>)
           </>
         ) : null}
-        . The record stays in the vault{vault ? ` ${shortAddress(vault)}` : ""}. The title is the one edition that can be sold, and its words are locked.
+        . The record stays in the vault{vault ? ` ${shortAddress(vault)}` : ""}. The title (NFT) is the one edition that can be sold, and its words are locked.
       </p>
       {status?.tensor ? (
         <p className="note">
@@ -535,16 +537,16 @@ export default async function SalePage({
       ) : null}
       {status ? (
         <ul className="record-checks">
-          <li className="ok">The record in the vault names this title</li>
+          <li className="ok">The record in the vault names this title (NFT)</li>
           {status.checks.map((check) => {
             const finished =
               (sold && check.label === "The escrow holds the title") ||
               (sold && check.label === "The creator wallet still holds the title");
             const label =
               sold && check.label === "The escrow holds the title"
-                ? "The title has left the escrow"
+                ? "The title (NFT) has left the escrow"
                 : sold && check.label === "The creator wallet still holds the title"
-                  ? "The title has moved to the buyer"
+                  ? "The title (NFT) has moved to the buyer"
                   : check.label;
             return (
               <li key={check.label} className={finished || check.ok ? "ok" : "no"}>
@@ -559,7 +561,7 @@ export default async function SalePage({
           ) : null}
         </ul>
       ) : (
-        <p className="error">No master in the program vault names this title. Treat it as unverified.</p>
+        <p className="error">No master in the program vault names this title (NFT). Treat it as unverified.</p>
       )}
       {sheet.record?.title?.promises?.length ? (
         <>
@@ -574,8 +576,8 @@ export default async function SalePage({
       <p className="note">
         {sold
           ? saleKind === "token"
-            ? "This title is claimed. The sale is finished. "
-            : "This title is claimed. The handoff of the RWA remains the promise above. "
+            ? "This title (NFT) is claimed. The sale is finished. "
+            : "This title (NFT) is claimed. The handoff of the RWA remains the promise above. "
           : status?.rail === "escrow"
             ? "A buyer calls the PAR escrow program from this page. "
             : "Listing and buying on this page both go through Tensor's program. "}

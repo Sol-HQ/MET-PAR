@@ -66,7 +66,7 @@ export function SaleTrade({
   const pricedInCoin = Boolean(listing) && listing?.currency === mint;
   const canBuy = Boolean(listing) && pricedInCoin && listing?.seller === creator && open;
   const wait = !graduated
-    ? `The token has not graduated. The list button opens ${delayDays} days after it does.`
+    ? `The list button opens ${delayDays} days after the token graduates.`
     : opensAt
       ? `The list button opens ${new Date(opensAt * 1000).toUTCString().replace(/:\d\d GMT$/, " UTC")}.`
       : "The pool does not show when the token graduated, so the list button stays closed.";
