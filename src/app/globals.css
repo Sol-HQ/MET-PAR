@@ -760,20 +760,16 @@ input.bad {
 }
 
 .token-preview,
-.card-shot,
-.attached-object .object-shot {
+.card-shot {
   width: 100%;
-  max-height: 12rem;
+  height: 12rem;
   object-fit: cover;
+  object-position: center;
+  display: block;
+  margin: 0 0 0.6rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--paper);
-}
-
-.card-shot,
-.attached-object .object-shot {
-  display: block;
-  margin: 0.6rem 0;
 }
 
 .object-board {

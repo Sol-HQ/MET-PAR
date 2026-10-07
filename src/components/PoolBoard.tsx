@@ -100,6 +100,7 @@ function ListingCard({
   const ready = card.stage === "lock";
   return (
     <article className={ready ? "card ready-call" : "card"}>
+      {card.image ? <img className="card-shot" src={card.image} alt="" /> : <div className="card-shot" />}
       <Link href={sharePath} className="card-link">
         <h3>
           {card.name} {card.symbol ? <span>{card.symbol}</span> : null}
@@ -115,14 +116,12 @@ function ListingCard({
         full at {card.fullAt}
         {card.quoteSymbol === "SOL" ? solNote(String(parseFloat(card.fullAt)), solUsd) : ""}
       </p>
-      {card.image ? <img className="card-shot" src={card.image} alt="" /> : null}
       {assets?.map((asset) => (
-        <Link key={asset.titleHref} href={asset.titleHref} className="attached-object">
-          <ObjectPicture src={asset.image} alt={asset.name} quiet />
-          <span>
+        <p key={asset.titleHref}>
+          <Link href={asset.titleHref}>
             {tokenPairing(asset.name, asset.kind || "")} {titleSentence(asset.status)}
-          </span>
-        </Link>
+          </Link>
+        </p>
       ))}
       <p className="note">
         {card.stage === "lock"
@@ -392,7 +391,7 @@ export function PoolBoard({
           <div className="card-grid">
             {shownAssets.map((asset) => (
               <article key={asset.title} className="card">
-                <ObjectPicture src={asset.image} alt={asset.name} />
+                <ObjectPicture src={asset.image} alt={asset.name} framed />
                 <Link href={asset.titleHref} className="card-link">
                   <h3>{asset.name}</h3>
                 </Link>

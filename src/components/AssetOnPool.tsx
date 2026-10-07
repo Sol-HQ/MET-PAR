@@ -18,7 +18,7 @@ type AssetCard = {
   titleHref: string;
 };
 
-export function ObjectPicture({ src, alt, quiet = false }: { src: string; alt: string; quiet?: boolean }) {
+export function ObjectPicture({ src, alt, quiet = false, framed = false }: { src: string; alt: string; quiet?: boolean; framed?: boolean }) {
   const ref = useRef<HTMLImageElement>(null);
   const [missing, setMissing] = useState(!src);
   useEffect(() => {
@@ -29,11 +29,14 @@ export function ObjectPicture({ src, alt, quiet = false }: { src: string; alt: s
     if (!img?.complete) return;
     if (img.naturalWidth < 32 || img.naturalHeight < 32) setMissing(true);
   }, [src]);
-  if (!src || missing) return quiet ? null : <p className="note">No picture is stored for this object.</p>;
+  if (!src || missing) {
+    if (framed) return <div className="card-shot" />;
+    return quiet ? null : <p className="note">No picture is stored for this object.</p>;
+  }
   return (
     <img
       ref={ref}
-      className="object-shot"
+      className={framed ? "card-shot" : "object-shot"}
       src={src}
       alt={alt}
       onLoad={(event) => {
