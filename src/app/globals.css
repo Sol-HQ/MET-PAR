@@ -217,6 +217,26 @@ button.text {
 
 .error { color: var(--stamp); }
 .status { color: var(--pine); }
+
+.toast {
+  position: fixed;
+  z-index: 40;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(24rem, calc(100vw - 2rem));
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--pine);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  color: var(--ink);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.toast p {
+  margin: 0;
+}
 .note { color: var(--muted); }
 label .note { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
 

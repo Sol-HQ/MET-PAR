@@ -171,7 +171,13 @@ type PendingSwap = {
   prepared?: PreparedTransaction;
   lines: string[];
   cross?: QuotePreview;
+  doneText: string;
 };
+
+function tradeDone(preview: QuotePreview, symbol: string, quoteSymbol: string): string {
+  if (preview.side === "buy") return `Buy complete. You received ${preview.tokens} ${symbol}.`;
+  return `Sale complete. You received ${preview.tokens} ${preview.bridge?.paySymbol ?? quoteSymbol}.`;
+}
 
 async function quoteGraduated(
   snapshot: PoolSnapshot,
@@ -280,6 +286,7 @@ export function PoolView({ address }: { address: string }) {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingSwap | null>(null);
   const [signature, setSignature] = useState("");
+  const [landed, setLanded] = useState<{ text: string; signature: string } | null>(null);
   const [payWith, setPayWith] = useState<"pool" | "other">("pool");
   const [solUsd, setSolUsd] = useState(0);
   const [holders, setHolders] = useState<HolderRow[]>([]);
@@ -636,6 +643,12 @@ export function PoolView({ address }: { address: string }) {
     }
   }
 
+  function finish(text: string, sig: string) {
+    setSignature(sig);
+    setStatus(text);
+    setLanded({ text, signature: sig });
+  }
+
   async function signSwap(preview: QuotePreview) {
     if (!publicKey || !signTransaction || !snapshot) {
       setError("Connect a wallet to swap.");
@@ -647,7 +660,7 @@ export function PoolView({ address }: { address: string }) {
       if (preview.bridge) {
         const lines = crossLines(preview, snapshot, address, cluster);
         if (cluster !== "mainnet-beta") throw new Error(practicePayNote(snapshot.quoteSymbol, preview.bridge.paySymbol, preview.side));
-        setPending({ lines, cross: preview });
+        setPending({ lines, cross: preview, doneText: tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol) });
         return;
       }
       const client = DynamicBondingCurveClient.create(connection, "confirmed");
@@ -681,12 +694,11 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
+        setPending({ prepared, lines, doneText: tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol) });
         return;
       }
       const signature = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(signature);
-      setStatus("Swap confirmed.");
+      finish(tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol), signature);
       setQuote(null);
       await refresh();
     } catch (cause) {
@@ -711,7 +723,7 @@ export function PoolView({ address }: { address: string }) {
       if (preview.side === "sell") {
         const priced = snapshot.isMigrated && snapshot.dammPool
           ? await quoteGraduated(snapshot, connection, "sell", preview.amountIn, preview.slippageBps)
-          : await quoteCurve("sell", preview.amountIn, "");
+          : await quoteCurve("sell", preview.amountIn);
         poolIn = priced.amountIn;
         poolMin = priced.minimumAmountOut;
         routeAmount = priced.minimumAmountOut.toString();
@@ -727,7 +739,7 @@ export function PoolView({ address }: { address: string }) {
         poolIn = new BN(route.otherAmountThreshold);
         const priced = snapshot.isMigrated && snapshot.dammPool
           ? await quoteGraduated(snapshot, connection, "buy", poolIn, preview.slippageBps)
-          : await quoteCurve("buy", poolIn, "");
+          : await quoteCurve("buy", poolIn);
         if (priced.minimumAmountOut.lt(preview.minimumAmountOut)) throw new Error("The price moved. Read the quote again.");
         poolMin = priced.minimumAmountOut;
       } else if (new BN(route.otherAmountThreshold).lt(new BN(preview.bridge.floorRaw))) {
@@ -758,8 +770,7 @@ export function PoolView({ address }: { address: string }) {
         built.lastValidBlockHeight,
         signTransaction as (transaction: VersionedTransaction) => Promise<VersionedTransaction>,
       );
-      setSignature(signature);
-      setStatus("Swap confirmed.");
+      finish(tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol), signature);
       setQuote(null);
       await refresh();
     } catch (cause) {
@@ -809,12 +820,11 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
+        setPending({ prepared, lines, doneText: "Claimed the creator curve fee." });
         return;
       }
       const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("Claimed the creator curve fee.");
+      finish("Claimed the creator curve fee.", confirmed);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Claim failed.");
@@ -863,12 +873,11 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
+        setPending({ prepared, lines, doneText: "Claimed the platform curve fee." });
         return;
       }
       const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("Claimed the platform curve fee.");
+      finish("Claimed the platform curve fee.", confirmed);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Claim failed.");
@@ -911,12 +920,11 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
+        setPending({ prepared, lines, doneText: "Withdrew the leftover tokens." });
         return;
       }
       const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("Withdrew the leftover tokens.");
+      finish("Withdrew the leftover tokens.", confirmed);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The leftover withdrawal failed.");
@@ -959,12 +967,11 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines });
+        setPending({ prepared, lines, doneText: "Claimed the unlocked creator supply." });
         return;
       }
       const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setSignature(confirmed);
-      setStatus("Claimed the unlocked creator supply.");
+      finish("Claimed the unlocked creator supply.", confirmed);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The creator supply claim failed.");
@@ -1546,6 +1553,14 @@ export function PoolView({ address }: { address: string }) {
                         : "Waiting for the quote"}
                 </button>
               </div>
+              {landed ? (
+                <p className="status" role="status">
+                  {landed.text}{" "}
+                  <a href={explorerTx(landed.signature, cluster)} target="_blank" rel="noreferrer">
+                    View the transaction
+                  </a>
+                </p>
+              ) : null}
               {amount.trim() && !quote && !(payWith === "other" && cluster !== "mainnet-beta") ? (
                 <p className="note">Reading the quote for the amount you typed…</p>
               ) : null}
@@ -1826,6 +1841,19 @@ export function PoolView({ address }: { address: string }) {
           {error}
         </p>
       ) : null}
+      {landed ? (
+        <div className="toast" role="status">
+          <p>{landed.text}</p>
+          <p>
+            <a href={explorerTx(landed.signature, cluster)} target="_blank" rel="noreferrer">
+              View the transaction
+            </a>
+          </p>
+          <button type="button" onClick={() => setLanded(null)}>
+            Close
+          </button>
+        </div>
+      ) : null}
       {status ? <p className="status">{status}</p> : null}
       {signature ? (
         <p className="note">
@@ -1853,8 +1881,7 @@ export function PoolView({ address }: { address: string }) {
             setBusy(true);
             sendPrepared(connection, next.prepared, signTransaction)
               .then(async (confirmed) => {
-                setSignature(confirmed);
-                setStatus("Confirmed.");
+                finish(next.doneText, confirmed);
                 await refresh();
               })
               .catch((cause: unknown) => {

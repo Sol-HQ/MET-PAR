@@ -210,11 +210,25 @@ export function SaleTrade({
       {canBuy && wallet === creator ? <p className="note">Your listing is up. A different wallet buys it.</p> : null}
       {listing && !open ? <p className="error">This listing is early. Buying stays closed on this page until the sale opens.</p> : null}
       {done.startsWith("http") ? (
-        <p className="note">
-          <a href={done} target="_blank" rel="noreferrer">
-            Confirmed. See the transaction.
-          </a>
-        </p>
+        <>
+          <p className="status" role="status">
+            Transaction complete.{" "}
+            <a href={done} target="_blank" rel="noreferrer">
+              View the transaction
+            </a>
+          </p>
+          <div className="toast" role="status">
+            <p>Transaction complete.</p>
+            <p>
+              <a href={done} target="_blank" rel="noreferrer">
+                View the transaction
+              </a>
+            </p>
+            <button type="button" onClick={() => setDone("")}>
+              Close
+            </button>
+          </div>
+        </>
       ) : done ? (
         <p className="note">{done}</p>
       ) : null}
