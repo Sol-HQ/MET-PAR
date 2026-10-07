@@ -100,7 +100,7 @@ function ListingCard({
   const ready = card.stage === "lock";
   return (
     <article className={ready ? "card ready-call" : "card"}>
-      {card.image ? <img className="card-shot" src={card.image} alt="" /> : <div className="card-shot" />}
+      <ObjectPicture src={card.image} alt={card.name} framed />
       <Link href={sharePath} className="card-link">
         <h3>
           {card.name} {card.symbol ? <span>{card.symbol}</span> : null}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { objectPairing, titleSentence, type AssetStanding } from "@/lib/asset-on-pool";
 import type { ClusterName } from "@/lib/constants";
 
@@ -19,31 +19,36 @@ type AssetCard = {
 };
 
 export function ObjectPicture({ src, alt, quiet = false, framed = false }: { src: string; alt: string; quiet?: boolean; framed?: boolean }) {
-  const ref = useRef<HTMLImageElement>(null);
+  const [attempt, setAttempt] = useState(0);
   const [missing, setMissing] = useState(!src);
   useEffect(() => {
     setMissing(!src);
-  }, [src]);
-  useEffect(() => {
-    const img = ref.current;
-    if (!img?.complete) return;
-    if (img.naturalWidth < 32 || img.naturalHeight < 32) setMissing(true);
+    setAttempt(0);
   }, [src]);
   if (!src || missing) {
     if (framed) return <div className="card-shot" />;
     return quiet ? null : <p className="note">No picture is stored for this object.</p>;
   }
+  const shown = attempt > 0 ? `${src}${src.includes("?") ? "&" : "?"}try=${attempt}` : src;
   return (
     <img
-      ref={ref}
       className={framed ? "card-shot" : "object-shot"}
-      src={src}
+      src={shown}
       alt={alt}
+      referrerPolicy="no-referrer"
       onLoad={(event) => {
         const img = event.currentTarget;
-        if (img.naturalWidth < 32 || img.naturalHeight < 32) setMissing(true);
+        if (img.naturalWidth >= 32 && img.naturalHeight >= 32) return;
+        if (framed && attempt < 4) setAttempt((value) => value + 1);
+        else setMissing(true);
       }}
-      onError={() => setMissing(true)}
+      onError={() => {
+        if (framed && attempt < 4) {
+          window.setTimeout(() => setAttempt((value) => value + 1), 1200);
+          return;
+        }
+        setMissing(true);
+      }}
     />
   );
 }
