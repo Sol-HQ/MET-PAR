@@ -260,7 +260,7 @@ export default async function SalePage({
     distinctObject || story || objectKind || objectHolder || where || claimText || handoffText || picture || existsNow === true || existsNow === false,
   );
   const saleKind: SaleKind = noCoin ? "rwa" : hasObject ? "paired" : "token";
-  const pageTitle = saleKind === "rwa" ? namedObject || title.name || "Real-world asset" : tokenName;
+  const pageTitle = saleKind === "token" ? tokenName : namedObject || title.name || tokenName;
   const shownState = sold && saleKind === "token" ? "Claimed." : stateLine;
   const tokenLabel = symbol && symbol !== "the token" && symbol !== tokenName ? `${tokenName} (${symbol})` : tokenName;
   const showPitch = Boolean(pitch) && !story && pitch !== story;
@@ -303,12 +303,23 @@ export default async function SalePage({
       <p className="object-status">{shownState}</p>
       <p>
         {saleKind === "paired"
-          ? `${tokenLabel} is the token. It is paired with a real-world asset.`
+          ? `This is a real-world asset. It is paired with the token ${tokenLabel}.`
           : saleKind === "rwa"
             ? `This is a real-world asset. It is not paired with its own token. A buyer pays in ${symbol}.`
             : `${tokenLabel} is a token. It is not paired with a real-world asset.`}
       </p>
       {stateLine !== saleLine ? <p className="note">{holderLine} {saleLine}</p> : <p className="note">{holderLine}</p>}
+      {saleKind !== "token" ? (
+        <>
+          <h2>The RWA</h2>
+          <p>{rwaSentence}</p>
+          {showPitch ? <p>{pitch}</p> : null}
+          <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
+          {story ? <p>{story}</p> : null}
+          {showClaim ? <p>The holder of the title can claim this RWA. {claimText}</p> : null}
+          {showHandoff ? <p>{handoffText}</p> : null}
+        </>
+      ) : null}
       {saleKind !== "rwa" ? (
         <>
           <h2>The token</h2>
@@ -392,17 +403,6 @@ export default async function SalePage({
               ) : null}
             </section>
           ) : null}
-        </>
-      ) : null}
-      {saleKind !== "token" ? (
-        <>
-          <h2>The RWA</h2>
-          <p>{rwaSentence}</p>
-          {showPitch ? <p>{pitch}</p> : null}
-          <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
-          {story ? <p>{story}</p> : null}
-          {showClaim ? <p>The holder of the title can claim this RWA. {claimText}</p> : null}
-          {showHandoff ? <p>{handoffText}</p> : null}
         </>
       ) : null}
       {sold ? (

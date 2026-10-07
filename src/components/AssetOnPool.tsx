@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { objectPairing, titleSentence, type AssetStanding } from "@/lib/asset-on-pool";
+import { titleSentence, tokenPairing, type AssetStanding } from "@/lib/asset-on-pool";
 import type { ClusterName } from "@/lib/constants";
 
 type AssetCard = {
@@ -94,10 +94,10 @@ export function AssetOnPool({ pool, cluster }: { pool: string; cluster: ClusterN
         const blurb = blurbOf(asset.name, asset.story);
         return (
           <article key={asset.title} className="card object-card">
+            <p>{tokenPairing(asset.name, asset.kind || "")}</p>
             <p className="eyebrow">Real-world asset</p>
             <h2>{asset.name}</h2>
-            <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin || "attached", true)}</p>
-            <ObjectPicture src={asset.image} alt={asset.name} quiet />
+            <ObjectPicture src={asset.image} alt={asset.name} framed />
             {blurb ? <p>{blurb}</p> : null}
             <p className="object-status">
               {titleSentence(asset.status)}

@@ -1041,7 +1041,6 @@ export function PoolView({ address }: { address: string }) {
       {!snapshot && !error ? <p>Loading the curve…</p> : null}
       {snapshot ? (
         <>
-          <AssetOnPool pool={snapshot.address} cluster={cluster} />
           <header className="board-title">
             {snapshot.image ? <img className="token-preview" src={snapshot.image} alt="" /> : null}
             <h1>
@@ -1890,6 +1889,7 @@ export function PoolView({ address }: { address: string }) {
               </p>
             </section>
           ) : null}
+          <AssetOnPool pool={snapshot.address} cluster={cluster} />
         </>
       ) : null}
       {error ? (
