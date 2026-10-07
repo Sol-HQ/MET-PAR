@@ -26,7 +26,7 @@ import { RecordPanel } from "@/components/RecordPanel";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
 import { explorerAccount, explorerTx, feeDecayLabel, meteoraPoolUrl, USDC_DEVNET, USDC_MAINNET, WSOL, type ClusterName } from "@/lib/constants";
-import { bpsToPercent, dollarsToSol, formatDollars, formatMoney, plainDecimal, pricePerToken, rawToUi, shortAddress, uiToRaw } from "@/lib/format";
+import { bpsToPercent, formatDollars, formatMoney, pricePerToken, rawToUi, shortAddress, uiToRaw } from "@/lib/format";
 import { buildCrossTransaction, readPayRoute, sendCrossTransaction } from "@/lib/cross-pay";
 import { loadDammMarket, loadPool, type DammMarket, type PoolSnapshot } from "@/lib/load-pool";
 import { loadHolders, loadTrades, type HolderRow, type TradeRow } from "@/lib/pool-book";
@@ -71,8 +71,6 @@ type QuotePreview = {
   averagePrice: string;
   minimumAmountOut: BN;
   amountIn: BN;
-  /** Set when the buyer typed dollars on a SOL pool. The swap still spends SOL. */
-  typedDollars: string;
   /** Set when the wallet pays or receives the other of SOL and USDC. The pool still uses its own quote. */
   bridge: {
     paySymbol: PaySymbol;
@@ -230,7 +228,6 @@ async function quoteGraduated(
     averagePrice,
     minimumAmountOut: quoted.minimumAmountOut,
     amountIn,
-    typedDollars: "",
     bridge: null,
   };
 }
@@ -283,7 +280,6 @@ export function PoolView({ address }: { address: string }) {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingSwap | null>(null);
   const [signature, setSignature] = useState("");
-  const [spendDollars, setSpendDollars] = useState(false);
   const [payWith, setPayWith] = useState<"pool" | "other">("pool");
   const [solUsd, setSolUsd] = useState(0);
   const [holders, setHolders] = useState<HolderRow[]>([]);
@@ -333,7 +329,6 @@ export function PoolView({ address }: { address: string }) {
   }, [refresh]);
 
   useEffect(() => {
-    setSpendDollars(false);
     setPayWith("pool");
     setAmount("");
     setQuote(null);
@@ -395,8 +390,6 @@ export function PoolView({ address }: { address: string }) {
       const quoteMint = snapshot.quoteSymbol === "SOL" ? WSOL : USDC_MAINNET;
       if (snapshot.quoteMint !== quoteMint) throw new Error("This pool's quote is not the SOL or USDC a one-transaction swap can use.");
     }
-    let spend = uiAmount;
-    let typedDollars = "";
     let bridgePay: QuotePreview["bridge"] = null;
     let poolAmount: BN | null = null;
     if (payWith === "other" && nextSide === "buy" && otherSymbol) {
@@ -420,18 +413,11 @@ export function PoolView({ address }: { address: string }) {
         floorRaw: "",
         inputRaw: spendRaw.toString(),
       };
-    } else if (nextSide === "buy" && snapshot.quoteSymbol === "SOL" && spendDollars) {
-      if (!(solUsd > 0)) throw new Error("The SOL price is still loading.");
-      const dollars = Number(uiAmount);
-      if (!Number.isFinite(dollars) || dollars <= 0) throw new Error("Enter a dollar amount.");
-      spend = dollarsToSol(dollars, solUsd);
-      if (!spend) throw new Error("That dollar amount is too small to become SOL.");
-      typedDollars = formatDollars(dollars);
     }
-    const amountIn = poolAmount ?? uiToRaw(spend, nextSide === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals);
+    const amountIn = poolAmount ?? uiToRaw(uiAmount, nextSide === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals);
     const priced = snapshot.isMigrated && snapshot.dammPool
-      ? { ...(await quoteGraduated(snapshot, connection, nextSide, amountIn, slippageBps)), typedDollars }
-      : await quoteCurve(nextSide, amountIn, typedDollars);
+      ? await quoteGraduated(snapshot, connection, nextSide, amountIn, slippageBps)
+      : await quoteCurve(nextSide, amountIn);
     if (payWith !== "other" || !otherSymbol) return priced;
     if (nextSide === "buy" && bridgePay) {
       return {
@@ -466,7 +452,7 @@ export function PoolView({ address }: { address: string }) {
     };
   }
 
-  async function quoteCurve(nextSide: Side, amountIn: BN, typedDollars: string): Promise<QuotePreview> {
+  async function quoteCurve(nextSide: Side, amountIn: BN): Promise<QuotePreview> {
     if (!snapshot) throw new Error("Pool is still loading.");
     const client = DynamicBondingCurveClient.create(connection, "confirmed");
     const pool = await client.state.getPool(address);
@@ -513,7 +499,6 @@ export function PoolView({ address }: { address: string }) {
       averagePrice,
       minimumAmountOut: quoted.minimumAmountOut,
       amountIn,
-      typedDollars,
       bridge: null,
     };
   }
@@ -541,10 +526,7 @@ export function PoolView({ address }: { address: string }) {
       const spend = spendAsset(snapshot, payWith, cluster);
       const cap = spendable(payBalance, spend.mint === null);
       try {
-        const raw =
-          spend.mint === null && payWith === "pool" && spendDollars
-            ? uiToRaw(dollarsToSol(Number(uiAmount), solUsd) || "0", 9)
-            : uiToRaw(uiAmount, spend.decimals);
+        const raw = uiToRaw(uiAmount, spend.decimals);
         if (raw.gt(cap)) {
           setQuote(null);
           setError(`This wallet holds ${rawToUi(payBalance, spend.decimals)} ${spend.symbol}.`);
@@ -576,7 +558,7 @@ export function PoolView({ address }: { address: string }) {
     };
     // buildQuote reads the latest pool, amount, and slippage from this render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, side, slippageBps, snapshot, connection, address, holding, payBalance, spendDollars, solUsd, payWith, cluster]);
+  }, [amount, side, slippageBps, snapshot, connection, address, holding, payBalance, solUsd, payWith, cluster]);
 
   function walletLine(): string {
     if (!snapshot) return "";
@@ -607,12 +589,7 @@ export function PoolView({ address }: { address: string }) {
     const spend = spendAsset(snapshot, payWith, cluster);
     const cap = spendable(payBalance, spend.mint === null);
     if (cap.isZero()) return;
-    if (spend.mint === null && payWith === "pool" && spendDollars) {
-      if (!(solUsd > 0)) return;
-      setAmount(plainDecimal(Number(rawToUi(cap, 9)) * solUsd, 2));
-    } else {
-      setAmount(rawToUi(cap, spend.decimals));
-    }
+    setAmount(rawToUi(cap, spend.decimals));
     setQuote(null);
   }
 
@@ -649,7 +626,6 @@ export function PoolView({ address }: { address: string }) {
       const gross = excluded.isZero()
         ? remaining
         : remaining.mul(included).add(excluded).sub(new BN(1)).div(excluded);
-      setSpendDollars(false);
       setPayWith("pool");
       setSide("buy");
       setAmount(rawToUi(gross, snapshot.quoteDecimals));
@@ -693,9 +669,7 @@ export function PoolView({ address }: { address: string }) {
         `Action: ${preview.side}`,
         `Network: ${cluster}`,
         `Pool: ${address}`,
-        preview.typedDollars
-          ? `You typed: ${preview.typedDollars}. That is ${preview.entered} SOL at ${formatDollars(solUsd)} per SOL. The pool spends SOL.`
-          : `You typed: ${preview.entered} ${unit}`,
+        `You typed: ${preview.entered} ${unit}`,
         `This trade uses: ${preview.used} ${unit}`,
         `Tokens at this price: ${preview.tokens} ${outUnit}`,
         `Average price: ${preview.averagePrice} ${snapshot.quoteSymbol} per ${snapshot.symbol}`,
@@ -1427,7 +1401,6 @@ export function PoolView({ address }: { address: string }) {
                     aria-pressed={payWith === "other"}
                     onClick={() => {
                       setPayWith("other");
-                      setSpendDollars(false);
                       setAmount("");
                       setQuote(null);
                     }}
@@ -1445,46 +1418,11 @@ export function PoolView({ address }: { address: string }) {
                       : `The sale pays ${snapshot.quoteSymbol}. That ${snapshot.quoteSymbol} is swapped to ${snapshot.quoteSymbol === "USDC" ? "SOL" : "USDC"} in the same signature. The swap uses the least ${snapshot.quoteSymbol} the sale promises. Extra ${snapshot.quoteSymbol} stays in this wallet.`}
                 </p>
               ) : null}
-              {side === "buy" && snapshot.quoteSymbol === "SOL" && payWith === "pool" ? (
-                <div className="choices" role="group" aria-label="Buy amount unit">
-                  <button
-                    type="button"
-                    aria-pressed={!spendDollars}
-                    onClick={() => {
-                      setSpendDollars(false);
-                      setAmount("");
-                      setQuote(null);
-                    }}
-                  >
-                    SOL
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={spendDollars}
-                    onClick={() => {
-                      setSpendDollars(true);
-                      setAmount("");
-                      setQuote(null);
-                    }}
-                  >
-                    Dollars
-                  </button>
-                </div>
-              ) : null}
               <label>
                 {side === "sell"
                   ? `${snapshot.symbol} you want to sell`
-                  : payWith === "other"
-                    ? `${snapshot.quoteSymbol === "USDC" ? "SOL" : "USDC"} you want to spend`
-                    : snapshot.quoteSymbol === "SOL" && spendDollars
-                      ? "Dollars you want to spend"
-                      : `${snapshot.quoteSymbol} you want to spend`}
+                  : `${payWith === "other" ? (snapshot.quoteSymbol === "USDC" ? "SOL" : "USDC") : snapshot.quoteSymbol} you want to spend`}
                 <span className="money">
-                  {side === "buy" &&
-                  ((payWith === "other" && snapshot.quoteSymbol === "SOL") ||
-                    (payWith !== "other" && (snapshot.quoteSymbol !== "SOL" || spendDollars))) ? (
-                    <span>$</span>
-                  ) : null}
                   <input
                     inputMode="decimal"
                     value={amount}
@@ -1498,7 +1436,7 @@ export function PoolView({ address }: { address: string }) {
                     onBlur={() => {
                       const payingSol =
                         side === "buy" &&
-                        ((payWith === "pool" && snapshot.quoteSymbol === "SOL" && !spendDollars) ||
+                        ((payWith === "pool" && snapshot.quoteSymbol === "SOL") ||
                           (payWith === "other" && snapshot.quoteSymbol === "USDC"));
                       if (payingSol) return;
                       if (/^\d+$/.test(amount)) setAmount(`${amount}.00`);
@@ -1513,33 +1451,30 @@ export function PoolView({ address }: { address: string }) {
                         ? snapshot.quoteSymbol === "USDC"
                           ? "SOL"
                           : "USDC"
-                        : snapshot.quoteSymbol === "SOL" && spendDollars
-                          ? "USD"
-                          : snapshot.quoteSymbol}
+                        : snapshot.quoteSymbol}
                   </span>
                 </span>
               </label>
               <p className="note">{walletLine()}</p>
               {side === "buy" ? (
                 <div className="choices" role="group" aria-label="Amount shortcuts">
-                  {(payWith === "other" && snapshot.quoteSymbol === "USDC"
+                  {((payWith === "pool" && snapshot.quoteSymbol === "SOL") ||
+                  (payWith === "other" && snapshot.quoteSymbol === "USDC")
                     ? ["0.01", "0.1", "1"]
-                    : payWith === "other"
-                      ? ["1.00", "5.00", "10.00"]
-                      : snapshot.quoteSymbol === "SOL" && spendDollars
-                        ? ["1", "5", "10"]
-                        : snapshot.quoteSymbol === "SOL"
-                          ? ["0.01", "0.1", "1"]
-                          : ["1.00", "5.00", "10.00"]
-                  ).map((choice) => (
-                    <button key={choice} type="button" onClick={() => { setAmount(choice); setQuote(null); }}>
-                      {payWith === "other" && snapshot.quoteSymbol === "USDC"
-                        ? `${choice} SOL`
-                        : payWith === "other" || snapshot.quoteSymbol !== "SOL" || spendDollars
-                          ? `$${choice}`
-                          : `${choice} SOL`}
-                    </button>
-                  ))}
+                    : ["1.00", "5.00", "10.00"]
+                  ).map((choice) => {
+                    const unit =
+                      payWith === "other"
+                        ? snapshot.quoteSymbol === "USDC"
+                          ? "SOL"
+                          : "USDC"
+                        : snapshot.quoteSymbol;
+                    return (
+                      <button key={choice} type="button" onClick={() => { setAmount(choice); setQuote(null); }}>
+                        {choice} {unit}
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
                     disabled={!payBalance || spendable(payBalance, spendAsset(snapshot, payWith, cluster).mint === null).isZero()}
@@ -1564,9 +1499,7 @@ export function PoolView({ address }: { address: string }) {
                       : `Sells ${snapshot.symbol} from this wallet. The quote is the ${snapshot.quoteSymbol} that comes back.`
                     : payWith === "other"
                       ? `The pool still prices this coin in ${snapshot.quoteSymbol}.`
-                      : snapshot.quoteSymbol === "SOL" && spendDollars
-                        ? `Dollars become SOL at ${solUsd > 0 ? formatDollars(solUsd) : "the live price"} per SOL. The swap spends SOL.${cluster === "devnet" ? " Practice SOL is not worth that price." : ""}`
-                        : `The fee is taken out of the ${snapshot.quoteSymbol} this trade uses.`}
+                      : `The fee is taken out of the ${snapshot.quoteSymbol} this trade uses.`}
               </p>
               <fieldset className="slippage">
                 <legend>Slippage</legend>
@@ -1623,9 +1556,7 @@ export function PoolView({ address }: { address: string }) {
                     <dd>
                       {quote.bridge
                         ? `${quote.bridge.payAmount} ${quote.bridge.paySymbol}`
-                        : quote.typedDollars
-                          ? `${quote.typedDollars}, which is ${quote.entered} SOL`
-                          : `${side === "buy" && snapshot.quoteSymbol !== "SOL" ? `$${quote.entered}` : quote.entered} ${side === "buy" ? snapshot.quoteSymbol : snapshot.symbol}`}
+                        : `${quote.entered} ${side === "buy" ? snapshot.quoteSymbol : snapshot.symbol}`}
                     </dd>
                   </div>
                   {quote.bridge ? (
@@ -1659,7 +1590,6 @@ export function PoolView({ address }: { address: string }) {
                         : `${quote.bridge ? quote.bridge.paySymbol : snapshot.quoteSymbol} you receive`}
                     </dt>
                     <dd>
-                      {side === "sell" && !quote.bridge && snapshot.quoteSymbol !== "SOL" ? "$" : ""}
                       {quote.tokens}{" "}
                       {side === "buy" ? snapshot.symbol : quote.bridge ? quote.bridge.paySymbol : snapshot.quoteSymbol}
                     </dd>
@@ -1667,7 +1597,7 @@ export function PoolView({ address }: { address: string }) {
                   <div>
                     <dt>{side === "buy" ? "Average price of this buy" : "Average price of this sale"}</dt>
                     <dd>
-                      {snapshot.quoteSymbol === "SOL" ? `${quote.averagePrice} SOL` : `$${quote.averagePrice} USDC`} per {snapshot.symbol}
+                      {quote.averagePrice} {snapshot.quoteSymbol} per {snapshot.symbol}
                     </dd>
                   </div>
                   <div>
@@ -1884,8 +1814,7 @@ export function PoolView({ address }: { address: string }) {
               ) : null}
               {snapshot.isMigrated ? <p className="note">The trading pool is already open. Liquidity is locked.</p> : null}
               <p className="note">
-                Slippage is in basis points. 100 bps is 1%, 200 is 2%, 300 is 3%, 400 is 4%. It is the furthest the amount received may fall below the quote before the wallet refuses. It does not change the price. On a SOL pool, the Dollars button turns a dollar amount into SOL at the live SOL price and then spends that SOL.
-                {cluster === "devnet" && snapshot.quoteSymbol === "SOL" ? " Practice SOL is not worth that dollar price." : ""}
+                Slippage is in basis points. 100 bps is 1%, 200 is 2%, 300 is 3%, 400 is 4%. It is the furthest the amount received may fall below the quote before the wallet refuses. It does not change the price.
               </p>
             </section>
           ) : null}
