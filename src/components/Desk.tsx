@@ -656,7 +656,7 @@ export function Desk() {
         await storedReads(draft);
       }
       if (next.configPrepared && draft) {
-        await sendPrepared(connection, next.configPrepared, signTransaction);
+        await sendPrepared(connection, next.configPrepared, signTransaction, "The template is on chain.");
         setPaid({
           fingerprint: next.fingerprint,
           config: draft.config,
@@ -732,7 +732,7 @@ export function Desk() {
       if (!draft) throw new Error("The metadata address is missing.");
       setMessage("Checking the picture and the token file are readable at the addresses the token will store...");
       await storedReads(draft);
-      const signature = await sendPrepared(connection, prepared, signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction, "The token is created.");
       setPaid(null);
       remember({
         pool: next.poolAddress,

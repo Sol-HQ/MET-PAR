@@ -123,7 +123,7 @@ export function OpenEscrow({
         }),
       );
       const prepared = await prepareTransaction(connection, publicKey, transaction, []);
-      const signature = await sendPrepared(connection, prepared, signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction, "The sale escrow is open.");
       setNote(explorerTx(signature, pageCluster));
       router.refresh();
     } catch (cause) {

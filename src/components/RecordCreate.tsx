@@ -933,7 +933,7 @@ export function RecordCreate({
           attributes: keepSheet(recordRows, plan.omitRecord),
         }),
       );
-      const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction);
+      const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction, "The record is on chain.");
       mark("Master sent to the program vault", explorerTx(recordSig, cluster));
 
       const titleTx = new Transaction().add(
@@ -946,7 +946,7 @@ export function RecordCreate({
           attributes: keepSheet(titleRows, plan.omitTitle),
         }),
       );
-      const titleSig = await sendPrepared(connection, await prepareTransaction(connection, payer, titleTx, [keys.title]), signTransaction);
+      const titleSig = await sendPrepared(connection, await prepareTransaction(connection, payer, titleTx, [keys.title]), signTransaction, "The title is in your wallet.");
       mark(`Title minted to your wallet${plan.rail === "creator" ? ". It stays there until the sale" : ""}`, explorerTx(titleSig, cluster));
 
       let depositSig: string | undefined;
@@ -971,7 +971,7 @@ export function RecordCreate({
             sale: draft.sale,
           }),
         );
-        depositSig = await sendPrepared(connection, await prepareTransaction(connection, payer, depositTx, []), signTransaction);
+        depositSig = await sendPrepared(connection, await prepareTransaction(connection, payer, depositTx, []), signTransaction, "The escrow deposit is confirmed.");
         mark("Title moved into the escrow until the sale", explorerTx(depositSig, cluster));
       }
 

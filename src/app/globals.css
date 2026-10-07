@@ -234,8 +234,16 @@ button.text {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
+.toast.bad {
+  border-color: var(--stamp);
+}
+
 .toast p {
   margin: 0;
+}
+
+.toast button {
+  justify-self: start;
 }
 .note { color: var(--muted); }
 label .note { display: block; margin-top: 0.35rem; font-size: 0.85rem; }

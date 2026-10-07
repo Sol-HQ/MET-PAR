@@ -9,7 +9,9 @@ import {
   VersionedTransaction,
   type Transaction,
 } from "@solana/web3.js";
-import { JITO_TIP_ACCOUNTS, JITO_TIP_LAMPORTS, jitoTipLamports } from "./send";
+import { finishSignature, JITO_TIP_ACCOUNTS, JITO_TIP_LAMPORTS, jitoTipLamports } from "./send";
+import { explainTx } from "./tx-error";
+import { reportTx, ReportedTxError } from "./tx-notice";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 
@@ -162,15 +164,24 @@ export async function sendCrossTransaction(
   transaction: VersionedTransaction,
   lastValidBlockHeight: number,
   signTransaction: (transaction: VersionedTransaction) => Promise<VersionedTransaction>,
+  landed = "Transaction confirmed.",
 ): Promise<string> {
-  const expected = transaction.message.serialize();
-  const blockhash = transaction.message.recentBlockhash;
-  const signed = await signTransaction(transaction);
-  if (!sameBytes(signed.message.serialize(), expected)) {
-    throw new Error("The wallet changed the transaction. It was not sent.");
+  let signature = "";
+  try {
+    const expected = transaction.message.serialize();
+    const blockhash = transaction.message.recentBlockhash;
+    const signed = await signTransaction(transaction);
+    if (!sameBytes(signed.message.serialize(), expected)) {
+      throw new Error("The wallet changed the transaction. It was not sent.");
+    }
+    const raw = signed.serialize();
+    signature = await connection.sendRawTransaction(raw, { skipPreflight: false });
+    await finishSignature(connection, signature, blockhash, lastValidBlockHeight, landed);
+    return signature;
+  } catch (cause) {
+    if (cause instanceof ReportedTxError) throw cause;
+    const text = explainTx(cause);
+    reportTx({ kind: "bad", text });
+    throw new ReportedTxError(text);
   }
-  const raw = signed.serialize();
-  const signature = await connection.sendRawTransaction(raw, { skipPreflight: false });
-  await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
-  return signature;
 }

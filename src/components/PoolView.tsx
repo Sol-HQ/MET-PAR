@@ -697,8 +697,9 @@ export function PoolView({ address }: { address: string }) {
         setPending({ prepared, lines, doneText: tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol) });
         return;
       }
-      const signature = await sendPrepared(connection, prepared, signTransaction);
-      finish(tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol), signature);
+      const doneText = tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol);
+      const signature = await sendPrepared(connection, prepared, signTransaction, doneText);
+      finish(doneText, signature);
       setQuote(null);
       await refresh();
     } catch (cause) {
@@ -764,13 +765,15 @@ export function PoolView({ address }: { address: string }) {
         pool: poolTx,
         sell: preview.side === "sell",
       });
+      const doneText = tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol);
       const signature = await sendCrossTransaction(
         connection,
         built.transaction,
         built.lastValidBlockHeight,
         signTransaction as (transaction: VersionedTransaction) => Promise<VersionedTransaction>,
+        doneText,
       );
-      finish(tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol), signature);
+      finish(doneText, signature);
       setQuote(null);
       await refresh();
     } catch (cause) {
@@ -823,7 +826,7 @@ export function PoolView({ address }: { address: string }) {
         setPending({ prepared, lines, doneText: "Claimed the creator curve fee." });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, "Claimed the creator curve fee.");
       finish("Claimed the creator curve fee.", confirmed);
       await refresh();
     } catch (cause) {
@@ -876,7 +879,7 @@ export function PoolView({ address }: { address: string }) {
         setPending({ prepared, lines, doneText: "Claimed the platform curve fee." });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, "Claimed the platform curve fee.");
       finish("Claimed the platform curve fee.", confirmed);
       await refresh();
     } catch (cause) {
@@ -923,7 +926,7 @@ export function PoolView({ address }: { address: string }) {
         setPending({ prepared, lines, doneText: "Withdrew the leftover tokens." });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, "Withdrew the leftover tokens.");
       finish("Withdrew the leftover tokens.", confirmed);
       await refresh();
     } catch (cause) {
@@ -970,7 +973,7 @@ export function PoolView({ address }: { address: string }) {
         setPending({ prepared, lines, doneText: "Claimed the unlocked creator supply." });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, "Claimed the unlocked creator supply.");
       finish("Claimed the unlocked creator supply.", confirmed);
       await refresh();
     } catch (cause) {
@@ -1841,19 +1844,6 @@ export function PoolView({ address }: { address: string }) {
           {error}
         </p>
       ) : null}
-      {landed ? (
-        <div className="toast" role="status">
-          <p>{landed.text}</p>
-          <p>
-            <a href={explorerTx(landed.signature, cluster)} target="_blank" rel="noreferrer">
-              View the transaction
-            </a>
-          </p>
-          <button type="button" onClick={() => setLanded(null)}>
-            Close
-          </button>
-        </div>
-      ) : null}
       {status ? <p className="status">{status}</p> : null}
       {signature ? (
         <p className="note">
@@ -1879,7 +1869,7 @@ export function PoolView({ address }: { address: string }) {
             }
             if (!next.prepared) return;
             setBusy(true);
-            sendPrepared(connection, next.prepared, signTransaction)
+            sendPrepared(connection, next.prepared, signTransaction, next.doneText)
               .then(async (confirmed) => {
                 finish(next.doneText, confirmed);
                 await refresh();

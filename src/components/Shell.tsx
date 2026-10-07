@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import type { ReactNode } from "react";
 import { isAdminWallet } from "@/lib/admins";
+import { TxNotice } from "@/components/TxNotice";
 import { DBC_PROGRAM_ID } from "@/lib/constants";
 import { useCluster } from "@/lib/cluster";
 
@@ -61,6 +62,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </p>
       ) : null}
       <main>{children}</main>
+      <TxNotice />
       <footer>
         <span>DBC program {DBC_PROGRAM_ID}</span>
         <a href="https://app.meteora.ag">Meteora</a>

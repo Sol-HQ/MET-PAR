@@ -1,5 +1,8 @@
 import { PublicKey, SystemProgram, Transaction, type Connection, type Keypair } from "@solana/web3.js";
+import { explorerTx, type ClusterName } from "./constants";
 import { formatLamports } from "./format";
+import { explainTx } from "./tx-error";
+import { reportTx, ReportedTxError } from "./tx-notice";
 
 /** One mainnet signature. Above Jito's 1000 lamport minimum, and small enough to show before the wallet opens. */
 export const JITO_TIP_LAMPORTS = 200_000;
@@ -193,29 +196,70 @@ async function relayJito(raw: Uint8Array): Promise<string> {
   return body.signature;
 }
 
+function clusterOf(endpoint: string): ClusterName {
+  return /devnet/i.test(endpoint) ? "devnet" : "mainnet-beta";
+}
+
+function reportFailure(connection: Connection, cause: unknown, signature?: string): never {
+  const text = explainTx(cause);
+  const onChain = Boolean(cause && typeof cause === "object" && "onChain" in cause && (cause as { onChain?: boolean }).onChain);
+  const expired = cause instanceof Error && /block height exceeded|blockhash not found|transaction expired/i.test(cause.message);
+  reportTx({
+    kind: "bad",
+    text,
+    href: signature && (onChain || expired) ? explorerTx(signature, clusterOf(connection.rpcEndpoint)) : undefined,
+  });
+  throw new ReportedTxError(text);
+}
+
+/** Confirms the signature, then reports that it landed or that the program rejected it. */
+export async function finishSignature(
+  connection: Connection,
+  signature: string,
+  blockhash: string,
+  lastValidBlockHeight: number,
+  landed: string,
+): Promise<void> {
+  try {
+    const confirmed = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+    if (confirmed.value.err) {
+      const looked = await connection
+        .getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+        .catch(() => null);
+      const failure = new Error("The transaction landed and failed.");
+      Object.assign(failure, { logs: looked?.meta?.logMessages ?? [], err: confirmed.value.err, signature, onChain: true });
+      throw failure;
+    }
+    reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+  } catch (cause) {
+    if (cause instanceof ReportedTxError) throw cause;
+    reportFailure(connection, cause, signature);
+  }
+}
+
 export async function sendPrepared(
   connection: Connection,
   prepared: PreparedTransaction,
   signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  landed = "Transaction confirmed.",
 ): Promise<string> {
-  const latest = await connection.getLatestBlockhash("confirmed");
-  const ready = transactionForWallet(prepared, latest.blockhash, latest.lastValidBlockHeight);
-  const signed = await signTransaction(ready.transaction);
-  const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
-  const signature = payerSignature(raw);
-  let relayed = "";
-  if (prepared.tipLamports > 0) relayed = await relayJito(raw).catch(() => "");
-  if (relayed !== signature) {
-    const sent = await connection.sendRawTransaction(raw, { skipPreflight: false });
-    if (sent !== signature) throw new Error("The network returned a different signature. It was not confirmed.");
+  let signature = "";
+  try {
+    const latest = await connection.getLatestBlockhash("confirmed");
+    const ready = transactionForWallet(prepared, latest.blockhash, latest.lastValidBlockHeight);
+    const signed = await signTransaction(ready.transaction);
+    const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
+    signature = payerSignature(raw);
+    let relayed = "";
+    if (prepared.tipLamports > 0) relayed = await relayJito(raw).catch(() => "");
+    if (relayed !== signature) {
+      const sent = await connection.sendRawTransaction(raw, { skipPreflight: false });
+      if (sent !== signature) throw new Error("The network returned a different signature. It was not confirmed.");
+    }
+    await finishSignature(connection, signature, latest.blockhash, latest.lastValidBlockHeight, landed);
+    return signature;
+  } catch (cause) {
+    if (cause instanceof ReportedTxError) throw cause;
+    reportFailure(connection, cause, signature || undefined);
   }
-  await connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    "confirmed",
-  );
-  return signature;
 }

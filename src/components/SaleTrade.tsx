@@ -57,7 +57,7 @@ export function SaleTrade({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
-  const [gate, setGate] = useState<{ title: string; lines: string[]; prepared: PreparedTransaction } | null>(null);
+  const [gate, setGate] = useState<{ title: string; lines: string[]; prepared: PreparedTransaction; landed: string } | null>(null);
 
   const opensAt = finishedAt > 0 ? finishedAt + delayDays * 86_400 : 0;
   const open = noCoin || (graduated && opensAt > 0 && Math.floor(Date.now() / 1000) >= opensAt);
@@ -71,13 +71,13 @@ export function SaleTrade({
       ? `The list button opens ${new Date(opensAt * 1000).toUTCString().replace(/:\d\d GMT$/, " UTC")}.`
       : "The pool does not show when the token graduated, so the list button stays closed.";
 
-  async function send(prepared: PreparedTransaction) {
+  async function send(prepared: PreparedTransaction, landed: string) {
     if (!signTransaction) return;
     setBusy(true);
     setError("");
     setGate(null);
     try {
-      const signature = await sendPrepared(connection, prepared, signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction, landed);
       setDone(explorerTx(signature, pageCluster));
       router.refresh();
     } catch (cause) {
@@ -94,11 +94,11 @@ export function SaleTrade({
     try {
       const prepared = await prepareTransaction(connection, publicKey, transaction, []);
       if (cluster === "mainnet-beta") {
-        setGate({ title: titleText, lines: [...lines, landingCost(prepared)], prepared });
+        setGate({ title: titleText, lines: [...lines, landingCost(prepared)], prepared, landed: `${titleText}.` });
         return;
       }
       if (!signTransaction) return;
-      const signature = await sendPrepared(connection, prepared, signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction, `${titleText}.`);
       setDone(explorerTx(signature, pageCluster));
       router.refresh();
     } catch (cause) {
@@ -217,17 +217,6 @@ export function SaleTrade({
               View the transaction
             </a>
           </p>
-          <div className="toast" role="status">
-            <p>Transaction complete.</p>
-            <p>
-              <a href={done} target="_blank" rel="noreferrer">
-                View the transaction
-              </a>
-            </p>
-            <button type="button" onClick={() => setDone("")}>
-              Close
-            </button>
-          </div>
         </>
       ) : done ? (
         <p className="note">{done}</p>
@@ -239,7 +228,7 @@ export function SaleTrade({
           lines={gate.lines}
           confirmLabel="Open wallet"
           onCancel={() => setGate(null)}
-          onConfirm={() => void send(gate.prepared)}
+          onConfirm={() => void send(gate.prepared, gate.landed)}
         />
       ) : null}
     </div>

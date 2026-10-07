@@ -27,7 +27,7 @@ function useHandoff(onDone?: () => void) {
     }
     setBusy(true);
     try {
-      const signature = await sendPrepared(connection, prepared, signTransaction);
+      const signature = await sendPrepared(connection, prepared, signTransaction, done);
       setStatus(done);
       setError("");
       onDone?.();

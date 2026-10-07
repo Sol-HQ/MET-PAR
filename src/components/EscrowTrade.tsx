@@ -67,7 +67,7 @@ export function EscrowTrade({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
-  const [gate, setGate] = useState<{ title: string; lines: string[]; transaction: Transaction } | null>(null);
+  const [gate, setGate] = useState<{ title: string; lines: string[]; transaction: Transaction; landed: string } | null>(null);
   const showAmount = (amount: bigint) => formatTokenAmount(amount, decimals);
   const readAmount = (text: string) => parseTokenAmount(text, decimals);
 
@@ -88,13 +88,13 @@ export function EscrowTrade({
     return info.owner;
   }
 
-  async function send(transaction: Transaction) {
+  async function send(transaction: Transaction, landed: string) {
     if (!publicKey || !signTransaction) return;
     setBusy(true);
     setError("");
     setGate(null);
     try {
-      const signature = await sendPrepared(connection, await prepareTransaction(connection, publicKey, transaction, []), signTransaction);
+      const signature = await sendPrepared(connection, await prepareTransaction(connection, publicKey, transaction, []), signTransaction, landed);
       setDone(explorerTx(signature, pageCluster));
       router.refresh();
     } catch (cause) {
@@ -105,8 +105,9 @@ export function EscrowTrade({
   }
 
   function confirm(titleText: string, lines: string[], transaction: Transaction) {
-    if (cluster === "mainnet-beta") setGate({ title: titleText, lines, transaction });
-    else void send(transaction);
+    const landed = `${titleText}.`;
+    if (cluster === "mainnet-beta") setGate({ title: titleText, lines, transaction, landed });
+    else void send(transaction, landed);
   }
 
   async function mark() {
@@ -288,7 +289,7 @@ export function EscrowTrade({
           lines={gate.lines}
           confirmLabel="Open wallet"
           onCancel={() => setGate(null)}
-          onConfirm={() => void send(gate.transaction)}
+          onConfirm={() => void send(gate.transaction, gate.landed)}
         />
       ) : null}
     </div>

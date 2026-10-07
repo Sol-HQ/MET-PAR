@@ -222,8 +222,9 @@ export function AdminDesk() {
         setPending({ prepared, lines, title: "Claim this platform fee on mainnet?" });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setStatus(`Claimed ${formatMoney(row.partnerQuoteFee, row.quoteDecimals)} ${row.quoteSymbol} from ${row.symbol}. Signature ${confirmed}`);
+      const claimed = `Claimed ${formatMoney(row.partnerQuoteFee, row.quoteDecimals)} ${row.quoteSymbol} from ${row.symbol}.`;
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, claimed);
+      setStatus(`${claimed} Signature ${confirmed}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Claim failed.");
     } finally {
@@ -269,8 +270,9 @@ export function AdminDesk() {
         setPending({ prepared, lines, title: "Withdraw leftover tokens on mainnet?" });
         return;
       }
-      const confirmed = await sendPrepared(connection, prepared, signTransaction);
-      setStatus(`Withdrew ${amount} ${row.symbol} to the platform wallet. Signature ${confirmed}`);
+      const withdrew = `Withdrew ${amount} ${row.symbol} to the platform wallet.`;
+      const confirmed = await sendPrepared(connection, prepared, signTransaction, withdrew);
+      setStatus(`${withdrew} Signature ${confirmed}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The leftover withdrawal failed.");
     } finally {
@@ -723,7 +725,7 @@ export function AdminDesk() {
             setPending(null);
             if (!signTransaction) return;
             setBusy(true);
-            sendPrepared(connection, next.prepared, signTransaction)
+            sendPrepared(connection, next.prepared, signTransaction, next.title.replace(/\?$/, "."))
               .then((confirmed) => {
                 setStatus(`Confirmed. Signature ${confirmed}`);
               })
