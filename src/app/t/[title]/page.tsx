@@ -297,7 +297,7 @@ export default async function SalePage({
     .join(" ");
 
   return (
-    <section className="card record-create">
+    <section className="card record-create sale-page">
       <p className="eyebrow">Sales page</p>
       <h2>{pageTitle}</h2>
       <p className="object-status">{shownState}</p>

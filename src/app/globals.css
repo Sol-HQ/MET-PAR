@@ -1132,6 +1132,68 @@ textarea {
   margin-top: 16px;
 }
 
+.sale-page {
+  gap: 0.28rem;
+  padding: 0.75rem 0.85rem;
+  line-height: 1.35;
+}
+
+.sale-page h2,
+.sale-page p,
+.sale-page .eyebrow,
+.sale-page .object-status {
+  margin: 0;
+}
+
+.sale-page > h2 {
+  margin-top: 0.7rem;
+  font-size: 1.02rem;
+  line-height: 1.2;
+}
+
+.sale-page > .eyebrow + h2 {
+  margin-top: 0;
+  font-size: 1.35rem;
+}
+
+.sale-page .quotes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.1rem;
+}
+
+.sale-page .quotes article {
+  padding: 0.45rem 0.55rem;
+}
+
+.sale-page .quotes h2 {
+  margin: 0;
+}
+
+.sale-page .figure {
+  font-size: 1.05rem;
+  margin: 0.05rem 0;
+}
+
+.sale-page .object-shot {
+  width: min(100%, 16rem);
+  height: 8rem;
+  margin: 0.15rem 0;
+  object-fit: cover;
+}
+
+.sale-page .record-promises {
+  gap: 0.25rem;
+  padding: 0.45rem 0.6rem;
+  margin-top: 0.15rem;
+}
+
+.sale-page .record-lines,
+.sale-page .record-checks {
+  gap: 0.12rem;
+  line-height: 1.3;
+}
+
 .record-promises {
   display: grid;
   gap: 8px;
@@ -1186,6 +1248,9 @@ textarea {
 @media (max-width: 800px) {
   .presets, .presets.launch, .beats, .beats.pair, .sheet, .quotes, dl, .quote-slip, .card-grid, .rights-grid {
     grid-template-columns: 1fr;
+  }
+  .sale-page .quotes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .top, footer, .listings a {
     flex-direction: column;
