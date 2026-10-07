@@ -37,7 +37,7 @@ type Sheet = {
     pitch?: string;
     object?: { story?: string; name?: string; kind?: string; existsNow?: boolean; holder?: string; where?: string };
     claim?: { text?: string };
-    redemption?: { handoff?: string; declaredValue?: string; declaredUnit?: string };
+    redemption?: { handoff?: string; ifClaimGoesWrong?: string; declaredValue?: string; declaredUnit?: string };
     title?: { promises?: string[] };
     token?: { name?: string; symbol?: string; supply?: string };
   };
@@ -263,9 +263,6 @@ export default async function SalePage({
   const pageTitle = saleKind === "token" ? tokenName : namedObject || title.name || tokenName;
   const shownState = sold && saleKind === "token" ? "Claimed." : stateLine;
   const tokenLabel = symbol && symbol !== "the token" && symbol !== tokenName ? `${tokenName} (${symbol})` : tokenName;
-  const showPitch = Boolean(pitch) && !story && pitch !== story;
-  const showClaim = Boolean(claimText) && !story.includes(claimText);
-  const showHandoff = Boolean(handoffText) && !story.includes(handoffText);
   const burnLine =
     Number.isFinite(burn) && saleKind !== "rwa"
       ? status?.rail === "escrow"
@@ -273,6 +270,21 @@ export default async function SalePage({
         : `The creator is paid the full price and burns ${burn}% of it.`
       : "";
   const sentence = (value: string) => (value.endsWith(".") ? value : `${value}.`);
+  const sheetRows = [
+    namedObject ? ["Name", namedObject] : null,
+    objectKind ? ["Kind", objectKind] : null,
+    existsNow === true ? ["Exists now", "Yes"] : existsNow === false ? ["Exists now", "No"] : null,
+    objectHolder ? ["Holder", objectHolder] : null,
+    where ? ["Where", where] : null,
+    story ? ["Story", story] : null,
+    claimText ? ["Claim", claimText] : null,
+    handoffText ? ["Handoff", handoffText] : null,
+    sheet.record?.redemption?.ifClaimGoesWrong ? ["If a claim goes wrong", sheet.record.redemption.ifClaimGoesWrong] : null,
+    sheet.record?.redemption?.declaredValue
+      ? ["Declared value", `${sheet.record.redemption.declaredValue} ${sheet.record.redemption.declaredUnit || ""}`.trim()]
+      : null,
+    pitch ? ["Pitch", pitch] : null,
+  ].filter((row): row is [string, string] => Boolean(row));
   const tokenSentence = [
     `${tokenLabel} trades on a curve${snapshot ? `, quoted in ${snapshot.quoteSymbol}` : ""}.`,
     snapshot?.supply ? `The supply is ${Number(snapshot.supply).toLocaleString("en-US")}.` : "",
@@ -283,20 +295,17 @@ export default async function SalePage({
   ]
     .filter(Boolean)
     .join(" ");
-  const rwaSentence = [
-    saleKind === "paired"
-      ? `The token paired with this RWA is ${tokenLabel}.`
-      : `This RWA is ${namedObject || "this object"}.`,
+  const rwaBasics = [
+    saleKind === "paired" ? `The token paired with this RWA is ${tokenLabel}.` : `A buyer pays for this RWA in ${symbol}.`,
     objectKind ? sentence(objectKind) : "",
     existsNow === true ? "It exists now." : existsNow === false ? "It does not exist yet." : "",
-    objectHolder
-      ? `${objectHolder} has it${where ? `, ${where.charAt(0).toLowerCase()}${where.slice(1)}` : ""}${where?.endsWith(".") || !where ? "" : "."}`
-      : where
-        ? sentence(where)
-        : "",
   ]
     .filter(Boolean)
     .join(" ");
+  const claimPath =
+    status?.rail === "escrow"
+      ? "The sale of the title (NFT) runs through the PAR escrow on this page."
+      : "The creator lists the title (NFT) through Tensor on this page.";
 
   return (
     <section className="card record-create sale-page">
@@ -314,12 +323,23 @@ export default async function SalePage({
       {saleKind !== "token" ? (
         <>
           <h2>The RWA</h2>
-          <p>{rwaSentence}</p>
-          {showPitch ? <p>{pitch}</p> : null}
+          <p>{rwaBasics}</p>
           <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
-          {story ? <p>{story}</p> : null}
-          {showClaim ? <p>The holder of the title (NFT) can claim this RWA. {claimText}</p> : null}
-          {showHandoff ? <p>{handoffText}</p> : null}
+          <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
+          <p>For the unique information on this RWA, read the meta sheet.</p>
+          {sheetRows.length > 0 ? (
+            <details className="specs">
+              <summary>Meta sheet …</summary>
+              <dl className="specs-body">
+                {sheetRows.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ) : null}
         </>
       ) : null}
       {saleKind !== "rwa" ? (
@@ -414,7 +434,7 @@ export default async function SalePage({
             This title (NFT) has been purchased.
             {saleKind === "token"
               ? " This sale is finished."
-              : " The handoff of the RWA is still the promise above. This sale is finished."}
+              : " The handoff is in the meta sheet. This sale is finished."}
             {pool && saleKind !== "rwa" ? " The token can still be traded." : ""}
           </p>
         </>
