@@ -15,8 +15,10 @@ import {
   RECORD_KIND,
   RECORD_VAULT,
   arweaveUrl,
-  readableUrl,
+  keepArweaveId,
   recordAttributes,
+  savedArweaveId,
+  waitForArweave,
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
@@ -777,16 +779,16 @@ export function RecordCreate({
       });
       const pictureBytes = new Uint8Array(await picture.arrayBuffer());
       const imageSha256 = await sha256Hex(pictureBytes);
-      const imageUpload = await turbo.upload({
-        data: pictureBytes,
-        dataItemOpts: { tags: [{ name: "Content-Type", value: "image/jpeg" }] },
-      });
-      const imageArweave = await readableUrl(arweaveUrl(imageUpload.id), imageSha256);
-      if (!imageArweave) {
-        throw new Error(
-          `The picture is not readable at ${arweaveUrl(imageUpload.id)}. That is the address the record and the title would store. Nothing was minted.`,
-        );
+      let imageId = savedArweaveId(imageSha256);
+      if (!imageId) {
+        const imageUpload = await turbo.upload({
+          data: pictureBytes,
+          dataItemOpts: { tags: [{ name: "Content-Type", value: "image/jpeg" }] },
+        });
+        imageId = imageUpload.id;
+        keepArweaveId(imageSha256, imageId);
       }
+      const imageArweave = arweaveUrl(imageId);
       mark("Picture stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
@@ -809,12 +811,16 @@ export function RecordCreate({
         attached: !plan.noCoin,
       });
       const htmlSha256 = await sha256Hex(new TextEncoder().encode(html));
-      const htmlUpload = await turbo.upload({
-        data: html,
-        dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
-      });
-      const htmlArweave = await readableUrl(arweaveUrl(htmlUpload.id), htmlSha256);
-      if (!htmlArweave) throw new Error(`The readable sheet is not at ${arweaveUrl(htmlUpload.id)}. Nothing was minted.`);
+      let htmlId = savedArweaveId(htmlSha256);
+      if (!htmlId) {
+        const htmlUpload = await turbo.upload({
+          data: html,
+          dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
+        });
+        htmlId = htmlUpload.id;
+        keepArweaveId(htmlSha256, htmlId);
+      }
+      const htmlArweave = arweaveUrl(htmlId);
       mark("Readable sheet stored on Arweave", htmlArweave);
 
       const sheet = sheetJson({
@@ -831,17 +837,44 @@ export function RecordCreate({
         htmlUrl: htmlArweave,
       });
       const sheetSha256 = await sha256Hex(new TextEncoder().encode(sheet));
-      const sheetUpload = await turbo.upload({
-        data: sheet,
-        dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
-      });
-      const sheetArweave = await readableUrl(arweaveUrl(sheetUpload.id), sheetSha256);
-      if (!sheetArweave) {
+      let sheetId = savedArweaveId(sheetSha256);
+      if (!sheetId) {
+        const sheetUpload = await turbo.upload({
+          data: sheet,
+          dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
+        });
+        sheetId = sheetUpload.id;
+        keepArweaveId(sheetSha256, sheetId);
+      }
+      const sheetArweave = arweaveUrl(sheetId);
+      mark("Record sheet stored on Arweave", sheetArweave);
+      setProgress((current) => [
+        ...current,
+        { label: "Waiting until arweave.net serves the picture and the record. The mint is not signed yet", done: false },
+      ]);
+      const [imageReady, htmlReady, sheetReady] = await Promise.all([
+        waitForArweave(imageId, imageSha256),
+        waitForArweave(htmlId, htmlSha256),
+        waitForArweave(sheetId, sheetSha256),
+      ]);
+      if (!imageReady) {
         throw new Error(
-          `The record file is not readable at ${arweaveUrl(sheetUpload.id)}. That file holds the picture address and the record. Nothing was minted.`,
+          `The picture is signed at ${imageArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
         );
       }
-      mark("Record sheet stored on Arweave", sheetArweave);
+      if (!htmlReady) {
+        throw new Error(
+          `The readable sheet is signed at ${htmlArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign that file again.`,
+        );
+      }
+      if (!sheetReady) {
+        throw new Error(
+          `The record file is signed at ${sheetArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign that file again.`,
+        );
+      }
+      setProgress((current) =>
+        current.map((item) => (item.label.startsWith("Waiting until arweave.net") ? { ...item, done: true } : item)),
+      );
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 

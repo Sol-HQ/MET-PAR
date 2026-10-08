@@ -40,7 +40,7 @@ import { bpsToPercent, formatDollars, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
 import { readCurveShape } from "@/lib/curve";
-import { arweaveUrl, bytesMatch, readableUrl, sha256Hex } from "@/lib/record";
+import { arweaveUrl, bytesMatch, keepArweaveId, savedArweaveId, sha256Hex, waitForArweave } from "@/lib/record";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
   assertCurveFee,
@@ -571,6 +571,13 @@ export function Desk() {
     }
   }
 
+  function waitLine(elapsedSeconds: number): string {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    const clock = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    return `The upload is signed. Waiting for arweave.net to serve it. ${clock}. Press Review create again only if this stops. That continues this wait and does not sign the upload again.`;
+  }
+
   async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string; imageSha: string; metadataSha: string }> {
     if (!publicKey || !signMessage || !signTransaction) {
       throw new Error("Connect a wallet to store the image and the metadata.");
@@ -582,49 +589,70 @@ export function Desk() {
     });
     let imageUri = "";
     let imageSha = "";
+    let imageId = "";
     if (draft.image) {
       const response = await fetch(draft.image);
       if (!response.ok) throw new Error("The image could not be read.");
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.length < 32 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error("The picture is not a JPEG, so it was not stored.");
       imageSha = await sha256Hex(bytes);
-      const type = response.headers.get("content-type") || "";
-      const contentType = type.startsWith("image/") ? type.split(";")[0] : "image/jpeg";
-      const imageUpload = await turbo.upload({
-        data: bytes,
-        dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
-      });
-      setMessage("Checking the picture is readable before the token file is stored...");
-      const readableImage = await readableUrl(arweaveUrl(imageUpload.id), imageSha);
-      if (!readableImage) {
-        throw new Error(
-          `The picture is not readable at ${arweaveUrl(imageUpload.id)}. That is the address the token would store. The token was not created.`,
-        );
+      imageId = savedArweaveId(imageSha);
+      if (imageId) {
+        setMessage("The picture is already signed onto Arweave. That signature is not asked for again.");
+      } else {
+        setMessage("Signing the picture onto Arweave...");
+        const type = response.headers.get("content-type") || "";
+        const contentType = type.startsWith("image/") ? type.split(";")[0] : "image/jpeg";
+        const imageUpload = await turbo.upload({
+          data: bytes,
+          dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
+        });
+        imageId = imageUpload.id;
+        keepArweaveId(imageSha, imageId);
       }
-      imageUri = readableImage;
+      imageUri = arweaveUrl(imageId);
     }
-    const body: { name: string; symbol: string; image?: string; description?: string; platform: string } = {
+    const body: { name: string; symbol: string; image?: string; imageSha256?: string; description?: string; platform: string } = {
       name: draft.name,
       symbol: draft.symbol,
       platform: "PAR platform",
     };
-    if (imageUri) body.image = imageUri;
+    if (imageUri) {
+      body.image = imageUri;
+      body.imageSha256 = imageSha;
+    }
     if (draft.description) body.description = draft.description;
     const metadataText = JSON.stringify(body);
     const metadataSha = await sha256Hex(new TextEncoder().encode(metadataText));
-    const metadataUpload = await turbo.upload({
-      data: metadataText,
-      dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
-    });
-    const uploadedMetadata = arweaveUrl(metadataUpload.id);
-    setMessage("Checking the token file is readable at the address the token will store...");
-    const metadata = await readableUrl(uploadedMetadata, metadataSha);
-    if (!metadata) {
+    let metadataId = savedArweaveId(metadataSha);
+    if (metadataId) {
+      setMessage("The token file is already signed onto Arweave. That signature is not asked for again.");
+    } else {
+      setMessage("Signing the token file onto Arweave...");
+      const metadataUpload = await turbo.upload({
+        data: metadataText,
+        dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
+      });
+      metadataId = metadataUpload.id;
+      keepArweaveId(metadataSha, metadataId);
+    }
+    const metadata = arweaveUrl(metadataId);
+    if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
+    setMessage(waitLine(0));
+    const [readableImage, readableMetadata] = await Promise.all([
+      imageId ? waitForArweave(imageId, imageSha, (elapsed) => setMessage(waitLine(elapsed))) : Promise.resolve(""),
+      waitForArweave(metadataId, metadataSha, (elapsed) => setMessage(waitLine(elapsed))),
+    ]);
+    if (imageId && !readableImage) {
       throw new Error(
-        `The metadata file is not readable at ${uploadedMetadata}. That file holds the name, the symbol, and the picture address. The token was not created.`,
+        `The picture is signed at ${imageUri}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
       );
     }
-    if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
+    if (!readableMetadata) {
+      throw new Error(
+        `The token file is signed at ${metadata}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the token file again.`,
+      );
+    }
     return { image: imageUri, metadata, imageSha, metadataSha };
   }
 
@@ -634,10 +662,14 @@ export function Desk() {
       bytesMatch(draft.metadataUri, draft.metadataSha),
     ]);
     if (draft.image && !imageOk) {
-      throw new Error(`The picture is not readable at ${draft.image}. That is the address the token would store. The token was not created.`);
+      throw new Error(
+        `The picture is signed at ${draft.image}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
+      );
     }
     if (!metadataOk) {
-      throw new Error(`The metadata file is not readable at ${draft.metadataUri}. That file holds the name, the symbol, and the picture address. The token was not created.`);
+      throw new Error(
+        `The token file is signed at ${draft.metadataUri}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the token file again.`,
+      );
     }
   }
 

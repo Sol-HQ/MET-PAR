@@ -40,20 +40,10 @@ export function arweaveUrl(id: string): string {
   return `https://arweave.net/${id}`;
 }
 
-/** Turbo can confirm an upload before arweave.net has it. These gateways serve the same item. */
-const ARWEAVE_GATEWAYS = ["https://arweave.net", "https://hydra.ar.io", "https://ar-io.dev", "https://gateway.ardrive.net"];
-
-function itemUrls(url: string): string[] {
-  let id = "";
-  try {
-    id = new URL(url).pathname.replace(/^\//, "");
-  } catch {
-    return [url];
-  }
-  if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return [url];
-  const urls = ARWEAVE_GATEWAYS.map((gateway) => `${gateway}/${id}`);
-  return [url, ...urls.filter((item) => item !== url)];
-}
+const ARWEAVE_ID = /^[A-Za-z0-9_-]{43}$/;
+const SAVED_UPLOADS = "par-arweave-id";
+/** Turbo confirms an upload before arweave.net serves it. The mint waits for arweave.net. */
+const ARWEAVE_WAIT_MS = 12 * 60 * 1000;
 
 async function hashMatches(url: string, sha256: string): Promise<boolean> {
   const response = await fetch(url);
@@ -61,39 +51,52 @@ async function hashMatches(url: string, sha256: string): Promise<boolean> {
   return (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256;
 }
 
+/** The upload id for these exact bytes, kept after a signature so a retry does not sign it again. */
+export function savedArweaveId(sha256: string): string {
+  if (typeof sessionStorage === "undefined" || !sha256) return "";
+  try {
+    const map = JSON.parse(sessionStorage.getItem(SAVED_UPLOADS) || "{}") as Record<string, string>;
+    const id = map[sha256];
+    return typeof id === "string" && ARWEAVE_ID.test(id) ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+export function keepArweaveId(sha256: string, id: string) {
+  if (typeof sessionStorage === "undefined" || !sha256 || !ARWEAVE_ID.test(id)) return;
+  try {
+    const map = JSON.parse(sessionStorage.getItem(SAVED_UPLOADS) || "{}") as Record<string, string>;
+    map[sha256] = id;
+    sessionStorage.setItem(SAVED_UPLOADS, JSON.stringify(map));
+  } catch {
+    /* A retry signs the upload again. */
+  }
+}
+
+/**
+ * arweave.net must return these exact bytes. The address written on the mint is that arweave.net link.
+ * Turbo can confirm the upload minutes before arweave.net serves it.
+ */
+export async function waitForArweave(id: string, sha256: string, onWait?: (elapsedSeconds: number) => void): Promise<string> {
+  if (!ARWEAVE_ID.test(id) || !sha256) return "";
+  const url = arweaveUrl(id);
+  const started = Date.now();
+  while (Date.now() - started < ARWEAVE_WAIT_MS) {
+    onWait?.(Math.round((Date.now() - started) / 1000));
+    try {
+      if (await hashMatches(url, sha256)) return url;
+    } catch {
+      /* arweave.net trails the upload. */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return "";
+}
+
 /** Taken off the site. The chain copies stay where they were minted. The paired token stays. */
 export const REMOVED_RECORDS = new Set(["tQ3CWLiAHD88vseUKmFjRz9APUtEM9Q7d6Z4SZtMN1G"]);
 export const REMOVED_TITLES = new Set(["Fbn8wewPmDiXGgeLcKGNdTa1cnRN2todeQDtesHqGvrk"]);
-
-/**
- * An address that returns these exact bytes.
- * arweave.net is preferred. Turbo often confirms first on another gateway, and a wallet keeps the first answer it gets.
- */
-export async function readableUrl(url: string, sha256: string): Promise<string | null> {
-  if (!url || !sha256) return null;
-  const candidates = itemUrls(url);
-  const deadline = Date.now() + 45_000;
-  let fallback = "";
-  while (Date.now() < deadline) {
-    const found = (
-      await Promise.all(
-        candidates.map(async (candidate) => {
-          try {
-            return (await hashMatches(candidate, sha256)) ? candidate : "";
-          } catch {
-            return "";
-          }
-        }),
-      )
-    ).filter(Boolean);
-    const canonical = found.find((candidate) => candidate.startsWith("https://arweave.net/"));
-    if (canonical) return canonical;
-    fallback = found[0] || fallback;
-    if (fallback && Date.now() >= deadline - 33_000) return fallback;
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  return fallback || null;
-}
 
 /** The address written on a mint has to return these exact bytes before that mint is signed. */
 export async function bytesMatch(url: string, sha256: string): Promise<boolean> {
@@ -102,7 +105,7 @@ export async function bytesMatch(url: string, sha256: string): Promise<boolean> 
     try {
       if (await hashMatches(url, sha256)) return true;
     } catch {
-      /* The gateway can lag behind the upload. */
+      /* arweave.net can lag behind the upload. */
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
