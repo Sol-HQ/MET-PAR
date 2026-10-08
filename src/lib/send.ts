@@ -26,6 +26,8 @@ export type PreparedTransaction = {
   blockhash: string;
   lastValidBlockHeight: number;
   feeLamports: number;
+  /** SOL locked into the new accounts this transaction creates. It is not a fee and it is not spent on the curve. */
+  rentLamports: number;
   /** 0 on the practice network, and 0 when the tip would push the transaction past the size limit. */
   tipLamports: number;
   /** Keypairs this page holds. The wallet signs first. These sign the same message afterward. */
@@ -39,17 +41,27 @@ export function jitoTipLamports(endpoint: string): number {
 }
 
 export function landingCost(prepared: PreparedTransaction): string {
-  const fee = `Network fee: ${formatLamports(prepared.feeLamports)}`;
-  if (!prepared.tipLamports) return fee;
-  return `${fee}. Jito tip: ${formatLamports(prepared.tipLamports)}. The tip sits inside this transaction, so it is paid when the transaction lands.`;
+  const parts: string[] = [];
+  if (prepared.rentLamports > 0) parts.push(`Account rent: ${formatLamports(prepared.rentLamports)}`);
+  parts.push(`Network fee: ${formatLamports(prepared.feeLamports)}`);
+  if (prepared.tipLamports > 0) {
+    parts.push(
+      `Jito tip: ${formatLamports(prepared.tipLamports)}. The tip sits inside this transaction, so it is paid when the transaction lands.`,
+    );
+  }
+  return parts.join(". ");
 }
 
-export function landingCostMany(parts: Array<PreparedTransaction | null | undefined>): string {
-  const ready = parts.filter((part): part is PreparedTransaction => Boolean(part));
+export function landingCostMany(prepared: Array<PreparedTransaction | null | undefined>): string {
+  const ready = prepared.filter((part): part is PreparedTransaction => Boolean(part));
+  const rent = ready.reduce((sum, part) => sum + part.rentLamports, 0);
   const fee = ready.reduce((sum, part) => sum + part.feeLamports, 0);
   const tip = ready.reduce((sum, part) => sum + part.tipLamports, 0);
-  if (!tip) return `Network fee: ${formatLamports(fee)}`;
-  return `Network fee: ${formatLamports(fee)}. Jito tip: ${formatLamports(tip)}. The tip sits inside the transaction, so it is paid when the transaction lands.`;
+  const lines: string[] = [];
+  if (rent > 0) lines.push(`Account rent: ${formatLamports(rent)}`);
+  lines.push(`Network fee: ${formatLamports(fee)}`);
+  if (tip > 0) lines.push(`Jito tip: ${formatLamports(tip)}. The tip sits inside the transaction, so it is paid when the transaction lands.`);
+  return lines.join(". ");
 }
 
 function resign(transaction: Transaction, signers: Keypair[]) {
@@ -74,17 +86,31 @@ function packetBytes(transaction: Transaction): number | null {
   return bytes !== null && bytes <= TX_BYTES ? bytes : null;
 }
 
+/** SOL this transaction locks into new accounts. A transfer, including a landing tip, is not rent. */
+function accountRentLamports(transaction: Transaction): number {
+  let rent = 0;
+  for (const instruction of transaction.instructions) {
+    if (!instruction.programId.equals(SystemProgram.programId) || instruction.data.length < 12) continue;
+    const kind = instruction.data.readUInt32LE(0);
+    if (kind !== 0 && kind !== 3) continue;
+    const lamports = Number(instruction.data.readBigUInt64LE(4));
+    if (lamports > 0 && lamports < 100_000_000_000) rent += lamports;
+  }
+  return rent;
+}
+
 export async function prepareTransaction(
   connection: Connection,
   payer: PublicKey,
   transaction: Transaction,
   signers: Keypair[],
+  options?: { tip?: boolean },
 ): Promise<PreparedTransaction> {
   transaction.feePayer = payer;
   const latest = await connection.getLatestBlockhash("confirmed");
   transaction.recentBlockhash = latest.blockhash;
   let tipLamports = 0;
-  if (jitoTipLamports(connection.rpcEndpoint) > 0) {
+  if (options?.tip !== false && jitoTipLamports(connection.rpcEndpoint) > 0) {
     const account = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
     transaction.add(
       SystemProgram.transfer({
@@ -111,6 +137,7 @@ export async function prepareTransaction(
     blockhash: latest.blockhash,
     lastValidBlockHeight: latest.lastValidBlockHeight,
     feeLamports: fee?.value ?? 0,
+    rentLamports: accountRentLamports(transaction),
     tipLamports,
     signers,
   };

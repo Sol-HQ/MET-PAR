@@ -691,7 +691,7 @@ export function Desk() {
         if (!transaction) {
           throw lastError instanceof Error ? lastError : new Error("The new template was not visible yet.");
         }
-        prepared = await prepareTransaction(connection, publicKey, transaction, [draft.baseMint]);
+        prepared = await prepareTransaction(connection, publicKey, transaction, [draft.baseMint], { tip: false });
       }
       if (cluster === "mainnet-beta" && !next.prepared) {
         if (!draft?.metadataUri) throw new Error("The metadata address is missing.");
@@ -826,7 +826,7 @@ export function Desk() {
           quoteMint,
           tokenBadge,
         });
-        configPrepared = await prepareTransaction(connection, publicKey, configTransaction, [freshConfig]);
+        configPrepared = await prepareTransaction(connection, publicKey, configTransaction, [freshConfig], { tip: false });
         configKey = freshConfig.publicKey;
       }
       const poolAddress = deriveDbcPoolAddress(
@@ -923,7 +923,7 @@ export function Desk() {
           ...(configPrepared
             ? [
                 landingCost(configPrepared),
-                `This signature writes the supply, prices, and fee into template ${configKey.toBase58()}. That account cannot be edited.`,
+                `This signature writes the supply, prices, and fee into template ${configKey.toBase58()}. The SOL above is the rent for that account and the network fee. Quote spent on the curve is 0. That account cannot be edited.`,
               ]
             : ["The template for these numbers is already on chain. This confirmation does not pay template rent again."]),
         ],
