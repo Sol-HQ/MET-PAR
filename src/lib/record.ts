@@ -42,14 +42,6 @@ export function arweaveUrl(id: string): string {
 
 const ARWEAVE_ID = /^[A-Za-z0-9_-]{43}$/;
 const SAVED_UPLOADS = "par-arweave-id";
-/** Turbo confirms an upload before arweave.net serves it. The mint waits for arweave.net. */
-const ARWEAVE_WAIT_MS = 12 * 60 * 1000;
-
-async function hashMatches(url: string, sha256: string): Promise<boolean> {
-  const response = await fetch(url);
-  if (!response.ok) return false;
-  return (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256;
-}
 
 /** The upload id for these exact bytes, kept after a signature so a retry does not sign it again. */
 export function savedArweaveId(sha256: string): string {
@@ -74,43 +66,9 @@ export function keepArweaveId(sha256: string, id: string) {
   }
 }
 
-/**
- * arweave.net must return these exact bytes. The address written on the mint is that arweave.net link.
- * Turbo can confirm the upload minutes before arweave.net serves it.
- */
-export async function waitForArweave(id: string, sha256: string, onWait?: (elapsedSeconds: number) => void): Promise<string> {
-  if (!ARWEAVE_ID.test(id) || !sha256) return "";
-  const url = arweaveUrl(id);
-  const started = Date.now();
-  while (Date.now() - started < ARWEAVE_WAIT_MS) {
-    onWait?.(Math.round((Date.now() - started) / 1000));
-    try {
-      if (await hashMatches(url, sha256)) return url;
-    } catch {
-      /* arweave.net trails the upload. */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
-  return "";
-}
-
 /** Taken off the site. The chain copies stay where they were minted. The paired token stays. */
 export const REMOVED_RECORDS = new Set(["tQ3CWLiAHD88vseUKmFjRz9APUtEM9Q7d6Z4SZtMN1G"]);
 export const REMOVED_TITLES = new Set(["Fbn8wewPmDiXGgeLcKGNdTa1cnRN2todeQDtesHqGvrk"]);
-
-/** The address written on a mint has to return these exact bytes before that mint is signed. */
-export async function bytesMatch(url: string, sha256: string): Promise<boolean> {
-  if (!url || !sha256) return false;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      if (await hashMatches(url, sha256)) return true;
-    } catch {
-      /* arweave.net can lag behind the upload. */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  return false;
-}
 
 /** The frozen token link. It names the record before the record exists, so the token and the record point at each other. */
 export function recordTokenUri(asset: string, mint: string, cluster: ClusterName): string {

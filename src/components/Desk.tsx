@@ -40,7 +40,7 @@ import { bpsToPercent, formatDollars, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
 import { readCurveShape } from "@/lib/curve";
-import { arweaveUrl, bytesMatch, keepArweaveId, savedArweaveId, sha256Hex, waitForArweave } from "@/lib/record";
+import { arweaveUrl, keepArweaveId, savedArweaveId, sha256Hex } from "@/lib/record";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
   assertCurveFee,
@@ -571,13 +571,6 @@ export function Desk() {
     }
   }
 
-  function waitLine(elapsedSeconds: number): string {
-    const minutes = Math.floor(elapsedSeconds / 60);
-    const seconds = elapsedSeconds % 60;
-    const clock = `${minutes}:${seconds.toString().padStart(2, "0")}`;
-    return `The upload is signed. Waiting for arweave.net to serve it. ${clock}. Press Review create again only if this stops. That continues this wait and does not sign the upload again.`;
-  }
-
   async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string; imageSha: string; metadataSha: string }> {
     if (!publicKey || !signMessage || !signTransaction) {
       throw new Error("Connect a wallet to store the image and the metadata.");
@@ -638,39 +631,7 @@ export function Desk() {
     }
     const metadata = arweaveUrl(metadataId);
     if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
-    setMessage(waitLine(0));
-    const [readableImage, readableMetadata] = await Promise.all([
-      imageId ? waitForArweave(imageId, imageSha, (elapsed) => setMessage(waitLine(elapsed))) : Promise.resolve(""),
-      waitForArweave(metadataId, metadataSha, (elapsed) => setMessage(waitLine(elapsed))),
-    ]);
-    if (imageId && !readableImage) {
-      throw new Error(
-        `The picture is signed at ${imageUri}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
-      );
-    }
-    if (!readableMetadata) {
-      throw new Error(
-        `The token file is signed at ${metadata}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the token file again.`,
-      );
-    }
     return { image: imageUri, metadata, imageSha, metadataSha };
-  }
-
-  async function storedReads(draft: PoolDraft): Promise<void> {
-    const [imageOk, metadataOk] = await Promise.all([
-      draft.image ? bytesMatch(draft.image, draft.imageSha) : Promise.resolve(true),
-      bytesMatch(draft.metadataUri, draft.metadataSha),
-    ]);
-    if (draft.image && !imageOk) {
-      throw new Error(
-        `The picture is signed at ${draft.image}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
-      );
-    }
-    if (!metadataOk) {
-      throw new Error(
-        `The token file is signed at ${draft.metadataUri}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the token file again.`,
-      );
-    }
   }
 
   async function finish(next: PendingCreate): Promise<"created" | "paused"> {
@@ -690,8 +651,6 @@ export function Desk() {
           metadataUri: stored.metadata,
           metadataSha: stored.metadataSha,
         };
-        setMessage("Checking the picture and the token file are readable at the addresses the token will store...");
-        await storedReads(draft);
       }
       if (next.configPrepared && draft) {
         await sendPrepared(connection, next.configPrepared, signTransaction, "The template is on chain.");
@@ -768,8 +727,6 @@ export function Desk() {
         return "paused";
       }
       if (!draft) throw new Error("The metadata address is missing.");
-      setMessage("Checking the picture and the token file are readable at the addresses the token will store...");
-      await storedReads(draft);
       const signature = await sendPrepared(connection, prepared, signTransaction, "The token is created.");
       setPaid(null);
       remember({

@@ -18,7 +18,6 @@ import {
   keepArweaveId,
   recordAttributes,
   savedArweaveId,
-  waitForArweave,
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
@@ -848,33 +847,6 @@ export function RecordCreate({
       }
       const sheetArweave = arweaveUrl(sheetId);
       mark("Record sheet stored on Arweave", sheetArweave);
-      setProgress((current) => [
-        ...current,
-        { label: "Waiting until arweave.net serves the picture and the record. The mint is not signed yet", done: false },
-      ]);
-      const [imageReady, htmlReady, sheetReady] = await Promise.all([
-        waitForArweave(imageId, imageSha256),
-        waitForArweave(htmlId, htmlSha256),
-        waitForArweave(sheetId, sheetSha256),
-      ]);
-      if (!imageReady) {
-        throw new Error(
-          `The picture is signed at ${imageArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign the picture again.`,
-        );
-      }
-      if (!htmlReady) {
-        throw new Error(
-          `The readable sheet is signed at ${htmlArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign that file again.`,
-        );
-      }
-      if (!sheetReady) {
-        throw new Error(
-          `The record file is signed at ${sheetArweave}. arweave.net does not serve it yet. Press Review create again. That continues the wait and does not sign that file again.`,
-        );
-      }
-      setProgress((current) =>
-        current.map((item) => (item.label.startsWith("Waiting until arweave.net") ? { ...item, done: true } : item)),
-      );
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 
