@@ -1656,18 +1656,22 @@ export function PoolView({ address }: { address: string }) {
                     <a href={explorerAccount(snapshot.creator, cluster)}>{shortAddress(snapshot.creator)}</a>
                   </dd>
                 </div>
-                <div>
-                  <dt>Platform fee wallet</dt>
-                  <dd>
-                    <a href={explorerAccount(snapshot.feeClaimer, cluster)}>{shortAddress(snapshot.feeClaimer)}</a>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Leftover receiver</dt>
-                  <dd>
-                    <a href={explorerAccount(snapshot.leftoverReceiver, cluster)}>{shortAddress(snapshot.leftoverReceiver)}</a>
-                  </dd>
-                </div>
+                {isAdminWallet(wallet) ? (
+                  <div>
+                    <dt>Platform fee wallet</dt>
+                    <dd>
+                      <a href={explorerAccount(snapshot.feeClaimer, cluster)}>{shortAddress(snapshot.feeClaimer)}</a>
+                    </dd>
+                  </div>
+                ) : null}
+                {isAdminWallet(wallet) ? (
+                  <div>
+                    <dt>Leftover receiver</dt>
+                    <dd>
+                      <a href={explorerAccount(snapshot.leftoverReceiver, cluster)}>{shortAddress(snapshot.leftoverReceiver)}</a>
+                    </dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Base vault</dt>
                   <dd>
@@ -1751,7 +1755,9 @@ export function PoolView({ address }: { address: string }) {
                   </button>
                 ) : (
                   <p className="note">
-                    The platform wallet {shortAddress(snapshot.feeClaimer)} claims the platform share on this page. Admin lists every token for the same claim.
+                    {isAdminWallet(wallet)
+                      ? `The platform wallet ${shortAddress(snapshot.feeClaimer)} claims the platform share on this page. Admin lists every token for the same claim.`
+                      : "The platform claims its share from the admin page."}
                   </p>
                 )}
               </div>

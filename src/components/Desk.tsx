@@ -966,7 +966,7 @@ export function Desk() {
           ...(configPrepared
             ? [
                 landingCost(configPrepared),
-                `This signature writes the supply, prices, and fee into template ${configKey.toBase58()}. That account cannot be edited. The platform fee claimer is ${PLATFORM_FEE_CLAIMER}.`,
+                `This signature writes the supply, prices, and fee into template ${configKey.toBase58()}. That account cannot be edited.`,
               ]
             : ["The template for these numbers is already on chain. This confirmation does not pay template rent again."]),
         ],
