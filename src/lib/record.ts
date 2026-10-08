@@ -40,20 +40,67 @@ export function arweaveUrl(id: string): string {
   return `https://arweave.net/${id}`;
 }
 
+/** Turbo can confirm an upload before arweave.net has it. These gateways serve the same item. */
+const ARWEAVE_GATEWAYS = ["https://arweave.net", "https://hydra.ar.io", "https://ar-io.dev", "https://gateway.ardrive.net"];
+
+function itemUrls(url: string): string[] {
+  let id = "";
+  try {
+    id = new URL(url).pathname.replace(/^\//, "");
+  } catch {
+    return [url];
+  }
+  if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return [url];
+  const urls = ARWEAVE_GATEWAYS.map((gateway) => `${gateway}/${id}`);
+  return [url, ...urls.filter((item) => item !== url)];
+}
+
+async function hashMatches(url: string, sha256: string): Promise<boolean> {
+  const response = await fetch(url);
+  if (!response.ok) return false;
+  return (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256;
+}
+
 /** Taken off the site. The chain copies stay where they were minted. The paired token stays. */
 export const REMOVED_RECORDS = new Set(["tQ3CWLiAHD88vseUKmFjRz9APUtEM9Q7d6Z4SZtMN1G"]);
 export const REMOVED_TITLES = new Set(["Fbn8wewPmDiXGgeLcKGNdTa1cnRN2todeQDtesHqGvrk"]);
 
 /**
- * The address written on a mint has to return these exact bytes before that mint is signed.
- * Wallets fetch that address once and keep the first answer, so a miss at sign time stays blank.
+ * An address that returns these exact bytes.
+ * arweave.net is preferred. Turbo often confirms first on another gateway, and a wallet keeps the first answer it gets.
  */
+export async function readableUrl(url: string, sha256: string): Promise<string | null> {
+  if (!url || !sha256) return null;
+  const candidates = itemUrls(url);
+  const deadline = Date.now() + 45_000;
+  let fallback = "";
+  while (Date.now() < deadline) {
+    const found = (
+      await Promise.all(
+        candidates.map(async (candidate) => {
+          try {
+            return (await hashMatches(candidate, sha256)) ? candidate : "";
+          } catch {
+            return "";
+          }
+        }),
+      )
+    ).filter(Boolean);
+    const canonical = found.find((candidate) => candidate.startsWith("https://arweave.net/"));
+    if (canonical) return canonical;
+    fallback = found[0] || fallback;
+    if (fallback && Date.now() >= deadline - 33_000) return fallback;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return fallback || null;
+}
+
+/** The address written on a mint has to return these exact bytes before that mint is signed. */
 export async function bytesMatch(url: string, sha256: string): Promise<boolean> {
   if (!url || !sha256) return false;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      const response = await fetch(url);
-      if (response.ok && (await sha256Hex(new Uint8Array(await response.arrayBuffer()))) === sha256) return true;
+      if (await hashMatches(url, sha256)) return true;
     } catch {
       /* The gateway can lag behind the upload. */
     }

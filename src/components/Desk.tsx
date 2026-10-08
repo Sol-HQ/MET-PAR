@@ -40,7 +40,7 @@ import { bpsToPercent, formatDollars, plainDecimal } from "@/lib/format";
 import { shrinkImage } from "@/lib/image";
 import { signedPictureHeaders } from "@/lib/picture";
 import { readCurveShape } from "@/lib/curve";
-import { arweaveUrl, bytesMatch, sha256Hex } from "@/lib/record";
+import { arweaveUrl, bytesMatch, readableUrl, sha256Hex } from "@/lib/record";
 import { DAMM_BADGE_FORM, DBC_BADGE_DOCS, METEORA_DISCORD, type QuoteCheck } from "@/lib/quote-gate";
 import {
   assertCurveFee,
@@ -594,9 +594,15 @@ export function Desk() {
         data: bytes,
         dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
       });
-      imageUri = arweaveUrl(imageUpload.id);
+      setMessage("Checking the picture is readable before the token file is stored...");
+      const readableImage = await readableUrl(arweaveUrl(imageUpload.id), imageSha);
+      if (!readableImage) {
+        throw new Error(
+          `The picture is not readable at ${arweaveUrl(imageUpload.id)}. That is the address the token would store. The token was not created.`,
+        );
+      }
+      imageUri = readableImage;
     }
-    const imageReady = imageUri ? bytesMatch(imageUri, imageSha) : Promise.resolve(true);
     const body: { name: string; symbol: string; image?: string; description?: string; platform: string } = {
       name: draft.name,
       symbol: draft.symbol,
@@ -610,15 +616,15 @@ export function Desk() {
       data: metadataText,
       dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
     });
-    const metadata = arweaveUrl(metadataUpload.id);
+    const uploadedMetadata = arweaveUrl(metadataUpload.id);
+    setMessage("Checking the token file is readable at the address the token will store...");
+    const metadata = await readableUrl(uploadedMetadata, metadataSha);
+    if (!metadata) {
+      throw new Error(
+        `The metadata file is not readable at ${uploadedMetadata}. That file holds the name, the symbol, and the picture address. The token was not created.`,
+      );
+    }
     if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
-    const [imageOk, metadataOk] = await Promise.all([imageReady, bytesMatch(metadata, metadataSha)]);
-    if (imageUri && !imageOk) {
-      throw new Error(`The picture is not readable at ${imageUri}. That is the address the token would store. The token was not created.`);
-    }
-    if (!metadataOk) {
-      throw new Error(`The metadata file is not readable at ${metadata}. That file holds the name, the symbol, and the picture address. The token was not created.`);
-    }
     return { image: imageUri, metadata, imageSha, metadataSha };
   }
 
@@ -1962,6 +1968,7 @@ export function Desk() {
                 setDescription("");
               })
               .catch((cause: unknown) => {
+                setMessage("");
                 setError(cause instanceof Error ? cause.message : "Could not create the pool.");
               })
               .finally(() => setBusy(false));

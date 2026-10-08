@@ -15,7 +15,7 @@ import {
   RECORD_KIND,
   RECORD_VAULT,
   arweaveUrl,
-  bytesMatch,
+  readableUrl,
   recordAttributes,
   recordInstruction,
   sha256Hex,
@@ -781,9 +781,13 @@ export function RecordCreate({
         data: pictureBytes,
         dataItemOpts: { tags: [{ name: "Content-Type", value: "image/jpeg" }] },
       });
-      const imageArweave = arweaveUrl(imageUpload.id);
+      const imageArweave = await readableUrl(arweaveUrl(imageUpload.id), imageSha256);
+      if (!imageArweave) {
+        throw new Error(
+          `The picture is not readable at ${arweaveUrl(imageUpload.id)}. That is the address the record and the title would store. Nothing was minted.`,
+        );
+      }
       mark("Picture stored on Arweave", imageArweave);
-      const imageReady = bytesMatch(imageArweave, imageSha256);
 
       const pathLine = plan.noCoin
         ? "Sale path: a fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens. Tensor, or the PAR escrow."
@@ -809,9 +813,9 @@ export function RecordCreate({
         data: html,
         dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
       });
-      const htmlArweave = arweaveUrl(htmlUpload.id);
+      const htmlArweave = await readableUrl(arweaveUrl(htmlUpload.id), htmlSha256);
+      if (!htmlArweave) throw new Error(`The readable sheet is not at ${arweaveUrl(htmlUpload.id)}. Nothing was minted.`);
       mark("Readable sheet stored on Arweave", htmlArweave);
-      const htmlReady = bytesMatch(htmlArweave, htmlSha256);
 
       const sheet = sheetJson({
         draft,
@@ -831,31 +835,13 @@ export function RecordCreate({
         data: sheet,
         dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
       });
-      const sheetArweave = arweaveUrl(sheetUpload.id);
+      const sheetArweave = await readableUrl(arweaveUrl(sheetUpload.id), sheetSha256);
+      if (!sheetArweave) {
+        throw new Error(
+          `The record file is not readable at ${arweaveUrl(sheetUpload.id)}. That file holds the picture address and the record. Nothing was minted.`,
+        );
+      }
       mark("Record sheet stored on Arweave", sheetArweave);
-      const sheetReady = bytesMatch(sheetArweave, sheetSha256);
-      setProgress((current) => [
-        ...current,
-        {
-          label: "Waiting for the public addresses to return the picture and the record. The mint is not signed yet",
-          done: false,
-        },
-      ]);
-      const [imageOk, htmlOk, sheetOk] = await Promise.all([imageReady, htmlReady, sheetReady]);
-      if (!imageOk) {
-        throw new Error(`The picture is not readable at ${imageArweave}. That is the address the record and the title would store. Nothing was minted.`);
-      }
-      if (!htmlOk) {
-        throw new Error(`The readable sheet is not at ${htmlArweave}. Nothing was minted.`);
-      }
-      if (!sheetOk) {
-        throw new Error(`The record file is not readable at ${sheetArweave}. That file holds the picture address and the record. Nothing was minted.`);
-      }
-      setProgress((current) =>
-        current.map((item) =>
-          item.label.startsWith("Waiting for the public addresses") ? { ...item, done: true } : item,
-        ),
-      );
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
 
