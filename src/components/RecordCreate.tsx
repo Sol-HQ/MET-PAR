@@ -778,14 +778,27 @@ export function RecordCreate({
       });
       const pictureBytes = new Uint8Array(await picture.arrayBuffer());
       const imageSha256 = await sha256Hex(pictureBytes);
-      let imageId = savedArweaveId(imageSha256);
+      const creationScope = `${payer.toBase58()}:${await sha256Hex(
+        new TextEncoder().encode(
+          JSON.stringify({
+            cluster,
+            asset: draft.assetName,
+            mint: plan.mint,
+            pool: plan.pool,
+            rail: plan.rail,
+            rows,
+            promises: plan.promises,
+          }),
+        ),
+      )}`;
+      let imageId = savedArweaveId(creationScope, imageSha256);
       if (!imageId) {
         const imageUpload = await turbo.upload({
           data: pictureBytes,
           dataItemOpts: { tags: [{ name: "Content-Type", value: "image/jpeg" }] },
         });
         imageId = imageUpload.id;
-        keepArweaveId(imageSha256, imageId);
+        keepArweaveId(creationScope, imageSha256, imageId);
       }
       const imageArweave = arweaveUrl(imageId);
       mark("Picture stored on Arweave", imageArweave);
@@ -810,14 +823,14 @@ export function RecordCreate({
         attached: !plan.noCoin,
       });
       const htmlSha256 = await sha256Hex(new TextEncoder().encode(html));
-      let htmlId = savedArweaveId(htmlSha256);
+      let htmlId = savedArweaveId(creationScope, htmlSha256);
       if (!htmlId) {
         const htmlUpload = await turbo.upload({
           data: html,
           dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
         });
         htmlId = htmlUpload.id;
-        keepArweaveId(htmlSha256, htmlId);
+        keepArweaveId(creationScope, htmlSha256, htmlId);
       }
       const htmlArweave = arweaveUrl(htmlId);
       mark("Readable sheet stored on Arweave", htmlArweave);
@@ -836,14 +849,14 @@ export function RecordCreate({
         htmlUrl: htmlArweave,
       });
       const sheetSha256 = await sha256Hex(new TextEncoder().encode(sheet));
-      let sheetId = savedArweaveId(sheetSha256);
+      let sheetId = savedArweaveId(creationScope, sheetSha256);
       if (!sheetId) {
         const sheetUpload = await turbo.upload({
           data: sheet,
           dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
         });
         sheetId = sheetUpload.id;
-        keepArweaveId(sheetSha256, sheetId);
+        keepArweaveId(creationScope, sheetSha256, sheetId);
       }
       const sheetArweave = arweaveUrl(sheetId);
       mark("Record sheet stored on Arweave", sheetArweave);

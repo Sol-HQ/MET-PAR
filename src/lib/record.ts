@@ -43,23 +43,28 @@ export function arweaveUrl(id: string): string {
 const ARWEAVE_ID = /^[A-Za-z0-9_-]{43}$/;
 const SAVED_UPLOADS = "par-arweave-id";
 
-/** The upload id for these exact bytes, kept after a signature so a retry does not sign it again. */
-export function savedArweaveId(sha256: string): string {
-  if (typeof sessionStorage === "undefined" || !sha256) return "";
+/** This browser tab only. The scope is the wallet plus this exact create, so another wallet or another form does not resume it. */
+function uploadKey(scope: string, sha256: string): string {
+  return `${scope}\n${sha256}`;
+}
+
+/** The upload id for these exact bytes on this create, kept after a signature so that same create does not sign it again. */
+export function savedArweaveId(scope: string, sha256: string): string {
+  if (typeof sessionStorage === "undefined" || !scope || !sha256) return "";
   try {
     const map = JSON.parse(sessionStorage.getItem(SAVED_UPLOADS) || "{}") as Record<string, string>;
-    const id = map[sha256];
+    const id = map[uploadKey(scope, sha256)];
     return typeof id === "string" && ARWEAVE_ID.test(id) ? id : "";
   } catch {
     return "";
   }
 }
 
-export function keepArweaveId(sha256: string, id: string) {
-  if (typeof sessionStorage === "undefined" || !sha256 || !ARWEAVE_ID.test(id)) return;
+export function keepArweaveId(scope: string, sha256: string, id: string) {
+  if (typeof sessionStorage === "undefined" || !scope || !sha256 || !ARWEAVE_ID.test(id)) return;
   try {
     const map = JSON.parse(sessionStorage.getItem(SAVED_UPLOADS) || "{}") as Record<string, string>;
-    map[sha256] = id;
+    map[uploadKey(scope, sha256)] = id;
     sessionStorage.setItem(SAVED_UPLOADS, JSON.stringify(map));
   } catch {
     /* A retry signs the upload again. */

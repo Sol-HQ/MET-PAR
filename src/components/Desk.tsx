@@ -390,7 +390,13 @@ export function Desk() {
       ),
     [choice, openingFeeForShape, endingForCurve, platform.platformFeePercent, feeDecaySeconds, migrationFeeBps, quoteKind, curveReserve, quoteExtra, curveShapeValue],
   );
+  const shownSymbol = symbolEdited ? symbol : symbolFromName(name);
   const formFingerprint = JSON.stringify({
+    wallet: publicKey?.toBase58() ?? "",
+    name: name.trim(),
+    symbol: shownSymbol.trim(),
+    description: description.trim(),
+    image: image.trim(),
     cluster,
     quoteKind,
     quoteMint: quoteCheck?.mint ?? "",
@@ -417,7 +423,6 @@ export function Desk() {
     feeDecaySeconds,
     reserve,
   });
-  const shownSymbol = symbolEdited ? symbol : symbolFromName(name);
 
   useEffect(() => {
     if (!curveFeeEdited) setCurveFee(String(openingBps / 100));
@@ -571,7 +576,7 @@ export function Desk() {
     }
   }
 
-  async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }): Promise<{ image: string; metadata: string; imageSha: string; metadataSha: string }> {
+  async function storeWithToken(draft: { name: string; symbol: string; image: string; description: string }, scope: string): Promise<{ image: string; metadata: string; imageSha: string; metadataSha: string }> {
     if (!publicKey || !signMessage || !signTransaction) {
       throw new Error("Connect a wallet to store the image and the metadata.");
     }
@@ -589,9 +594,9 @@ export function Desk() {
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.length < 32 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error("The picture is not a JPEG, so it was not stored.");
       imageSha = await sha256Hex(bytes);
-      imageId = savedArweaveId(imageSha);
+      imageId = savedArweaveId(scope, imageSha);
       if (imageId) {
-        setMessage("The picture is already signed onto Arweave. That signature is not asked for again.");
+        setMessage("This wallet already signed this picture for this create. That signature is not asked for again.");
       } else {
         setMessage("Signing the picture onto Arweave...");
         const type = response.headers.get("content-type") || "";
@@ -601,7 +606,7 @@ export function Desk() {
           dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
         });
         imageId = imageUpload.id;
-        keepArweaveId(imageSha, imageId);
+        keepArweaveId(scope, imageSha, imageId);
       }
       imageUri = arweaveUrl(imageId);
     }
@@ -617,9 +622,9 @@ export function Desk() {
     if (draft.description) body.description = draft.description;
     const metadataText = JSON.stringify(body);
     const metadataSha = await sha256Hex(new TextEncoder().encode(metadataText));
-    let metadataId = savedArweaveId(metadataSha);
+    let metadataId = savedArweaveId(scope, metadataSha);
     if (metadataId) {
-      setMessage("The token file is already signed onto Arweave. That signature is not asked for again.");
+      setMessage("This wallet already signed this token file for this create. That signature is not asked for again.");
     } else {
       setMessage("Signing the token file onto Arweave...");
       const metadataUpload = await turbo.upload({
@@ -627,7 +632,7 @@ export function Desk() {
         dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
       });
       metadataId = metadataUpload.id;
-      keepArweaveId(metadataSha, metadataId);
+      keepArweaveId(scope, metadataSha, metadataId);
     }
     const metadata = arweaveUrl(metadataId);
     if (metadata.length > 200) throw new Error("The metadata link is too long for the chain.");
@@ -643,7 +648,7 @@ export function Desk() {
       let draft = next.poolDraft;
       if (!prepared && draft && !draft.metadataUri) {
         setMessage("Storing the image and the metadata on Arweave...");
-        const stored = await storeWithToken(draft);
+        const stored = await storeWithToken(draft, `${publicKey.toBase58()}:${next.fingerprint}`);
         draft = {
           ...draft,
           image: stored.image,
@@ -1904,7 +1909,7 @@ export function Desk() {
           <p className="note">
             Creating it stores the picture and the metadata on Arweave, then signs a new template, then signs the token. The check shows the network fee before each signature. The supply and prices
             are written into that template and cannot be edited later.
-            {paid ? " Changing these numbers after a paid template charges that rent again." : ""}
+            {paid ? " Changing the wallet, the name, the picture, or these numbers after a paid template charges that rent again." : ""}
           </p>
         ) : null}
       </form>
