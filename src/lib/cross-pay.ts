@@ -175,8 +175,8 @@ export async function sendCrossTransaction(
       throw new Error("The wallet changed the transaction. It was not sent.");
     }
     const raw = signed.serialize();
-    signature = await connection.sendRawTransaction(raw, { skipPreflight: false });
-    await finishSignature(connection, signature, blockhash, lastValidBlockHeight, landed);
+    signature = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 0 });
+    await finishSignature(connection, signature, blockhash, lastValidBlockHeight, landed, { raw, tip: false });
     return signature;
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;

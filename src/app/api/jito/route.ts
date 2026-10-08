@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { JITO_TIP_ACCOUNTS } from "@/lib/send";
 
-const JITO_TRANSACTIONS = "https://mainnet.block-engine.jito.wtf/api/v1/transactions?bundleOnly=true";
+const JITO_TRANSACTIONS = "https://mainnet.block-engine.jito.wtf/api/v1/transactions";
 const TIP_ACCOUNTS = new Set<string>(JITO_TIP_ACCOUNTS);
 
 function carriesTip(encoded: string): boolean {

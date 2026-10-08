@@ -8,7 +8,7 @@ export function explainTx(cause: unknown): string {
     return "You closed the wallet. Nothing was sent.";
   }
   if (/block height exceeded|blockhash not found|transaction expired/i.test(message)) {
-    return "The transaction expired before it landed. Nothing was sent. Sign it again.";
+    return "The transaction expired before a block included it. The SOL stayed in the wallet. Sign it again.";
   }
   const anchor = anchorSentence(logs);
   if (anchor) return `${anchor} ${tail}`;

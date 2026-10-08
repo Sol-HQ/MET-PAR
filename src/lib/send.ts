@@ -185,6 +185,13 @@ function payerSignature(raw: Uint8Array): string {
   return encodeBase58(raw.subarray(1, 65));
 }
 
+/** The same signed bytes can be handed to the network more than once. Only one copy can land. */
+async function pushSigned(connection: Connection, raw: Uint8Array, tip: boolean): Promise<void> {
+  const sends: Promise<unknown>[] = [connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })];
+  if (tip) sends.push(relayJito(raw));
+  await Promise.all(sends.map((send) => send.catch(() => undefined)));
+}
+
 async function relayJito(raw: Uint8Array): Promise<string> {
   const response = await fetch("/api/jito", {
     method: "POST",
@@ -219,7 +226,18 @@ export async function finishSignature(
   blockhash: string,
   lastValidBlockHeight: number,
   landed: string,
+  resend?: { raw: Uint8Array; tip: boolean },
 ): Promise<void> {
+  let stop = false;
+  const repeater = resend
+    ? (async () => {
+        while (!stop) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          if (stop) return;
+          await pushSigned(connection, resend.raw, resend.tip);
+        }
+      })()
+    : null;
   try {
     const confirmed = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
     if (confirmed.value.err) {
@@ -234,6 +252,9 @@ export async function finishSignature(
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
     reportFailure(connection, cause, signature);
+  } finally {
+    stop = true;
+    void repeater;
   }
 }
 
@@ -250,13 +271,16 @@ export async function sendPrepared(
     const signed = await signTransaction(ready.transaction);
     const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
     signature = payerSignature(raw);
-    let relayed = "";
-    if (prepared.tipLamports > 0) relayed = await relayJito(raw).catch(() => "");
-    if (relayed !== signature) {
-      const sent = await connection.sendRawTransaction(raw, { skipPreflight: false });
-      if (sent !== signature) throw new Error("The network returned a different signature. It was not confirmed.");
+    const simulation = await connection.simulateTransaction(signed);
+    if (simulation.value.err) {
+      const errText = JSON.stringify(simulation.value.err);
+      const failure = new Error(/BlockhashNotFound|blockhash/i.test(errText) ? "blockhash not found" : "The transaction was not sent.");
+      Object.assign(failure, { logs: simulation.value.logs ?? [], err: simulation.value.err });
+      throw failure;
     }
-    await finishSignature(connection, signature, latest.blockhash, latest.lastValidBlockHeight, landed);
+    const tip = prepared.tipLamports > 0;
+    await pushSigned(connection, raw, tip);
+    await finishSignature(connection, signature, latest.blockhash, latest.lastValidBlockHeight, landed, { raw, tip });
     return signature;
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
