@@ -107,7 +107,7 @@ export function ChainTime() {
   const local = formatLocalTime(beat?.unixTimestamp || 0);
   return (
     <p className="chain-time">
-      Solana {time || "time"}
+      SOLANA {time || "time"}
       {local ? ` · ${local}` : ""}
     </p>
   );

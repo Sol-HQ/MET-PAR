@@ -205,6 +205,11 @@ button.text {
   bottom: 0;
   transform: translateX(-50%);
   text-align: center;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f3c75a;
 }
 
 .chain-slot {
