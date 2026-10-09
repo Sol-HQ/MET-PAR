@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Keypair, PublicKey, Transaction, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type Draft } from "@/components/AssetDesk";
@@ -714,24 +714,11 @@ export function RecordCreate({
           throw new Error(`The master edition would fail: ${JSON.stringify(collectionSimulated.value.err)}`);
         }
         collectionRent = collectionSimulated.value.accounts?.[0]?.lamports ?? 0;
-        const combined = new Transaction().add(
-          ...editionCollectionInstructions({
-            endpoint: connection.rpcEndpoint,
-            collection: keys.collection,
-            creator: payerKey,
-            name: titleName(draft.assetName),
-            uri: sheetSlot,
-          }),
-          ...titlePrepared.transaction.instructions,
-        );
-        combined.feePayer = payerKey;
-        combined.recentBlockhash = titlePrepared.transaction.recentBlockhash;
-        const titleSimulated = await connection.simulateTransaction(new VersionedTransaction(combined.compileMessage()), {
-          sigVerify: false,
-          accounts: { encoding: "base64", addresses: [keys.title.publicKey.toBase58()] },
-        });
-        if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
-        titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
+        const titleSimulated = await connection
+          .simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey])
+          .catch(() => null);
+        const rented = titleSimulated && !titleSimulated.value.err ? titleSimulated.value.accounts?.[0]?.lamports ?? 0 : 0;
+        titleRent = rented > 0 ? rented : recordRent;
       } else {
         const titleSimulated = await connection.simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey]);
         if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
