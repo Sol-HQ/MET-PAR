@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LawRecord } from "@/components/LawRecord";
+import { TENSOR_TAKER_FEE_PERCENT } from "@/lib/title";
 
 export function Faqs() {
   return (
@@ -137,13 +138,14 @@ export function Faqs() {
         <p>
           With a coin attached, the title can be sold only after graduation, and only after a clock the creator
           chose, from 1 to 365 days. The day is set at graduation and locks into the title. With no coin, the
-          creator names the payment token and the wait.
+          creator names the payment token. The title stays in the creator&apos;s wallet until the creator lists it.
         </p>
         <p>
-          A normal wallet sells the title through Tensor on both networks, and can buy a title that is already for
-          sale. Tensor takes that sale. PAR takes none of it. The escrow path holds the title and sells it at a
-          fixed price or by bid. On the practice network it is open to the two test wallets. On the real network
-          the escrow button says coming soon.
+          A normal wallet lists the title through Tensor&apos;s marketplace program, at one price, and can buy a
+          title that is already listed. The buyer pays that price. Tensor pays the seller the full price and
+          charges the buyer about {TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the
+          creator promised one, is the creator&apos;s own promise. With a coin attached, the practice network also
+          has an escrow path, open to the two test wallets. On Solana Mainnet that button says coming soon.
         </p>
         <p>
           The creator signs the terms and owes the handoff. PAR is software. It does not hold, insure, or guarantee

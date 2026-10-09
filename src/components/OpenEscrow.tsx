@@ -48,7 +48,9 @@ export function NoCoinChoice({
       </div>
       {path === null ? (
         <p className="note">
-          Escrow asks for the token, a burn from 0% to 98%, and up to three extra wallets. The PAR program keeps 2%. Tensor lists this title in the token already written on it, and PAR takes none of that sale.
+          {escrowOpen
+            ? "Escrow asks for the token, a burn from 0% to 98%, and up to three extra wallets. The PAR program keeps 2%. Tensor lists this title in the token already written on it, and PAR takes none of that sale."
+            : "You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."}
         </p>
       ) : null}
       {path === "escrow" ? escrow : null}

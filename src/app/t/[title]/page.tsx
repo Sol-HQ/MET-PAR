@@ -175,7 +175,7 @@ export default async function SalePage({
   const saleOpen = Boolean(graduated) && curveOpensAt > 0 && Math.floor(Date.now() / 1000) >= curveOpensAt;
 
   const saleLine = noCoin
-    ? "The creator lists this title (NFT) at a fixed price or by bid, and sets how long before the sale opens."
+    ? "The creator lists this title (NFT) at one price through Tensor's marketplace program. A buyer pays that price."
     : !title.exists
     ? "This title (NFT) is not on chain."
     : !Number.isFinite(delay) || !Number.isFinite(burn)

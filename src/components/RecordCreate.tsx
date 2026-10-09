@@ -44,6 +44,7 @@ import {
   saleVenueWords,
   CREATOR_BURN_DAYS,
   ESCROW_COMING,
+  TENSOR_TAKER_FEE_PERCENT,
   TENSOR_MARKETPLACE,
   TITLE_KIND,
   titleAttributes,
@@ -266,7 +267,7 @@ function sheetJson(input: {
         tokenName: plan.tokenName,
         symbol,
         mint,
-        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+        soldThrough: saleVenueWords(plan.rail),
         salePage: plan.venue,
         attached: !plan.noCoin,
       })}\n\n${draft.story}\n\nFull sheet: ${input.htmlUrl}`,
@@ -277,7 +278,7 @@ function sheetJson(input: {
         { trait_type: "Token", value: symbol },
         { trait_type: "Token address", value: mint },
         { trait_type: "Sale page", value: plan.venue },
-        { trait_type: "Sold through", value: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail) },
+        { trait_type: "Sold through", value: saleVenueWords(plan.rail) },
         { trait_type: "Sale", value: saleKind },
         { trait_type: "Record", value: RECORD_KIND },
         { trait_type: "Title", value: plan.keys.title.publicKey.toBase58() },
@@ -354,7 +355,7 @@ function sheetJson(input: {
           sale: {
             page: plan.venue,
             kind: plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor",
-            soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+            soldThrough: saleVenueWords(plan.rail),
             soldThroughProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[input.cluster === "devnet" ? "devnet" : "mainnet-beta"] : TENSOR_MARKETPLACE,
             payIn: mint,
             opensDaysAfterGraduation: plan.noCoin ? null : Number(draft.saleDays),
@@ -363,7 +364,7 @@ function sheetJson(input: {
             creatorPercent: plan.noCoin ? null : plan.rail === "escrow" ? creatorSalePercent(burnOf(draft)) : 100 - burnOf(draft),
             programPercent: plan.noCoin ? null : plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
             price: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "Set by the creator in this token.",
-            burnedBy: plan.noCoin ? "chosen on the sale page if the title goes into the escrow" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
+            burnedBy: plan.noCoin ? "the creator's own promise, if the creator burns any of the price" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
             auction:
               plan.rail === "escrow" && draft.sale === "auction"
                 ? {
@@ -568,7 +569,7 @@ export function RecordCreate({
           tokenName: draftPlan.tokenName,
           symbol: draftPlan.symbol,
           mint,
-          soldThrough: draftPlan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(draftPlan.rail),
+          soldThrough: saleVenueWords(draftPlan.rail),
           salePage: venue,
           pool,
           pathLine: `${draftPlan.rail === "escrow" ? "PAR escrow" : "Tensor"} token ${mint}`,
@@ -628,7 +629,7 @@ export function RecordCreate({
           escrowProgram: rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
           sheet: sheetSlot,
           salePage: venue,
-          soldThrough: coin ? saleVenueWords(rail) : "Tensor or the PAR escrow",
+          soldThrough: saleVenueWords(rail),
           coin: coin ? "attached" : "none",
         }),
         (attributes) =>
@@ -733,7 +734,7 @@ export function RecordCreate({
           ? "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Those three leave as one Jito bundle with one tip. They land in that order, or none land. The three addresses stay in this browser tab so a refresh can finish the same mint."
           : "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are separate signatures. The three addresses stay in this browser tab so a refresh can finish the same mint.";
       draftPlan.lines = [
-        `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
+        `Network: ${cluster === "devnet" ? "practice network" : "Solana Mainnet"}`,
         `Order: you sign the promises, then the sheet picture, the NFT image, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
         `The wallet signs the promises, four Arweave uploads, the record${useEdition ? ", the master edition" : ""}, and the title${useRail === "escrow" ? ", then the escrow deposit" : ""}.`,
         bundleLine,
@@ -746,12 +747,12 @@ export function RecordCreate({
         `Title: ${title}`,
         `Platform vault: ${vault}`,
         draftPlan.noCoin
-          ? `The title stays in your wallet (${creator}). On the sale you choose Tensor or the PAR escrow. Sale page written on the record and the title: ${venue}.`
+          ? `The title stays in your wallet (${creator}). You list it on the sale page through Tensor's marketplace program. Sale page written on the record and the title: ${venue}.`
           : `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. Sale page written on the record and the title: ${venue}.`,
         useRail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `On the sale page you set a fixed price or a bid in ${draftPlan.symbol}, and how many days before the sale opens. Tensor pays you the full price and PAR takes none of that sale. In the escrow you can also name a burn from 0% to 98% and up to three extra wallets. The PAR program keeps 2% of an escrow sale.`
+            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale.`
             : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
         `The record and the title each carry the token address ${mint}, sale page ${venue}, and a full sheet link. That link is the readable page on Arweave.`,
         "The wallet signs this message. These are the words, in this order.",
@@ -759,10 +760,10 @@ export function RecordCreate({
         draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : `Payment token: ${draftPlan.tokenName} (${draftPlan.symbol}).`,
         `Sheet picture: ${(picture.size / 1024).toFixed(1)} KiB. NFT image: ${(nftPicture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         draftPlan.noCoin
-          ? "The sale is a fixed price or a bid. You set the price and the wait on the sale page."
+          ? "The sale is a list at one price. You set that price on the sale page."
           : `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
         draftPlan.noCoin
-          ? "The PAR program keeps 2% of an escrow sale. A Tensor sale pays you the full price."
+          ? "Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."
           : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
         `Record rent: ${formatLamports(recordRent)}. ${landingCost(recordPrepared)} Record transaction: ${recordBytes} of 1232 bytes.`,
         ...(useEdition
@@ -887,7 +888,7 @@ export function RecordCreate({
       mark("NFT image stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
-        ? "Sale path: a fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens. Tensor, or the PAR escrow."
+        ? "Sale path: Tensor. The creator lists one price on the sale page. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise."
         : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
           : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
@@ -896,7 +897,7 @@ export function RecordCreate({
         tokenName: plan.tokenName,
         symbol: plan.symbol,
         mint,
-        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+        soldThrough: saleVenueWords(plan.rail),
         salePage: plan.venue,
         pool: plan.pool,
         pathLine,
@@ -955,7 +956,7 @@ export function RecordCreate({
         escrowProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[cluster] : undefined,
         sheet: htmlArweave,
         salePage: plan.venue,
-        soldThrough: plan.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(plan.rail),
+        soldThrough: saleVenueWords(plan.rail),
         coin: coinWord,
       });
       const titleRows = titleAttributes({
@@ -991,7 +992,7 @@ export function RecordCreate({
         sheetImageUrl: sheetImageArweave,
         htmlUrl: htmlArweave,
         noCoin: plan.noCoin,
-        saleOpens: plan.noCoin ? "the day the creator sets" : `${Number(draft.saleDays)} ${shortClock ? "seconds" : "days"} after graduation`,
+        saleOpens: plan.noCoin ? "when the creator lists it" : `${Number(draft.saleDays)} ${shortClock ? "seconds" : "days"} after graduation`,
         delayDays: Number(draft.saleDays),
       });
 
@@ -1188,8 +1189,8 @@ export function RecordCreate({
                 ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
                 : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
               : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."
-            : "The title stays in your wallet. On the sale page you set a fixed price or a bid, the payment token, and how many days before the sale opens."}
-          {cluster === "devnet" ? "" : ` ${ESCROW_COMING}`}
+            : "The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."}
+          {coin && cluster !== "devnet" ? ` ${ESCROW_COMING}` : ""}
         </p>
       {!finished ? (
         <div className="record-promises">
@@ -1287,7 +1288,7 @@ export function RecordCreate({
       {error ? <p className="error">{error}</p> : null}
       {gateOpen && plan ? (
         <MainnetGate
-          title="Create this record on the real network?"
+          title="Create this record on Solana Mainnet?"
           lines={plan.lines}
           note="Nothing is written until you confirm. The lines below are what this confirmation writes."
           filename="par-record-review.txt"

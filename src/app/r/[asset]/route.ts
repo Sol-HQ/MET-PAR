@@ -56,7 +56,7 @@ export async function GET(request: Request, context: { params: Promise<{ asset: 
     symbol: token.symbol,
     description: read.exists
       ? read.attributes.coin === "none"
-        ? `One title to one object. A buyer pays in ${token.symbol || "the named token"}. The sale is a fixed price or a bid. The master is ${asset}, sent to the program vault with the record sheet.`
+        ? `One title to one object. A buyer pays in ${token.symbol || "the named token"}. The creator lists one price through Tensor's marketplace program. The master is ${asset}, sent to the program vault with the record sheet.`
         : `A payment token and a meme. It pays for the title to one real object. The meme is the joy and heart of the object. It is not a share, and it pays nothing. Its master is ${asset}, sent to the program vault with the record sheet.`
       : `Its record ${asset} has not been minted. Without the record this token is only half of the asset.`,
     image: typeof sheet.image === "string" ? sheet.image : "",

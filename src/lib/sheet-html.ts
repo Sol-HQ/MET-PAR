@@ -14,7 +14,7 @@ export function sheetLead(input: {
 }): string {
   const token = input.attached
     ? `The token ${input.tokenName} (${input.symbol}) pays for this title. Token address ${input.mint}.`
-    : `A buyer pays for this title in ${input.tokenName} (${input.symbol}). Token address ${input.mint}. The sale is a fixed price or a bid. The creator sets how long before it opens.`;
+    : `A buyer pays for this title in ${input.tokenName} (${input.symbol}). Token address ${input.mint}. The creator lists it on the sale page through Tensor's marketplace program, at one price. Tensor pays the creator the full price. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`;
   return `${token} The title is sold through ${input.soldThrough}. The sale page is ${input.salePage}.`;
 }
 

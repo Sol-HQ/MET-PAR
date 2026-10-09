@@ -138,12 +138,12 @@ export function creatorPromises(input: {
         : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
       : attached
         ? `I will list the title through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
-        : `I will put this title up for sale on PAR platform. I name the payment token, a fixed price or a bid, and how many days before the sale opens. I can list it through Tensor or put it in the PAR escrow.`,
+        : `I will list this title on its PAR sale page through Tensor's marketplace program, at one price in ${pay}. A buyer pays that price.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
-        : "If I list through Tensor, Tensor pays me the full price and PAR takes none of that sale. If I put the title in the PAR escrow, I choose a burn from 0% to 98% and the PAR program keeps 2%.",
+        : "Tensor pays me the full price. PAR takes none of that sale. If I burn any of that price, the burn is my own promise.",
     `I will hand the item to the holder of the title within ${input.handoffDays} days of their claim, as the handoff terms say.`,
     escrow
       ? auction
@@ -196,17 +196,17 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     ...(facts.sheet ? [{ key: "full sheet", value: facts.sheet }] : []),
     { key: "coin", value: facts.noCoin ? "none" : "attached" },
     { key: "mint", value: facts.mint },
-    { key: "sold through", value: facts.noCoin ? "Tensor or the PAR escrow" : saleVenueWords(facts.rail) },
+    { key: "sold through", value: saleVenueWords(facts.rail) },
     { key: "sale page", value: facts.venue },
     { key: "record", value: facts.record },
     { key: "pool", value: facts.pool },
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
-    { key: "sale opens", value: facts.noCoin ? "the day the creator sets" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
-    { key: "paid in", value: facts.noCoin ? "the token named when it is listed" : "this token only" },
-    { key: "burned", value: facts.noCoin ? "0 to 98 percent if escrow. Program keeps 2 percent." : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
+    { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
+    { key: "paid in", value: "this token only" },
+    { key: "burned", value: facts.noCoin ? "the creator's own promise, if the creator burns any of the price" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
-    { key: "sale", value: facts.noCoin ? "chosen on the sale page" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
+    { key: "sale", value: facts.noCoin ? "tensor" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
   ];
   if (auction) {
     rows.push({

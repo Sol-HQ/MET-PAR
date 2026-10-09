@@ -7,8 +7,9 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
       {plain ? (
         <p>
           One object that already exists. One title is the claim to it. A buyer pays for that title in a token the
-          creator names. USDC, SOL, or another ordinary token. The sale is a fixed price or a bid. The creator says
-          how many days before that sale opens.
+          creator names. USDC, SOL, or another ordinary token. The creator lists one price through Tensor&apos;s
+          marketplace program. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of
+          that sale. A burn, if the creator promised one, is the creator&apos;s own promise.
         </p>
       ) : (
         <p>
@@ -27,11 +28,11 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
       </p>
       {plain ? (
         <p>
-          After the title exists, the creator puts it up for sale and names the wait. On Tensor, the listing uses
-          the token already on the title, and PAR takes none of that sale. On the escrow path, the PAR escrow holds
-          the title and sells it for a fixed price or by bid. (The escrow path is not a mainnet option yet. Coming
-          soon.) The creator hands the object to the holder of the title. PAR is software. It does not hold, insure,
-          or guarantee the object. The person named on the sheet owes the handoff. The pitch and the redemption card
+          After the title exists, the creator lists it on the sale page through Tensor&apos;s marketplace program, at
+          one price in the token already on the title. A buyer pays that price. Tensor pays the creator the full
+          price. PAR takes none of that sale. A burn, if the creator promised one, is the creator&apos;s own promise.
+          The creator hands the object to the holder of the title. PAR is software. It does not hold, insure, or
+          guarantee the object. The person named on the sheet owes the handoff. The pitch and the redemption card
           bar a line that the price will go up, or that a return is promised.
         </p>
       ) : (
@@ -129,10 +130,11 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
       {plain ? (
         <p>
           The object, the person, the handoff, and the payment token are written on the NFT. The record sheet pins
-          them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The title sells at a fixed
-          price or by bid, through Tensor or the PAR escrow, after the day the creator sets. (The escrow path is not
-          a mainnet option yet. Coming soon.) The object moves when the named person keeps the handoff. The form
-          blocks a price promise and a promised return on the pitch and on the redemption card.
+          them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The title lists through
+          Tensor&apos;s marketplace program at one price. A buyer pays that price. Tensor pays the creator the full
+          price. PAR takes none of that sale. A burn, if the creator promised one, is the creator&apos;s own promise.
+          The object moves when the named person keeps the handoff. The form blocks a price promise and a promised
+          return on the pitch and on the redemption card.
         </p>
       ) : (
         <p>

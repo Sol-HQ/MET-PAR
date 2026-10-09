@@ -687,7 +687,7 @@ export function AssetDesk() {
       [
         "Sale path",
         withCoin === false
-          ? "A fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens."
+          ? "Tensor. The creator lists one price on the sale page. A buyer pays that price."
           : rail === "escrow"
             ? draft.sale === "auction"
               ? "Escrow, because Escrow is selected on Claim. The title is auctioned only through the PAR escrow program."
@@ -716,7 +716,7 @@ export function AssetDesk() {
             }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
             ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
-            : `The buyer pays in ${pay?.symbol || "the token you name"}. After the title exists, the sale page takes a fixed price or a bid, and the number of days before the sale opens. On an escrow sale the program keeps 2%, and the burn is a whole percent from 0 to 98. On a Tensor sale, PAR takes none.`,
+            : `The buyer pays in ${pay?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`,
       ],
       [
         "Token",
@@ -736,7 +736,7 @@ export function AssetDesk() {
         withCoin === false ? "When it sells" : "Curve",
         coin
           ? `Read from the coin. Supply ${coin.supply}. Opening price ${coin.startPrice} ${coin.quoteSymbol}. Pool price ${coin.endPrice} ${coin.quoteSymbol}. At the opening price the whole supply is priced at ${coin.wholeAtPar} ${coin.quoteSymbol}. Fee ${bpsToPercent(coin.openingFeeBps)} to ${bpsToPercent(coin.endingFeeBps)}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${coin.platformFeePercent}%, creator ${coin.creatorFeePercent}%. ${coin.isMigrated ? "The coin has graduated." : "The coin has not graduated."} ${sizeLine}`
-          : "The sale is a fixed price or a bid in the token named above. The creator sets how many days before it opens.",
+          : "The sale is a list at one price in the token named above. The creator sets that price on the sale page.",
       ],
     ],
     [draft, symbol, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, pay, sizeLine, withCoin],
@@ -830,7 +830,7 @@ export function AssetDesk() {
         <p className="note">What you type stays in this browser until the record is created. You can open the pool page, copy the token address, and come back.</p>
         <p>
           {withCoin === false
-            ? "This page makes one title for one object. The token you name is what a buyer pays. After the title exists, you put it up at a fixed price or by bid, and you say how long before that sale opens."
+            ? "This page makes one title for one object. The token you name is what a buyer pays. After the title exists, you list one price on the sale page through Tensor's marketplace program. A buyer pays that price."
             : withCoin === true
               ? "Create the coin on the home page first. Then paste that token address here. This page reads the coin. It does not let you type a different supply, price, or curve."
               : "Choose whether a coin goes with this title."}
@@ -848,7 +848,7 @@ export function AssetDesk() {
             ? "Choose one before the steps. A title that says it has a coin cannot be created until that coin's token address is read."
             : withCoin
               ? "The Coin step asks for the token address. Leave it empty and the title cannot be created."
-              : "The Price step asks for the token a buyer pays with. USDC, SOL, or another ordinary token. The sale page is where you set a fixed price or a bid, and how long before the sale opens."}
+              : "The Price step asks for the token a buyer pays with. USDC, SOL, or another ordinary token. The sale page is where you list one price through Tensor's marketplace program."}
         </p>
         {withCoin === true ? <div className="beats">
           <article>
@@ -1133,7 +1133,7 @@ export function AssetDesk() {
             There is one asset and one title.{" "}
             {withCoin
               ? `${COIN_WORDS} The title can be bought ${draft.saleDays || "some"} ${waitUnit} after graduation. `
-              : "The token is what a buyer pays for this title. After it exists, the sale page takes a fixed price or a bid, and how many days before the sale opens. "}
+              : "The token is what a buyer pays for this title. After it exists, the sale page takes one price. You list it through Tensor's marketplace program. "}
             {withCoin && rail === "escrow"
               ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}%, pays you ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
               : withCoin
@@ -1396,7 +1396,7 @@ export function AssetDesk() {
       {step === "Price" ? (
         <form>
           <p className="note">
-            Name the token a buyer pays with. USDC and SOL fill the known address. Any other ordinary token can be read. Token-2022 is refused. On the sale page you set a fixed price or a bid, and how long before the sale opens.
+            Name the token a buyer pays with. USDC and SOL fill the known address. Any other ordinary token can be read. Token-2022 is refused. On the sale page you list one price through Tensor's marketplace program.
           </p>
           <div className="segmented" role="group" aria-label="Price token">
             <button type="button" onClick={() => void loadPay(cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>
@@ -1609,7 +1609,7 @@ export function AssetDesk() {
                 : "Sale path: PAR escrow. These words say the title is sold only through the PAR escrow program, because Escrow is selected on Claim."
               : withCoin
                 ? "Sale path: Tensor. These words say the title is listed through Tensor's marketplace program, because Tensor is selected on Claim."
-                : "Sale path: chosen on the sale page. A fixed price or a bid, paid in the token you named. You set how long before the sale opens."}
+                : "Sale path: Tensor. One price, paid in the token you named. You set that price on the sale page."}
           </p>
           <p className="note">
             Both NFTs carry the token address, the sale page on www.meteora.surf, and a link named full sheet. That link opens this sheet on Arweave. The review names the exact sale page this confirmation writes.
