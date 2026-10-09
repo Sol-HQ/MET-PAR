@@ -79,6 +79,9 @@ export function escrowDepositAllowed(cluster: ClusterName, wallet: string | null
 /** Shown wherever both paths are named. The escrow button is visible and does not click. */
 export const ESCROW_COMING = "(The escrow path is not a mainnet option yet. Coming soon.)";
 
+/** The whole escrow path, in one line. It is not a Solana Mainnet option yet. */
+export const ESCROW_PATH = `The PAR escrow path is not live on Solana Mainnet. When it is, the title sits in that program. The sale is a fixed price or an auction, the bids run inside the program, and the burn happens in the program at the sale. The burn is a whole percent from 0% to 98%. The program keeps ${SALE_PROGRAM_FEE_PERCENT}%.`;
+
 /** The route a new title will actually use. Mainnet ignores an escrow pick. */
 export function chosenRail(cluster: ClusterName, hold: "wallet" | "escrow"): TitleRail {
   return escrowOffered(cluster) && hold === "escrow" ? "escrow" : "creator";

@@ -9,7 +9,7 @@ import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
-import { ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction } from "@/lib/title";
+import { ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction } from "@/lib/title";
 
 type Row = { wallet: string; amount: string };
 
@@ -49,8 +49,8 @@ export function NoCoinChoice({
       {path === null ? (
         <p className="note">
           {escrowOpen
-            ? "Escrow asks for the token, a burn from 0% to 98%, and up to three extra wallets. The PAR program keeps 2%. Tensor lists this title in the token already written on it, and PAR takes none of that sale."
-            : "You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."}
+            ? "Escrow holds the title. The sale is a fixed price or an auction. The bids run inside the program. A whole-percent burn from 0% to 98% happens in the program at the sale. The PAR program keeps 2%. Up to three extra wallets can be named. Tensor lists one price in the token already written on the title, and PAR takes none of that sale."
+            : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
         </p>
       ) : null}
       {path === "escrow" ? escrow : null}

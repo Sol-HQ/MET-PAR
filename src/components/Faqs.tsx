@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LawRecord } from "@/components/LawRecord";
-import { TENSOR_TAKER_FEE_PERCENT } from "@/lib/title";
+import { ESCROW_PATH, TENSOR_TAKER_FEE_PERCENT } from "@/lib/title";
 
 export function Faqs() {
   return (
@@ -144,8 +144,8 @@ export function Faqs() {
           A normal wallet lists the title through Tensor&apos;s marketplace program, at one price, and can buy a
           title that is already listed. The buyer pays that price. Tensor pays the seller the full price and
           charges the buyer about {TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the
-          creator promised one, is the creator&apos;s own promise. With a coin attached, the practice network also
-          has an escrow path, open to the two test wallets. On Solana Mainnet that button says coming soon.
+          creator promised one, is the creator&apos;s own promise. {ESCROW_PATH} On the practice network that program
+          is open to the two test wallets, and only when a coin is attached.
         </p>
         <p>
           The creator signs the terms and owes the handoff. PAR is software. It does not hold, insure, or guarantee

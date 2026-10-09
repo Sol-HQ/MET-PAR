@@ -1,3 +1,5 @@
+import { ESCROW_PATH } from "@/lib/title";
+
 /** Facts on the structure of a PAR real-world asset, and the published tests those facts sit beside. */
 export function LawRecord({ plain = false }: { plain?: boolean }) {
   return (
@@ -31,7 +33,7 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
           After the title exists, the creator lists it on the sale page through Tensor&apos;s marketplace program, at
           one price in the token already on the title. A buyer pays that price. Tensor pays the creator the full
           price. PAR takes none of that sale. A burn, if the creator promised one, is the creator&apos;s own promise.
-          The creator hands the object to the holder of the title. PAR is software. It does not hold, insure, or
+          {ESCROW_PATH} The creator hands the object to the holder of the title. PAR is software. It does not hold, insure, or
           guarantee the object. The person named on the sheet owes the handoff. The pitch and the redemption card
           bar a line that the price will go up, or that a return is promised.
         </p>
@@ -41,8 +43,7 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
             After graduation the coin trades for a number of days the creator set, from 1 to 365. The title can be sold
             when those days end. The day is fixed when the coin graduates. On the Tensor path, the creator then lists
             the title through Tensor&apos;s marketplace, paid only in this coin, and burns 25% of the price within 7
-            days. On the escrow path, the PAR escrow holds the title and sells it. (The escrow path is not a mainnet
-            option yet. Coming soon.) The creator hands the object to the holder of the title. PAR is software. It does
+            days. {ESCROW_PATH} The creator hands the object to the holder of the title. PAR is software. It does
             not hold, insure, or guarantee the object. The person named on the sheet owes the handoff.
           </p>
           <p>
@@ -140,8 +141,7 @@ export function LawRecord({ plain = false }: { plain?: boolean }) {
         <p>
           The payment use and the meme are written on the NFT when the coin is created. The record sheet on that NFT
           pins them. The hash on the NFT pins the sheet. PAR keeps a copy of those proofs. The coin trades on Meteora,
-          on Solana. The title lists through Tensor after the day the clock sets, or through the PAR escrow. (The
-          escrow path is not a mainnet option yet. Coming soon.) The object moves when the named person keeps the
+          on Solana. The title lists through Tensor after the day the clock sets. The object moves when the named person keeps the
           handoff. The form blocks a price promise and a promised return on the pitch and on the redemption card.
         </p>
       )}

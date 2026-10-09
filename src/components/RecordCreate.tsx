@@ -43,7 +43,7 @@ import {
   saleUrl,
   saleVenueWords,
   CREATOR_BURN_DAYS,
-  ESCROW_COMING,
+  ESCROW_PATH,
   TENSOR_TAKER_FEE_PERCENT,
   TENSOR_MARKETPLACE,
   TITLE_KIND,
@@ -752,19 +752,20 @@ export function RecordCreate({
         useRail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale.`
+            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if you promised one, is your own promise.`
             : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
+        ...(useRail === "escrow" ? [] : [ESCROW_PATH]),
         `The record and the title each carry the token address ${mint}, sale page ${venue}, and a full sheet link. That link is the readable page on Arweave.`,
         "The wallet signs this message. These are the words, in this order.",
         ...sampleMessage.split("\n"),
         draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : `Payment token: ${draftPlan.tokenName} (${draftPlan.symbol}).`,
         `Sheet picture: ${(picture.size / 1024).toFixed(1)} KiB. NFT image: ${(nftPicture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
-        draftPlan.noCoin
-          ? "The sale is a list at one price. You set that price on the sale page."
-          : `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
-        draftPlan.noCoin
-          ? "Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."
-          : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
+        ...(draftPlan.noCoin
+          ? []
+          : [
+              `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
+              `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
+            ]),
         `Record rent: ${formatLamports(recordRent)}. ${landingCost(recordPrepared)} Record transaction: ${recordBytes} of 1232 bytes.`,
         ...(useEdition
           ? [
@@ -1189,8 +1190,8 @@ export function RecordCreate({
                 ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
                 : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
               : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."
-            : "The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise."}
-          {coin && cluster !== "devnet" ? ` ${ESCROW_COMING}` : ""}
+            : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
+          {coin && cluster !== "devnet" && rail !== "escrow" ? ` ${ESCROW_PATH}` : ""}
         </p>
       {!finished ? (
         <div className="record-promises">
