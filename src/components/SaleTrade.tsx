@@ -34,6 +34,7 @@ export function SaleTrade({
   listing,
   decimals = 6,
   noCoin = false,
+  collection = null,
 }: {
   pageCluster: ClusterName;
   title: string;
@@ -48,6 +49,7 @@ export function SaleTrade({
   listing: Listing | null;
   decimals?: number;
   noCoin?: boolean;
+  collection?: string | null;
 }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
@@ -64,6 +66,7 @@ export function SaleTrade({
   const wallet = publicKey?.toBase58() ?? "";
   const isCreator = wallet === creator;
   const pricedInCoin = Boolean(listing) && listing?.currency === mint;
+  const collectionKey = collection ? new PublicKey(collection) : null;
   const canBuy = Boolean(listing) && pricedInCoin && listing?.seller === creator && open;
   const wait = !graduated
     ? `The list button opens ${delayDays} days after the token graduates.`
@@ -115,7 +118,13 @@ export function SaleTrade({
       return;
     }
     const transaction = new Transaction().add(
-      listOnTensorInstruction({ title: new PublicKey(title), creator: publicKey, mint: new PublicKey(mint), price: amount }),
+      listOnTensorInstruction({
+        title: new PublicKey(title),
+        creator: publicKey,
+        mint: new PublicKey(mint),
+        price: amount,
+        collection: collectionKey,
+      }),
     );
     confirm(
       "List this title",
@@ -140,6 +149,7 @@ export function SaleTrade({
       seller: new PublicKey(listing.seller),
       buyer: publicKey,
       price: amount,
+      collection: collectionKey,
     });
     confirm(
       "Buy this title",
@@ -154,7 +164,9 @@ export function SaleTrade({
 
   function delist() {
     if (!publicKey) return;
-    const transaction = new Transaction().add(delistOnTensorInstruction({ title: new PublicKey(title), creator: publicKey }));
+    const transaction = new Transaction().add(
+      delistOnTensorInstruction({ title: new PublicKey(title), creator: publicKey, collection: collectionKey }),
+    );
     confirm("Take the listing down", ["The title returns to your wallet. Nobody can buy it until you list it again."], transaction);
   }
 

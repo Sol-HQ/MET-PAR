@@ -21,6 +21,11 @@ function absent() {
   return { pubkey: marketplace, isSigner: false, isWritable: false };
 }
 
+/** An edition title sits in its sealed collection. Core needs that collection on every move. */
+function collectionKey(collection?: PublicKey) {
+  return collection ? { pubkey: collection, isSigner: false, isWritable: false } : absent();
+}
+
 export function feeVaultAddress(listState: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("fee_vault"), Buffer.from([listState.toBytes()[31]])],
@@ -50,7 +55,13 @@ export function formatTokenAmount(amount: bigint, decimals = TOKEN_DECIMALS): st
 }
 
 /** The creator lists the title through Tensor's program, priced in this token. Tensor holds it while it is listed. */
-export function listOnTensorInstruction(input: { title: PublicKey; creator: PublicKey; mint: PublicKey; price: bigint }): TransactionInstruction {
+export function listOnTensorInstruction(input: {
+  title: PublicKey;
+  creator: PublicKey;
+  mint: PublicKey;
+  price: bigint;
+  collection?: PublicKey | null;
+}): TransactionInstruction {
   const data = Buffer.alloc(52);
   data.set(LIST_CORE, 0);
   data.writeBigUInt64LE(input.price, 8);
@@ -61,7 +72,7 @@ export function listOnTensorInstruction(input: { title: PublicKey; creator: Publ
     data,
     keys: [
       { pubkey: input.title, isSigner: false, isWritable: true },
-      absent(),
+      collectionKey(input.collection ?? undefined),
       { pubkey: tensorListAddress(input.title), isSigner: false, isWritable: true },
       { pubkey: input.creator, isSigner: true, isWritable: false },
       { pubkey: core, isSigner: false, isWritable: false },
@@ -80,6 +91,7 @@ export function buyOnTensorInstruction(input: {
   seller: PublicKey;
   buyer: PublicKey;
   price: bigint;
+  collection?: PublicKey | null;
 }): TransactionInstruction {
   const listState = tensorListAddress(input.title);
   const feeVault = feeVaultAddress(listState);
@@ -98,7 +110,7 @@ export function buyOnTensorInstruction(input: {
       { pubkey: input.buyer, isSigner: false, isWritable: false },
       { pubkey: listState, isSigner: false, isWritable: true },
       { pubkey: input.title, isSigner: false, isWritable: true },
-      absent(),
+      collectionKey(input.collection ?? undefined),
       { pubkey: input.mint, isSigner: false, isWritable: false },
       { pubkey: input.seller, isSigner: false, isWritable: true },
       { pubkey: sellerTokens, isSigner: false, isWritable: true },
@@ -125,6 +137,7 @@ export function buyOnTensorTransaction(input: {
   seller: PublicKey;
   buyer: PublicKey;
   price: bigint;
+  collection?: PublicKey | null;
 }): Transaction {
   const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer);
   return new Transaction().add(
@@ -134,13 +147,17 @@ export function buyOnTensorTransaction(input: {
 }
 
 /** The creator takes the listing down. The title returns to the creator's wallet. */
-export function delistOnTensorInstruction(input: { title: PublicKey; creator: PublicKey }): TransactionInstruction {
+export function delistOnTensorInstruction(input: {
+  title: PublicKey;
+  creator: PublicKey;
+  collection?: PublicKey | null;
+}): TransactionInstruction {
   return new TransactionInstruction({
     programId: marketplace,
     data: Buffer.from(DELIST_CORE),
     keys: [
       { pubkey: input.title, isSigner: false, isWritable: true },
-      absent(),
+      collectionKey(input.collection ?? undefined),
       { pubkey: input.creator, isSigner: true, isWritable: true },
       { pubkey: tensorListAddress(input.title), isSigner: false, isWritable: true },
       { pubkey: core, isSigner: false, isWritable: false },

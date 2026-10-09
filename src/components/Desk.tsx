@@ -109,6 +109,57 @@ type PaidTemplate = {
 };
 
 const STORAGE_KEY = "par.listings.v1";
+const PAID_STORE = "par.paid-template.v1";
+
+function paidStoreKey(wallet: string, fingerprint: string) {
+  return `${PAID_STORE}:${wallet}:${fingerprint}`;
+}
+
+function encodeSecret(secret: Uint8Array): string {
+  let binary = "";
+  for (const byte of secret) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function decodeSecret(text: string): Uint8Array {
+  const binary = atob(text);
+  const secret = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) secret[index] = binary.charCodeAt(index);
+  return secret;
+}
+
+function writePaid(wallet: string, paid: PaidTemplate) {
+  try {
+    sessionStorage.setItem(
+      paidStoreKey(wallet, paid.fingerprint),
+      JSON.stringify({ config: paid.config.toBase58(), secret: encodeSecret(paid.baseMint.secretKey) }),
+    );
+  } catch {
+    // A private browser can refuse storage. The page still holds the key until refresh.
+  }
+}
+
+function readPaid(wallet: string, fingerprint: string): PaidTemplate | null {
+  try {
+    const raw = sessionStorage.getItem(paidStoreKey(wallet, fingerprint));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { config?: string; secret?: string };
+    if (!parsed.config || !parsed.secret) return null;
+    const secret = decodeSecret(parsed.secret);
+    if (secret.length !== 64) return null;
+    return { fingerprint, config: new PublicKey(parsed.config), baseMint: Keypair.fromSecretKey(secret) };
+  } catch {
+    return null;
+  }
+}
+
+function forgetPaid(wallet: string, fingerprint: string) {
+  try {
+    sessionStorage.removeItem(paidStoreKey(wallet, fingerprint));
+  } catch {
+    // The create already finished. A leftover copy is unused after the token exists.
+  }
+}
 
 function readRemembered(): Remembered[] {
   if (typeof window === "undefined") return [];
@@ -312,6 +363,7 @@ export function Desk() {
   if (!feeFlat) {
     try {
       endingParsed = parseFeePercent(endFee);
+      assertCurveFee(endingParsed);
       if (endingParsed > openingFeeForShape) endingProblem = "The ending fee has to be at or under the opening fee.";
     } catch (cause) {
       endingProblem = cause instanceof Error ? cause.message : "That ending fee is not allowed.";
@@ -423,6 +475,14 @@ export function Desk() {
     feeDecaySeconds,
     reserve,
   });
+
+  useEffect(() => {
+    const wallet = publicKey?.toBase58();
+    if (!wallet) return;
+    const stored = readPaid(wallet, formFingerprint);
+    if (!stored) return;
+    setPaid((current) => (current && current.fingerprint === formFingerprint ? current : stored));
+  }, [publicKey, formFingerprint]);
 
   useEffect(() => {
     if (!curveFeeEdited) setCurveFee(String(openingBps / 100));
@@ -659,11 +719,13 @@ export function Desk() {
       }
       if (next.configPrepared && draft) {
         await sendPrepared(connection, next.configPrepared, signTransaction, "The template is on chain.");
-        setPaid({
+        const saved = {
           fingerprint: next.fingerprint,
           config: draft.config,
           baseMint: draft.baseMint,
-        });
+        };
+        setPaid(saved);
+        writePaid(publicKey.toBase58(), saved);
         templateSaved = true;
         setMessage("Template confirmed. Building the token...");
         await waitForAccount(connection, draft.config);
@@ -733,6 +795,7 @@ export function Desk() {
       }
       if (!draft) throw new Error("The metadata address is missing.");
       const signature = await sendPrepared(connection, prepared, signTransaction, "The token is created.");
+      forgetPaid(publicKey.toBase58(), next.fingerprint);
       setPaid(null);
       remember({
         pool: next.poolAddress,
@@ -952,6 +1015,15 @@ export function Desk() {
         : writtenStart === writtenEnd
           ? `The fee stays at ${bpsToPercent(writtenStart)} for the whole curve.`
           : `The fee starts at ${bpsToPercent(writtenStart)} and falls ${fallWords} to ${bpsToPercent(writtenEnd)} over ${feeDecayLabel(feeDecaySeconds)}.`;
+  const createBlock = !publicKey
+    ? "Connect a wallet before Review create."
+    : name.trim().length === 0
+      ? "Enter the token name."
+      : feeProblem || endingProblem || compoundProblem
+        ? feeProblem || endingProblem || compoundProblem
+        : picture.ok
+          ? ""
+          : picture.error || "Fix the curve fields.";
   return (
     <div className="desk">
       <section className="lede">
@@ -1893,13 +1965,10 @@ export function Desk() {
             </p>
           </>
         )}
-        <button
-          className="solid"
-          type="submit"
-          disabled={busy || !picture.ok || feeProblem.length > 0 || endingProblem.length > 0 || compoundProblem.length > 0 || name.trim().length === 0}
-        >
+        <button className="solid" type="submit" disabled={busy || Boolean(createBlock)}>
           {busy ? "Building..." : "Review create"}
         </button>
+        {createBlock && !busy ? <p className="note">{createBlock}</p> : null}
         {picture.ok && paid?.fingerprint === formFingerprint ? (
           <p className="note">
             The template for these numbers is already on chain. Review create signs the token only. Template rent

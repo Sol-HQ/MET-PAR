@@ -1,28 +1,18 @@
-import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { JITO_TIP_ACCOUNTS } from "@/lib/send";
+import { transactionCarriesJitoTip } from "@/lib/send";
 
 const JITO_TRANSACTIONS = "https://mainnet.block-engine.jito.wtf/api/v1/transactions";
-const TIP_ACCOUNTS = new Set<string>(JITO_TIP_ACCOUNTS);
-
-function carriesTip(encoded: string): boolean {
-  try {
-    const transaction = Transaction.from(Buffer.from(encoded, "base64"));
-    return transaction.instructions.some((instruction) => {
-      if (!instruction.programId.equals(SystemProgram.programId)) return false;
-      if (instruction.data.length < 12 || instruction.data[0] !== 2) return false;
-      const destination = instruction.keys[1]?.pubkey;
-      return destination instanceof PublicKey && TIP_ACCOUNTS.has(destination.toBase58());
-    });
-  } catch {
-    return false;
-  }
-}
 
 /** Relays one already-signed mainnet transaction to Jito. The browser cannot call the block engine directly. */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { transaction?: string } | null;
   const transaction = body?.transaction || "";
-  if (transaction.length < 80 || transaction.length > 4_000 || !carriesTip(transaction)) {
+  let raw: Uint8Array | null = null;
+  try {
+    raw = Uint8Array.from(Buffer.from(transaction, "base64"));
+  } catch {
+    raw = null;
+  }
+  if (!raw || transaction.length < 80 || transaction.length > 4_000 || !transactionCarriesJitoTip(raw)) {
     return Response.json({ error: "Send the signed transaction." }, { status: 400 });
   }
   const response = await fetch(JITO_TRANSACTIONS, {

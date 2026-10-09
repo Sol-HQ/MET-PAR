@@ -1,4 +1,4 @@
-import { create, fetchAsset, mplCore, updateV2 } from "@metaplex-foundation/mpl-core";
+import { create, createCollection, fetchAsset, fetchCollection, mplCore, updateCollection, updateV2 } from "@metaplex-foundation/mpl-core";
 import { createNoopSigner, createSignerFromKeypair, publicKey as umiKey, signerIdentity } from "@metaplex-foundation/umi";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi-web3js-adapters";
@@ -220,13 +220,52 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
 }
 
 /**
- * The title, the one edition of the record that can be sold. The creator owns it, its attributes carry authority None,
- * and its update authority is set to None in the same transaction, so nothing on it can change again.
- * ImmutableMetadata is left off on purpose: it would block setting the update authority to None.
+ * The collection's update authority after the title is minted. It is an address off the curve, so no key exists for it
+ * and nothing can ever be added to the collection, changed on it, or changed on the title again.
+ */
+export function sealedAuthority(collection: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([new TextEncoder().encode("par sealed"), collection.toBuffer()], new PublicKey(CORE_PROGRAM_ID))[0];
+}
+
+/**
+ * The master edition: a Core collection carrying the Master Edition plugin, max supply 1. The creator holds its update
+ * authority only until the title is minted into it; `titleInstructions` seals it in that same transaction.
+ */
+export function editionCollectionInstructions(input: {
+  endpoint: string;
+  collection: Keypair;
+  creator: PublicKey;
+  name: string;
+  uri: string;
+}): TransactionInstruction[] {
+  const umi = createUmi(input.endpoint).use(mplCore());
+  const creator = createNoopSigner(umiKey(input.creator.toBase58()));
+  umi.use(signerIdentity(creator));
+  const builder = createCollection(umi, {
+    collection: createSignerFromKeypair(umi, fromWeb3JsKeypair(input.collection)),
+    name: input.name,
+    uri: input.uri,
+    updateAuthority: creator.publicKey,
+    payer: creator,
+    plugins: [{ type: "MasterEdition", maxSupply: 1, authority: { type: "None" } }],
+  });
+  return builder.getInstructions().map((instruction) => toWeb3JsInstruction(instruction));
+}
+
+/**
+ * The title, the one edition of the record that can be sold. The creator owns it.
+ *
+ * With `collection` (made by `editionCollectionInstructions`): the title is minted into it as Edition 1, then the
+ * collection is handed to `sealedAuthority` in the same transaction. Core does not enforce edition numbers; the sealed
+ * collection, with exactly one asset ever minted into it, is what keeps the title the only one.
+ *
+ * Without `collection` (the escrow path, whose program takes no collection account): a standalone Core asset whose
+ * update authority is set to None. ImmutableMetadata is left off: it would block setting the update authority to None.
  */
 export function titleInstructions(input: {
   endpoint: string;
   asset: Keypair;
+  collection?: PublicKey;
   creator: PublicKey;
   name: string;
   uri: string;
@@ -236,6 +275,30 @@ export function titleInstructions(input: {
   const creator = createNoopSigner(umiKey(input.creator.toBase58()));
   umi.use(signerIdentity(creator));
   const asset = createSignerFromKeypair(umi, fromWeb3JsKeypair(input.asset));
+  if (input.collection) {
+    const collection = umiKey(input.collection.toBase58());
+    const builder = create(umi, {
+      asset,
+      collection: { publicKey: collection },
+      name: input.name,
+      uri: input.uri,
+      owner: creator.publicKey,
+      payer: creator,
+      authority: creator,
+      plugins: [
+        { type: "Attributes", attributeList: input.attributes, authority: { type: "None" } },
+        { type: "Edition", number: 1, authority: { type: "None" } },
+      ],
+    }).add(
+      updateCollection(umi, {
+        collection,
+        payer: creator,
+        authority: creator,
+        newUpdateAuthority: umiKey(sealedAuthority(input.collection).toBase58()),
+      }),
+    );
+    return builder.getInstructions().map((instruction) => toWeb3JsInstruction(instruction));
+  }
   const builder = create(umi, {
     asset,
     name: input.name,
@@ -576,6 +639,7 @@ export type TitleStatus = {
   sheet: string;
   listing: string | null;
   creator: string;
+  collection: string | null;
   tensor: TensorListing | null;
   checks: TitleCheck[];
   ok: boolean;
@@ -632,6 +696,12 @@ export async function titleStatus(
     },
   ];
   if (tensor) checks.push({ label: "The Tensor price is in this token", ok: tensor.currency === record.attributes.mint });
+  if (read.collection) {
+    checks.push({
+      label: "The title is edition 1 of a sealed collection of one",
+      ok: read.collectionSealed && read.edition === 1,
+    });
+  }
   return {
     address,
     rail,
@@ -640,6 +710,7 @@ export async function titleStatus(
     sheet: read.uri,
     listing,
     creator,
+    collection: read.collection,
     tensor,
     checks,
     ok: checks.every((check) => check.ok),
@@ -654,9 +725,23 @@ export type TitleRead = {
   attributes: Record<string, string>;
   locked: boolean;
   clean: boolean;
+  collection: string | null;
+  edition: number | null;
+  collectionSealed: boolean;
 };
 
-const NO_TITLE: TitleRead = { exists: false, owner: "", name: "", uri: "", attributes: {}, locked: false, clean: false };
+const NO_TITLE: TitleRead = {
+  exists: false,
+  owner: "",
+  name: "",
+  uri: "",
+  attributes: {},
+  locked: false,
+  clean: false,
+  collection: null,
+  edition: null,
+  collectionSealed: false,
+};
 
 /** `clean` means no plugin lets anyone move, burn, or freeze the title, the same rule the escrow enforces. */
 export async function readTitle(endpoint: string, asset: string): Promise<TitleRead> {
@@ -677,14 +762,34 @@ export async function readTitle(endpoint: string, asset: string): Promise<TitleR
       found.lifecycleHooks?.length ? found.lifecycleHooks : undefined,
       found.linkedLifecycleHooks?.length ? found.linkedLifecycleHooks : undefined,
     ].some(Boolean);
+    const edition = found.edition ? Number(found.edition.number) : null;
+    let collection: string | null = null;
+    let collectionSealed = false;
+    if (found.updateAuthority.type === "Collection" && found.updateAuthority.address) {
+      collection = found.updateAuthority.address.toString();
+      try {
+        const parent = await fetchCollection(umi, umiKey(collection), { commitment: "confirmed" });
+        collectionSealed =
+          parent.updateAuthority.toString() === sealedAuthority(new PublicKey(collection)).toBase58() &&
+          Number(parent.masterEdition?.maxSupply ?? 0) === 1 &&
+          Number(parent.numMinted) === 1 &&
+          edition === 1;
+      } catch {
+        collectionSealed = false;
+      }
+    }
     return {
       exists: true,
       owner: found.owner.toString(),
       name: found.name,
       uri: found.uri,
       attributes,
-      locked: found.updateAuthority.type === "None" && found.attributes?.authority.type === "None",
+      locked:
+        found.attributes?.authority.type === "None" && (found.updateAuthority.type === "None" || collectionSealed),
       clean: !risky,
+      collection,
+      edition,
+      collectionSealed,
     };
   } catch {
     return NO_TITLE;

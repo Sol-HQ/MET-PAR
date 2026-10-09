@@ -169,6 +169,7 @@ async function readHolding(connection: Connection, owner: PublicKey, mint: Publi
 
 type PendingSwap = {
   prepared?: PreparedTransaction;
+  preview?: QuotePreview;
   lines: string[];
   cross?: QuotePreview;
   doneText: string;
@@ -694,10 +695,51 @@ export function PoolView({ address }: { address: string }) {
         landingCost(prepared),
       ];
       if (cluster === "mainnet-beta") {
-        setPending({ prepared, lines, doneText: tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol) });
+        setPending({
+          prepared,
+          preview,
+          lines,
+          doneText: tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol),
+        });
         return;
       }
       const doneText = tradeDone(preview, snapshot.symbol, snapshot.quoteSymbol);
+      const signature = await sendPrepared(connection, prepared, signTransaction, doneText);
+      finish(doneText, signature);
+      setQuote(null);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Swap failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendFreshDirect(preview: QuotePreview) {
+    if (!publicKey || !signTransaction || !snapshot) return;
+    setBusy(true);
+    setError("");
+    try {
+      const priced = snapshot.isMigrated && snapshot.dammPool
+        ? await quoteGraduated(snapshot, connection, preview.side, preview.amountIn, preview.slippageBps)
+        : await quoteCurve(preview.side, preview.amountIn);
+      if (priced.minimumAmountOut.lt(preview.minimumAmountOut)) {
+        throw new Error("The price moved. Read the quote again.");
+      }
+      const client = DynamicBondingCurveClient.create(connection, "confirmed");
+      const transaction = snapshot.isMigrated && snapshot.dammPool
+        ? await graduatedSwapTransaction(connection, publicKey, snapshot, priced)
+        : await client.pool.swap2({
+            owner: publicKey,
+            pool: new PublicKey(address),
+            swapBaseForQuote: priced.side === "sell",
+            swapMode: priced.side === "buy" ? SwapMode.PartialFill : SwapMode.ExactIn,
+            amountIn: priced.amountIn,
+            minimumAmountOut: priced.minimumAmountOut,
+            referralTokenAccount: null,
+          });
+      const prepared = await prepareTransaction(connection, publicKey, transaction, []);
+      const doneText = tradeDone(priced, snapshot.symbol, snapshot.quoteSymbol);
       const signature = await sendPrepared(connection, prepared, signTransaction, doneText);
       finish(doneText, signature);
       setQuote(null);
@@ -1170,197 +1212,6 @@ export function PoolView({ address }: { address: string }) {
             )}
           </section>
 
-          <dl className="quote-slip" aria-label="Token record">
-            <div>
-              <dt>Mint</dt>
-              <dd>
-                <a href={explorerAccount(snapshot.baseMint, cluster)}>{shortAddress(snapshot.baseMint)}</a>
-              </dd>
-            </div>
-            <div>
-              <dt>Curve</dt>
-              <dd>
-                <a href={explorerAccount(snapshot.address, cluster)}>{shortAddress(snapshot.address)}</a>
-              </dd>
-            </div>
-            <div>
-              <dt>Template</dt>
-              <dd>
-                <a href={explorerAccount(snapshot.config, cluster)}>{shortAddress(snapshot.config)}</a>
-              </dd>
-            </div>
-            <div>
-              <dt>Trading pool</dt>
-              <dd>
-                {snapshot.dammPool ? (
-                  <a href={meteoraPoolUrl(snapshot.dammPool, cluster)} target="_blank" rel="noreferrer">
-                    {shortAddress(snapshot.dammPool)}
-                  </a>
-                ) : (
-                  "Not open"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Quote</dt>
-              <dd>
-                {snapshot.quoteSymbol}{" "}
-                <a href={explorerAccount(snapshot.quoteMint, cluster)}>{shortAddress(snapshot.quoteMint)}</a>
-              </dd>
-            </div>
-            <div>
-              <dt>Decimals</dt>
-              <dd>
-                {snapshot.baseDecimals} token, {snapshot.quoteDecimals} quote
-              </dd>
-            </div>
-            <div>
-              <dt>Supply</dt>
-              <dd>{Number(snapshot.supply).toLocaleString("en-US")}</dd>
-            </div>
-            <div>
-              <dt>Creator supply</dt>
-              <dd>
-                {reserved.isZero()
-                  ? "None"
-                  : `${groupUi(rawToUi(reserved, snapshot.baseDecimals))} ${snapshot.symbol}`}
-              </dd>
-            </div>
-            {shares ? (
-              <div>
-                <dt>Trading fee split</dt>
-                <dd>
-                  Meteora {shareLabel(shares.meteora)}, creator {shareLabel(shares.creator)}, platform {shareLabel(shares.platform)}
-                </dd>
-              </div>
-            ) : null}
-            {snapshot.isMigrated ? null : (
-              <div>
-                <dt>Tokens on the curve</dt>
-                <dd>
-                  {groupUi(rawToUi(snapshot.baseReserve, snapshot.baseDecimals))} {snapshot.symbol}
-                </dd>
-              </div>
-            )}
-            <div>
-              <dt>Opening price</dt>
-              <dd>
-                {snapshot.startPrice} {snapshot.quoteSymbol}
-              </dd>
-            </div>
-            {snapshot.shelfPrice ? (
-              <div>
-                <dt>Shelf through</dt>
-                <dd>
-                  {snapshot.shelfPrice} {snapshot.quoteSymbol}
-                </dd>
-              </div>
-            ) : null}
-            <div>
-              <dt>Pool price</dt>
-              <dd>
-                {snapshot.endPrice} {snapshot.quoteSymbol}
-              </dd>
-            </div>
-            <div>
-              <dt>Curve fills at</dt>
-              <dd>
-                {formatMoney(snapshot.threshold, snapshot.quoteDecimals)} {snapshot.quoteSymbol}
-              </dd>
-            </div>
-            <div>
-              <dt>Curve fee</dt>
-              <dd>
-                {snapshot.feeDecaySeconds > 0
-                  ? `${bpsToPercent(snapshot.openingFeeBps)} to ${bpsToPercent(snapshot.endingFeeBps)} over ${feeDecayLabel(snapshot.feeDecaySeconds)}`
-                  : bpsToPercent(snapshot.openingFeeBps)}
-              </dd>
-            </div>
-            <div>
-              <dt>Pool fee</dt>
-              <dd>
-                {snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "Saved on the template"}
-                {snapshot.compoundingFeeBps > 0
-                  ? `. Compounding puts ${snapshot.compoundingFeeBps / 100}% of the liquidity fee back into the pool. Meteora's 20% still comes out first.`
-                  : ""}
-              </dd>
-            </div>
-            <div>
-              <dt>Liquidity</dt>
-              <dd>{snapshot.isMigrated ? "Locked in the trading pool" : "Still on the curve"}</dd>
-            </div>
-            <div>
-              <dt>Creator</dt>
-              <dd>
-                <a href={explorerAccount(snapshot.creator, cluster)}>{shortAddress(snapshot.creator)}</a>
-              </dd>
-            </div>
-          </dl>
-
-          {schedule.length > 0 ? (
-            <section className="migrate" aria-label="Creator allocation">
-              <h2>Creator allocation</h2>
-              {schedule.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-              {creatorClaim ? (
-                <p>
-                  Claimed {groupUi(rawToUi(creatorClaim.claimed, snapshot.baseDecimals))} {snapshot.symbol}. Unlocked now{" "}
-                  {groupUi(rawToUi(creatorClaim.claimable, snapshot.baseDecimals))} {snapshot.symbol}.
-                  {nextUnlock
-                    ? ` Next unlock ${new Date(nextUnlock * 1000).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}.`
-                    : " The schedule is fully unlocked."}
-                </p>
-              ) : snapshot.migrationProgress < 1 ? (
-                <p>The curve is still filling. This allocation stays reserved until the supply is locked.</p>
-              ) : (
-                <p>The curve is full. The clock starts when the gold box is signed.</p>
-              )}
-            </section>
-          ) : null}
-
-          <section className="ledger" aria-label="Holders">
-            <h2>Holders</h2>
-            {holders.length === 0 ? <p className="note">No wallet holds this token outside the pool.</p> : null}
-            <ol>
-              {holders.map((row) => {
-                const supply = Number(snapshot.supply);
-                const share = supply > 0 ? (Number(row.amount) / supply) * 100 : 0;
-                return (
-                  <li key={row.owner}>
-                    <a href={explorerAccount(row.owner, cluster)}>{shortAddress(row.owner)}</a>
-                    <span>
-                      {groupUi(row.amount)} {snapshot.symbol}
-                    </span>
-                    <span>{share.toLocaleString("en-US", { maximumFractionDigits: 2 })}%</span>
-                  </li>
-                );
-              })}
-            </ol>
-            {holdersCapped ? <p className="note">These are the 20 largest holdings. Smaller wallets are not in this list.</p> : null}
-          </section>
-
-          <section className="ledger" aria-label="Buys and sells">
-            <h2>Buys and sells</h2>
-            {trades.length === 0 ? <p className="note">No buys or sells yet.</p> : null}
-            <ol>
-              {trades.map((trade) => (
-                <li key={trade.signature}>
-                  <span className={trade.side}>{trade.side === "buy" ? "Buy" : "Sell"}</span>
-                  <span>{tradeWhen(trade.time)}</span>
-                  {trade.wallet ? <a href={explorerAccount(trade.wallet, cluster)}>{shortAddress(trade.wallet)}</a> : <span />}
-                  <span>
-                    {groupUi(trade.base)} {snapshot.symbol}
-                  </span>
-                  <span>
-                    {groupUi(trade.quote)} {snapshot.quoteSymbol}
-                  </span>
-                  <a href={explorerTx(trade.signature, cluster)}>Transaction</a>
-                </li>
-              ))}
-            </ol>
-          </section>
-
           {snapshot.trading || (snapshot.isMigrated && snapshot.dammPool) ? (
             <form
               className="trade"
@@ -1640,6 +1491,197 @@ export function PoolView({ address }: { address: string }) {
             </form>
           ) : null}
 
+          <dl className="quote-slip" aria-label="Token record">
+            <div>
+              <dt>Mint</dt>
+              <dd>
+                <a href={explorerAccount(snapshot.baseMint, cluster)}>{shortAddress(snapshot.baseMint)}</a>
+              </dd>
+            </div>
+            <div>
+              <dt>Curve</dt>
+              <dd>
+                <a href={explorerAccount(snapshot.address, cluster)}>{shortAddress(snapshot.address)}</a>
+              </dd>
+            </div>
+            <div>
+              <dt>Template</dt>
+              <dd>
+                <a href={explorerAccount(snapshot.config, cluster)}>{shortAddress(snapshot.config)}</a>
+              </dd>
+            </div>
+            <div>
+              <dt>Trading pool</dt>
+              <dd>
+                {snapshot.dammPool ? (
+                  <a href={meteoraPoolUrl(snapshot.dammPool, cluster)} target="_blank" rel="noreferrer">
+                    {shortAddress(snapshot.dammPool)}
+                  </a>
+                ) : (
+                  "Not open"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Quote</dt>
+              <dd>
+                {snapshot.quoteSymbol}{" "}
+                <a href={explorerAccount(snapshot.quoteMint, cluster)}>{shortAddress(snapshot.quoteMint)}</a>
+              </dd>
+            </div>
+            <div>
+              <dt>Decimals</dt>
+              <dd>
+                {snapshot.baseDecimals} token, {snapshot.quoteDecimals} quote
+              </dd>
+            </div>
+            <div>
+              <dt>Supply</dt>
+              <dd>{Number(snapshot.supply).toLocaleString("en-US")}</dd>
+            </div>
+            <div>
+              <dt>Creator supply</dt>
+              <dd>
+                {reserved.isZero()
+                  ? "None"
+                  : `${groupUi(rawToUi(reserved, snapshot.baseDecimals))} ${snapshot.symbol}`}
+              </dd>
+            </div>
+            {shares ? (
+              <div>
+                <dt>Trading fee split</dt>
+                <dd>
+                  Meteora {shareLabel(shares.meteora)}, creator {shareLabel(shares.creator)}, platform {shareLabel(shares.platform)}
+                </dd>
+              </div>
+            ) : null}
+            {snapshot.isMigrated ? null : (
+              <div>
+                <dt>Tokens on the curve</dt>
+                <dd>
+                  {groupUi(rawToUi(snapshot.baseReserve, snapshot.baseDecimals))} {snapshot.symbol}
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Opening price</dt>
+              <dd>
+                {snapshot.startPrice} {snapshot.quoteSymbol}
+              </dd>
+            </div>
+            {snapshot.shelfPrice ? (
+              <div>
+                <dt>Shelf through</dt>
+                <dd>
+                  {snapshot.shelfPrice} {snapshot.quoteSymbol}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Pool price</dt>
+              <dd>
+                {snapshot.endPrice} {snapshot.quoteSymbol}
+              </dd>
+            </div>
+            <div>
+              <dt>Curve fills at</dt>
+              <dd>
+                {formatMoney(snapshot.threshold, snapshot.quoteDecimals)} {snapshot.quoteSymbol}
+              </dd>
+            </div>
+            <div>
+              <dt>Curve fee</dt>
+              <dd>
+                {snapshot.feeDecaySeconds > 0
+                  ? `${bpsToPercent(snapshot.openingFeeBps)} to ${bpsToPercent(snapshot.endingFeeBps)} over ${feeDecayLabel(snapshot.feeDecaySeconds)}`
+                  : bpsToPercent(snapshot.openingFeeBps)}
+              </dd>
+            </div>
+            <div>
+              <dt>Pool fee</dt>
+              <dd>
+                {snapshot.migrationFeeBps > 0 ? bpsToPercent(snapshot.migrationFeeBps) : "Saved on the template"}
+                {snapshot.compoundingFeeBps > 0
+                  ? `. Compounding puts ${snapshot.compoundingFeeBps / 100}% of the liquidity fee back into the pool. Meteora's 20% still comes out first.`
+                  : ""}
+              </dd>
+            </div>
+            <div>
+              <dt>Liquidity</dt>
+              <dd>{snapshot.isMigrated ? "Locked in the trading pool" : "Still on the curve"}</dd>
+            </div>
+            <div>
+              <dt>Creator</dt>
+              <dd>
+                <a href={explorerAccount(snapshot.creator, cluster)}>{shortAddress(snapshot.creator)}</a>
+              </dd>
+            </div>
+          </dl>
+
+          {schedule.length > 0 ? (
+            <section className="migrate" aria-label="Creator allocation">
+              <h2>Creator allocation</h2>
+              {schedule.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              {creatorClaim ? (
+                <p>
+                  Claimed {groupUi(rawToUi(creatorClaim.claimed, snapshot.baseDecimals))} {snapshot.symbol}. Unlocked now{" "}
+                  {groupUi(rawToUi(creatorClaim.claimable, snapshot.baseDecimals))} {snapshot.symbol}.
+                  {nextUnlock
+                    ? ` Next unlock ${new Date(nextUnlock * 1000).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}.`
+                    : " The schedule is fully unlocked."}
+                </p>
+              ) : snapshot.migrationProgress < 1 ? (
+                <p>The curve is still filling. This allocation stays reserved until the supply is locked.</p>
+              ) : (
+                <p>The curve is full. The clock starts when the gold box is signed.</p>
+              )}
+            </section>
+          ) : null}
+
+          <section className="ledger" aria-label="Holders">
+            <h2>Holders</h2>
+            {holders.length === 0 ? <p className="note">No wallet holds this token outside the pool.</p> : null}
+            <ol>
+              {holders.map((row) => {
+                const supply = Number(snapshot.supply);
+                const share = supply > 0 ? (Number(row.amount) / supply) * 100 : 0;
+                return (
+                  <li key={row.owner}>
+                    <a href={explorerAccount(row.owner, cluster)}>{shortAddress(row.owner)}</a>
+                    <span>
+                      {groupUi(row.amount)} {snapshot.symbol}
+                    </span>
+                    <span>{share.toLocaleString("en-US", { maximumFractionDigits: 2 })}%</span>
+                  </li>
+                );
+              })}
+            </ol>
+            {holdersCapped ? <p className="note">These are the 20 largest holdings. Smaller wallets are not in this list.</p> : null}
+          </section>
+
+          <section className="ledger" aria-label="Buys and sells">
+            <h2>Buys and sells</h2>
+            {trades.length === 0 ? <p className="note">No buys or sells yet.</p> : null}
+            <ol>
+              {trades.map((trade) => (
+                <li key={trade.signature}>
+                  <span className={trade.side}>{trade.side === "buy" ? "Buy" : "Sell"}</span>
+                  <span>{tradeWhen(trade.time)}</span>
+                  {trade.wallet ? <a href={explorerAccount(trade.wallet, cluster)}>{shortAddress(trade.wallet)}</a> : <span />}
+                  <span>
+                    {groupUi(trade.base)} {snapshot.symbol}
+                  </span>
+                  <span>
+                    {groupUi(trade.quote)} {snapshot.quoteSymbol}
+                  </span>
+                  <a href={explorerTx(trade.signature, cluster)}>Transaction</a>
+                </li>
+              ))}
+            </ol>
+          </section>
+
           {authority && shares ? (
             <section className="migrate" aria-label="Creator and platform">
               <h2>{creatorWallet ? "Creator" : "Platform"}</h2>
@@ -1873,17 +1915,10 @@ export function PoolView({ address }: { address: string }) {
               void executeCross(next.cross);
               return;
             }
-            if (!next.prepared) return;
-            setBusy(true);
-            sendPrepared(connection, next.prepared, signTransaction, next.doneText)
-              .then(async (confirmed) => {
-                finish(next.doneText, confirmed);
-                await refresh();
-              })
-              .catch((cause: unknown) => {
-                setError(cause instanceof Error ? cause.message : "Transaction failed.");
-              })
-              .finally(() => setBusy(false));
+            if (next.preview) {
+              void sendFreshDirect(next.preview);
+              return;
+            }
           }}
         />
       ) : null}

@@ -9,7 +9,7 @@ import {
   VersionedTransaction,
   type Transaction,
 } from "@solana/web3.js";
-import { finishSignature, JITO_TIP_ACCOUNTS, JITO_TIP_LAMPORTS, jitoTipLamports } from "./send";
+import { JITO_TIP_ACCOUNTS, JITO_TIP_LAMPORTS, jitoTipLamports, sendSignedRaw } from "./send";
 import { explainTx } from "./tx-error";
 import { reportTx, ReportedTxError } from "./tx-notice";
 
@@ -175,8 +175,7 @@ export async function sendCrossTransaction(
       throw new Error("The wallet changed the transaction. It was not sent.");
     }
     const raw = signed.serialize();
-    signature = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 0 });
-    await finishSignature(connection, signature, blockhash, lastValidBlockHeight, landed, { raw, tip: false });
+    signature = await sendSignedRaw(connection, raw, blockhash, lastValidBlockHeight, landed);
     return signature;
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;

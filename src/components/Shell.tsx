@@ -53,7 +53,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <p className="note sec-line">
-        PAR uses its best means to be SEC compliant. Do not promise that a price will go up, or promise a return.
+        Do not promise that a price will go up, or promise a return.
       </p>
       {cluster === "mainnet-beta" ? (
         <p className="banner">

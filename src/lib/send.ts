@@ -1,4 +1,4 @@
-import { PublicKey, SystemProgram, Transaction, type Connection, type Keypair } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, VersionedTransaction, type Connection, type Keypair } from "@solana/web3.js";
 import { explorerTx, type ClusterName } from "./constants";
 import { formatLamports } from "./format";
 import { explainTx } from "./tx-error";
@@ -38,6 +38,35 @@ export type PreparedTransaction = {
 export function jitoTipLamports(endpoint: string): number {
   if (/devnet|localhost|127\.0\.0\.1/i.test(endpoint)) return 0;
   return JITO_TIP_LAMPORTS;
+}
+
+function transferToTip(programId: PublicKey | undefined, data: Uint8Array, destination: PublicKey | undefined): boolean {
+  if (!programId?.equals(SystemProgram.programId) || !destination) return false;
+  if (data.length < 12 || data[0] !== 2) return false;
+  return new Set<string>(JITO_TIP_ACCOUNTS).has(destination.toBase58());
+}
+
+/** True when the signed bytes pay a Jito tip account. Reads both legacy and versioned transactions. */
+export function transactionCarriesJitoTip(raw: Uint8Array): boolean {
+  try {
+    const transaction = Transaction.from(Buffer.from(raw));
+    return transaction.instructions.some((instruction) =>
+      transferToTip(instruction.programId, instruction.data, instruction.keys[1]?.pubkey),
+    );
+  } catch {
+    // Versioned transactions fail Transaction.from.
+  }
+  try {
+    const transaction = VersionedTransaction.deserialize(raw);
+    const keys = transaction.message.getAccountKeys();
+    return transaction.message.compiledInstructions.some((instruction) => {
+      const program = keys.get(instruction.programIdIndex);
+      const destination = keys.get(instruction.accountKeyIndexes[1] ?? -1);
+      return transferToTip(program, Uint8Array.from(instruction.data), destination);
+    });
+  } catch {
+    return false;
+  }
 }
 
 export function landingCost(prepared: PreparedTransaction): string {
@@ -283,6 +312,21 @@ export async function finishSignature(
     stop = true;
     void repeater;
   }
+}
+
+/** Sends already-signed bytes to RPC, and to Jito when those bytes carry a tip. */
+export async function sendSignedRaw(
+  connection: Connection,
+  raw: Uint8Array,
+  blockhash: string,
+  lastValidBlockHeight: number,
+  landed: string,
+): Promise<string> {
+  const signature = payerSignature(raw);
+  const tip = transactionCarriesJitoTip(raw);
+  await pushSigned(connection, raw, tip);
+  await finishSignature(connection, signature, blockhash, lastValidBlockHeight, landed, { raw, tip });
+  return signature;
 }
 
 export async function sendPrepared(

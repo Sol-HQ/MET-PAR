@@ -40,7 +40,7 @@ function envValue(name) {
 }
 
 function envRpc() {
-  return envValue("NEXT_PUBLIC_DEVNET_RPC_URL") || "https://api.devnet.solana.com";
+  return envValue("DEVNET_RPC_URL") || "https://api.devnet.solana.com";
 }
 
 function indexDb() {

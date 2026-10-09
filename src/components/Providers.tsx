@@ -6,7 +6,7 @@ import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { rpcUrl, type ClusterName } from "@/lib/constants";
+import { rpcUrl, wsUrl, type ClusterName } from "@/lib/constants";
 import { ClusterContext } from "@/lib/cluster";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -47,7 +47,7 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <ClusterContext.Provider value={{ cluster, setCluster }}>
-      <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed" }}>
+      <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed", wsEndpoint: wsUrl(cluster) }}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>{children}</WalletModalProvider>
         </WalletProvider>

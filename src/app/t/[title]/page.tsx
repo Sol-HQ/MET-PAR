@@ -489,6 +489,7 @@ export default async function SalePage({
                 holdsTitle={creatorHolds}
                 decimals={decimals}
                 noCoin={noCoin}
+                collection={status?.collection ?? null}
                 listing={
                   status?.tensor
                     ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
@@ -522,6 +523,7 @@ export default async function SalePage({
             holdsTitle={creatorHolds}
             decimals={decimals}
             noCoin={noCoin}
+            collection={status.collection}
             listing={
               status.tensor
                 ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }

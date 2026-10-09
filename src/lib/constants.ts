@@ -93,12 +93,28 @@ function mainnetFromSharedRpc(devnetUrl: string): string | null {
   }
 }
 
+/**
+ * The keyed RPC address lives only in server env (DEVNET_RPC_URL, MAINNET_RPC_URL). The browser talks to /api/rpc,
+ * which forwards to it, so the key never reaches a visitor.
+ */
 export function rpcUrl(cluster: ClusterName): string {
-  if (cluster === "devnet") {
-    return process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/api/rpc/${cluster === "devnet" ? "devnet" : "mainnet"}`;
   }
-  if (process.env.NEXT_PUBLIC_MAINNET_RPC_URL) return process.env.NEXT_PUBLIC_MAINNET_RPC_URL;
-  return mainnetFromSharedRpc(process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "") || "https://api.mainnet-beta.solana.com";
+  return serverRpcUrl(cluster);
+}
+
+export function serverRpcUrl(cluster: ClusterName): string {
+  if (cluster === "devnet") {
+    return process.env.DEVNET_RPC_URL || "https://api.devnet.solana.com";
+  }
+  if (process.env.MAINNET_RPC_URL) return process.env.MAINNET_RPC_URL;
+  return mainnetFromSharedRpc(process.env.DEVNET_RPC_URL || "") || "https://api.mainnet-beta.solana.com";
+}
+
+/** Confirmations subscribe over a websocket. The proxy cannot carry one, so the browser uses the keyless public socket. */
+export function wsUrl(cluster: ClusterName): string {
+  return cluster === "devnet" ? "wss://api.devnet.solana.com" : "wss://api.mainnet-beta.solana.com";
 }
 
 export function quoteDecimalsFor(kind: QuoteKind): number {

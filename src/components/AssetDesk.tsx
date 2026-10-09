@@ -465,6 +465,7 @@ export function AssetDesk() {
   const [preparedKeys] = useState(() => ({
     record: Keypair.generate(),
     title: Keypair.generate(),
+    collection: Keypair.generate(),
   }));
   const tokenMint = coin?.mint || pay?.mint || "";
   const poolAddress = coin?.pool || "";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, VersionedTransaction, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type Draft } from "@/components/AssetDesk";
@@ -48,10 +48,11 @@ import {
   TITLE_KIND,
   titleAttributes,
   titleInstructions,
+  editionCollectionInstructions,
   type TitleRail,
 } from "@/lib/title";
 
-type Keys = { record: Keypair; title: Keypair };
+type Keys = { record: Keypair; title: Keypair; collection: Keypair };
 
 type Plan = {
   keys: Keys;
@@ -632,6 +633,7 @@ export function RecordCreate({
       if (simulated.value.err) throw new Error(`The record would fail: ${JSON.stringify(simulated.value.err)}`);
       const recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
 
+      const useEdition = draftPlan.rail !== "escrow";
       const titleFit = await fitNft(
         "title",
         titleAttributes({
@@ -654,6 +656,7 @@ export function RecordCreate({
             ...titleInstructions({
               endpoint: connection.rpcEndpoint,
               asset: keys.title,
+              collection: useEdition ? keys.collection.publicKey : undefined,
               creator: payerKey,
               name: titleName(draft.assetName),
               uri: sheetSlot,
@@ -664,18 +667,67 @@ export function RecordCreate({
       );
       const titlePrepared = titleFit.prepared;
       const titleBytes = titleFit.bytes;
-      const titleSimulated = await connection.simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey]);
-      if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
-      const titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
+      let titleRent = 0;
+      let collectionBytes = 0;
+      let collectionRent = 0;
+      if (useEdition) {
+        const collectionTx = new Transaction().add(
+          ...editionCollectionInstructions({
+            endpoint: connection.rpcEndpoint,
+            collection: keys.collection,
+            creator: payerKey,
+            name: titleName(draft.assetName),
+            uri: sheetSlot,
+          }),
+        );
+        const collectionPrepared = await prepareTransaction(connection, payerKey, collectionTx, [keys.collection], {
+          tip: false,
+        });
+        const measuredCollection = transactionBytes(collectionPrepared.transaction);
+        if (measuredCollection === null) throw new Error("The master edition could not be measured.");
+        collectionBytes = measuredCollection;
+        if (collectionBytes > 1232) {
+          throw new Error(`The master edition is ${collectionBytes} bytes. The limit is 1232.`);
+        }
+        const collectionSimulated = await connection.simulateTransaction(collectionPrepared.transaction, undefined, [
+          keys.collection.publicKey,
+        ]);
+        if (collectionSimulated.value.err) {
+          throw new Error(`The master edition would fail: ${JSON.stringify(collectionSimulated.value.err)}`);
+        }
+        collectionRent = collectionSimulated.value.accounts?.[0]?.lamports ?? 0;
+        const combined = new Transaction().add(
+          ...editionCollectionInstructions({
+            endpoint: connection.rpcEndpoint,
+            collection: keys.collection,
+            creator: payerKey,
+            name: titleName(draft.assetName),
+            uri: sheetSlot,
+          }),
+          ...titlePrepared.transaction.instructions,
+        );
+        combined.feePayer = payerKey;
+        combined.recentBlockhash = titlePrepared.transaction.recentBlockhash;
+        const titleSimulated = await connection.simulateTransaction(new VersionedTransaction(combined.compileMessage()), {
+          sigVerify: false,
+          accounts: { encoding: "base64", addresses: [keys.title.publicKey.toBase58()] },
+        });
+        if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
+        titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
+      } else {
+        const titleSimulated = await connection.simulateTransaction(titlePrepared.transaction, undefined, [keys.title.publicKey]);
+        if (titleSimulated.value.err) throw new Error(`The title would fail: ${JSON.stringify(titleSimulated.value.err)}`);
+        titleRent = titleSimulated.value.accounts?.[0]?.lamports ?? 0;
+      }
       draftPlan.omitRecord = recordFit.omitted;
       draftPlan.omitTitle = titleFit.omitted;
 
       const useRail = draftPlan.rail;
-      const walletOpens = useRail === "escrow" ? "six" : "five";
+      const walletOpens = useRail === "escrow" || useEdition ? "six" : "five";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
-        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
-        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
+        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
+        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record${useEdition ? ", the master edition" : ""}, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
         `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
         ...(draftPlan.noCoin
@@ -704,6 +756,11 @@ export function RecordCreate({
           ? "The PAR program keeps 2% of an escrow sale. A Tensor sale pays you the full price."
           : `Curve fee: ${draftPlan.openingBps === draftPlan.endingBps ? `${bpsToPercent(draftPlan.openingBps)} until graduation` : `${bpsToPercent(draftPlan.openingBps)} falling to ${bpsToPercent(draftPlan.endingBps)}`}. Of that fee, Meteora ${METEORA_TRADING_FEE_PERCENT}%, PAR ${draftPlan.platformFeePercent}%, you ${draftPlan.creatorFeePercent}%.`,
         `Record rent: ${formatLamports(recordRent)}. ${landingCost(recordPrepared)} Record transaction: ${recordBytes} of 1232 bytes.`,
+        ...(useEdition
+          ? [
+              `Master edition rent: ${formatLamports(collectionRent)}. Master edition transaction: ${collectionBytes} of 1232 bytes.`,
+            ]
+          : []),
         `Title rent: ${formatLamports(titleRent)}. ${landingCost(titlePrepared)} Title transaction: ${titleBytes} of 1232 bytes.`,
         ...(recordFit.omitted.length || titleFit.omitted.length
           ? [
@@ -711,7 +768,9 @@ export function RecordCreate({
             ]
           : []),
         "The record locks at creation. Its name, link, and attributes cannot be changed, and no plugin can be added. The vault never burns it.",
-        "The title locks at creation too. Nobody can change its name, link, or attributes. It can only be moved by whoever holds it.",
+        useEdition
+          ? "The title is minted as edition 1 of a sealed collection of one. Nobody can add another edition or change its name, link, or attributes. It can only be moved by whoever holds it."
+          : "The title locks at creation too. Nobody can change its name, link, or attributes. It can only be moved by whoever holds it.",
       ];
       setPlan(draftPlan);
     } catch (cause) {
@@ -940,10 +999,36 @@ export function RecordCreate({
       const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction, "The record is on chain.");
       mark("Master sent to the program vault", explorerTx(recordSig, cluster));
 
+      const useEdition = plan.rail !== "escrow";
+      if (useEdition) {
+        const already = await connection.getAccountInfo(keys.collection.publicKey, "confirmed");
+        if (already) {
+          mark("Master edition already on chain", explorerAccount(keys.collection.publicKey.toBase58(), cluster));
+        } else {
+          const collectionTx = new Transaction().add(
+            ...editionCollectionInstructions({
+              endpoint: connection.rpcEndpoint,
+              collection: keys.collection,
+              creator: payer,
+              name: titleName(draft.assetName),
+              uri: sheetArweave,
+            }),
+          );
+          const collectionSig = await sendPrepared(
+            connection,
+            await prepareTransaction(connection, payer, collectionTx, [keys.collection]),
+            signTransaction,
+            "The master edition is on chain.",
+          );
+          mark("Master edition of one, ready for the title", explorerTx(collectionSig, cluster));
+          await waitForAccount(connection, keys.collection.publicKey);
+        }
+      }
       const titleTx = new Transaction().add(
         ...titleInstructions({
           endpoint: connection.rpcEndpoint,
           asset: keys.title,
+          collection: useEdition ? keys.collection.publicKey : undefined,
           creator: payer,
           name: titleName(draft.assetName),
           uri: sheetArweave,
@@ -1036,8 +1121,8 @@ export function RecordCreate({
         <div className="record-promises">
           <p className="eyebrow">Creator promises</p>
           <p className="note">
-            Two NFTs are made. The master is sent to the program vault and stays there. One edition is made. That
-            edition is the title, and it goes to the {railWords(rail)}. You sign these words with your wallet, and
+            The master is sent to the program vault and stays there. The title is minted as edition 1 of a sealed
+            collection of one, and it goes to the {railWords(rail)}. You sign these words with your wallet, and
             the signature is kept on the record sheet.
           </p>
           <ol>
