@@ -3,6 +3,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
 import { CLAIMED_STATUS, titleWasPurchased } from "@/lib/asset-on-pool";
 import { ObjectPicture } from "@/components/AssetOnPool";
+import { objectPictureUrl } from "@/lib/sheet-html";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
@@ -40,6 +41,8 @@ type Sheet = {
     redemption?: { handoff?: string; ifClaimGoesWrong?: string; declaredValue?: string; declaredUnit?: string };
     title?: { promises?: string[] };
     token?: { name?: string; symbol?: string; supply?: string };
+    image?: { arweave?: string };
+    sheetImage?: { arweave?: string };
   };
 };
 
@@ -254,7 +257,7 @@ export default async function SalePage({
   const existsNow = sheet.record?.object?.existsNow;
   const objectHolder = (sheet.record?.object?.holder || "").trim();
   const where = (sheet.record?.object?.where || "").trim();
-  const picture = typeof sheet.image === "string" ? sheet.image.trim() : "";
+  const picture = objectPictureUrl(sheet);
   const distinctObject = Boolean(namedObject) && namedObject !== tokenName && namedObject !== symbol;
   const hasObject = Boolean(
     distinctObject || story || objectKind || objectHolder || where || claimText || handoffText || picture || existsNow === true || existsNow === false,
@@ -324,7 +327,7 @@ export default async function SalePage({
         <>
           <h2>The RWA</h2>
           <p>{rwaBasics}</p>
-          <ObjectPicture src={picture} alt={namedObject || "The RWA"} />
+          <ObjectPicture src={picture} alt={namedObject || "The RWA"} wide />
           <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
           <p>For the unique information on this RWA, read the meta sheet.</p>
           {sheetRows.length > 0 ? (

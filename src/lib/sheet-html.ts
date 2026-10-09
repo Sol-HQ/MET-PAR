@@ -18,6 +18,21 @@ export function sheetLead(input: {
   return `${token} The title is sold through ${input.soldThrough}. The sale page is ${input.salePage}.`;
 }
 
+export type SheetPictures = {
+  image?: string;
+  record?: {
+    image?: { arweave?: string };
+    sheetImage?: { arweave?: string };
+  };
+};
+
+/** The wide object photo on PAR pages. Falls back to the NFT image on older sheets. */
+export function objectPictureUrl(sheet: SheetPictures): string {
+  const wide = sheet.record?.sheetImage?.arweave?.trim();
+  if (wide) return wide;
+  return typeof sheet.image === "string" ? sheet.image.trim() : "";
+}
+
 /** The page a person reads when they open the sheet link on the NFT. */
 export function sheetPageHtml(input: {
   name: string;
@@ -31,6 +46,7 @@ export function sheetPageHtml(input: {
   rows: [string, string][];
   promises: string[];
   imageUrl: string;
+  nftImageUrl?: string;
   attached: boolean;
 }): string {
   const sale = input.salePage.startsWith("https://")
@@ -39,6 +55,12 @@ export function sheetPageHtml(input: {
   const image = input.imageUrl.startsWith("https://")
     ? `<img src="${escapeHtml(input.imageUrl)}" alt="${escapeHtml(input.name)}" />`
     : "";
+  const nft =
+    input.nftImageUrl &&
+    input.nftImageUrl !== input.imageUrl &&
+    input.nftImageUrl.startsWith("https://")
+      ? `<h2>NFT image</h2><img src="${escapeHtml(input.nftImageUrl)}" alt="NFT image" />`
+      : "";
   const sections = input.rows
     .map(([title, body]) => `<section><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></section>`)
     .join("\n");
@@ -68,7 +90,14 @@ export function sheetPageHtml(input: {
 <p class="mark">PAR record</p>
 <h1>${escapeHtml(input.name)}</h1>
 ${image}
-<p>${input.attached ? "This picture is the record image. The token keeps the image it was created with." : "This picture is the record image."}</p>
+<p>${
+    input.nftImageUrl && input.nftImageUrl !== input.imageUrl
+      ? "This picture is the sheet image. Wallets and Tensor show the NFT image."
+      : input.attached
+        ? "This picture is the record image. The token keeps the image it was created with."
+        : "This picture is the record image."
+  }</p>
+${nft}
 <p>${escapeHtml(sheetLead(input))}</p>
 <p>${sale}. ${escapeHtml(input.pathLine)}</p>
 <dl>

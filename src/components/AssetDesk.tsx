@@ -3,7 +3,7 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { signedPictureHeaders } from "@/lib/picture";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
 import { readClassicMint, readCoin, type CoinFacts, type PayFacts } from "@/lib/coin-read";
@@ -13,7 +13,7 @@ import { shrinkImageUnder } from "@/lib/image";
 import { BILLION_SUPPLY, type LaunchChoice } from "@/lib/launch";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import { FREE_UPLOAD_BYTES } from "@/lib/record";
-import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaKeys, rwaDraftKey, writeRwaKeys } from "@/lib/rwa-draft";
+import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaDraftRaw, readRwaKeys, writeRwaDraftRaw, writeRwaKeys } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
@@ -49,15 +49,18 @@ type SavedDraft = {
   pictureCopy: string;
   pictureNote: string;
   pictureBase64: string;
+  nftPictureCopy: string;
+  nftPictureNote: string;
+  nftPictureBase64: string;
 };
 
 function isStep(value: unknown): value is Step {
   return typeof value === "string" && (STEPS as readonly string[]).includes(value);
 }
 
-function readSavedDraft(): SavedDraft | null {
+function readSavedDraft(rawText?: string): SavedDraft | null {
   try {
-    const raw = sessionStorage.getItem(rwaDraftKey());
+    const raw = rawText ?? readRwaDraftRaw();
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SavedDraft>;
     if (!parsed.draft || typeof parsed.draft !== "object" || typeof parsed.draft.objectName !== "string") return null;
@@ -74,6 +77,9 @@ function readSavedDraft(): SavedDraft | null {
       pictureCopy: typeof parsed.pictureCopy === "string" ? parsed.pictureCopy : "",
       pictureNote: typeof parsed.pictureNote === "string" ? parsed.pictureNote : "",
       pictureBase64: typeof parsed.pictureBase64 === "string" ? parsed.pictureBase64 : "",
+      nftPictureCopy: typeof parsed.nftPictureCopy === "string" ? parsed.nftPictureCopy : "",
+      nftPictureNote: typeof parsed.nftPictureNote === "string" ? parsed.nftPictureNote : "",
+      nftPictureBase64: typeof parsed.nftPictureBase64 === "string" ? parsed.nftPictureBase64 : "",
     };
   } catch {
     return null;
@@ -373,7 +379,7 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
     if (!draft.objectName.trim() || !draft.kind.trim() || !draft.holder.trim() || !draft.where.trim() || !draft.story.trim()) {
       return "Name the object, what it is, who holds it, where it is, and the story.";
     }
-    if (!checks.hasPicture) return "Add a picture of the asset. It becomes the picture on the record.";
+    if (!checks.hasPicture) return "Add the sheet picture and the NFT image.";
     if (draft.existsNow === "no") {
       return "This template is for an object that already exists. An object still being made is a preorder.";
     }
@@ -453,6 +459,12 @@ export function AssetDesk() {
   const [pictureCopy, setPictureCopy] = useState("");
   const [pictureView, setPictureView] = useState("");
   const [pictureNote, setPictureNote] = useState("");
+  const [nftPicture, setNftPicture] = useState<Blob | null>(null);
+  const [nftPictureCopy, setNftPictureCopy] = useState("");
+  const [nftPictureView, setNftPictureView] = useState("");
+  const [nftPictureNote, setNftPictureNote] = useState("");
+  const [draftNote, setDraftNote] = useState("");
+  const loadDraftRef = useRef<HTMLInputElement>(null);
   const { cluster } = useCluster();
   const { connection } = useConnection();
   const { publicKey, signMessage } = useWallet();
@@ -488,25 +500,44 @@ export function AssetDesk() {
   const shortClock = cluster === "devnet" && rail === "escrow";
   const waitUnit = shortClock ? "seconds" : "days";
 
+  function applySaved(saved: SavedDraft) {
+    setStep(saved.step);
+    setExample(saved.example);
+    setDraft(saved.draft);
+    setWithCoin(saved.withCoin);
+    setCoinInput(saved.coinInput);
+    setCoin(saved.coin);
+    setPayInput(saved.payInput);
+    setPay(saved.pay);
+    setPictureCopy(saved.pictureCopy || (saved.pictureBase64 ? "restored" : ""));
+    setPictureNote(saved.pictureNote);
+    setNftPictureCopy(saved.nftPictureCopy || (saved.nftPictureBase64 ? "restored" : ""));
+    setNftPictureNote(saved.nftPictureNote);
+    setPictureView((current) => {
+      if (current) URL.revokeObjectURL(current);
+      if (!saved.pictureBase64) {
+        setPicture(null);
+        return "";
+      }
+      const blob = base64ToBlob(saved.pictureBase64);
+      setPicture(blob);
+      return URL.createObjectURL(blob);
+    });
+    setNftPictureView((current) => {
+      if (current) URL.revokeObjectURL(current);
+      if (!saved.nftPictureBase64) {
+        setNftPicture(null);
+        return "";
+      }
+      const blob = base64ToBlob(saved.nftPictureBase64);
+      setNftPicture(blob);
+      return URL.createObjectURL(blob);
+    });
+  }
+
   useEffect(() => {
     const saved = readSavedDraft();
-    if (saved) {
-      setStep(saved.step);
-      setExample(saved.example);
-      setDraft(saved.draft);
-      setWithCoin(saved.withCoin);
-      setCoinInput(saved.coinInput);
-      setCoin(saved.coin);
-      setPayInput(saved.payInput);
-      setPay(saved.pay);
-      setPictureCopy(saved.pictureCopy);
-      setPictureNote(saved.pictureNote);
-      if (saved.pictureBase64) {
-        const blob = base64ToBlob(saved.pictureBase64);
-        setPicture(blob);
-        setPictureView(URL.createObjectURL(blob));
-      }
-    }
+    if (saved) applySaved(saved);
     setRestored(true);
   }, []);
 
@@ -515,35 +546,37 @@ export function AssetDesk() {
     let cancel = false;
     void (async () => {
       let pictureBase64 = "";
+      let nftPictureBase64 = "";
       if (picture) {
         pictureBase64 = bytesToBase64(new Uint8Array(await picture.arrayBuffer()));
       }
-      if (cancel) return;
-      try {
-        sessionStorage.setItem(
-          rwaDraftKey(),
-          JSON.stringify({
-            step,
-            example,
-            draft,
-            withCoin,
-            coinInput,
-            coin,
-            payInput,
-            pay,
-            pictureCopy,
-            pictureNote,
-            pictureBase64,
-          } satisfies SavedDraft),
-        );
-      } catch {
-        /* A full picture can exceed the browser's storage. The fields still stay for this visit. */
+      if (nftPicture) {
+        nftPictureBase64 = bytesToBase64(new Uint8Array(await nftPicture.arrayBuffer()));
       }
+      if (cancel) return;
+      writeRwaDraftRaw(
+        JSON.stringify({
+          step,
+          example,
+          draft,
+          withCoin,
+          coinInput,
+          coin,
+          payInput,
+          pay,
+          pictureCopy,
+          pictureNote,
+          pictureBase64,
+          nftPictureCopy,
+          nftPictureNote,
+          nftPictureBase64,
+        } satisfies SavedDraft),
+      );
     })();
     return () => {
       cancel = true;
     };
-  }, [restored, step, example, draft, withCoin, coinInput, coin, payInput, pay, picture, pictureCopy, pictureNote]);
+  }, [restored, step, example, draft, withCoin, coinInput, coin, payInput, pay, picture, pictureCopy, pictureNote, nftPicture, nftPictureCopy, nftPictureNote]);
 
   useEffect(() => {
     if (escrowLive) {
@@ -554,7 +587,7 @@ export function AssetDesk() {
   }, [escrowLive]);
 
   const checks: Checks = {
-    hasPicture: Boolean(picture && pictureCopy),
+    hasPicture: Boolean(picture && pictureCopy && nftPicture && nftPictureCopy),
     withCoin,
     coin: Boolean(coin),
     pay: Boolean(pay),
@@ -569,8 +602,9 @@ export function AssetDesk() {
     : "";
   const index = steps.indexOf(step);
 
-  async function addPicture(file: File) {
-    setPictureNote("Shrinking and saving the picture…");
+  async function storePicture(file: File, kind: "sheet" | "nft") {
+    const setNote = kind === "nft" ? setNftPictureNote : setPictureNote;
+    setNote("Shrinking and saving the picture…");
     try {
       const jpeg = await shrinkImageUnder(file, FREE_UPLOAD_BYTES - 4096);
       if (!publicKey || !signMessage) throw new Error("Connect a wallet to save the picture.");
@@ -581,14 +615,70 @@ export function AssetDesk() {
       });
       const body = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !body.url) throw new Error(body.error || "Could not save that picture.");
+      const view = URL.createObjectURL(jpeg);
+      if (kind === "nft") {
+        if (nftPictureView) URL.revokeObjectURL(nftPictureView);
+        setNftPicture(jpeg);
+        setNftPictureCopy(body.url);
+        setNftPictureView(view);
+        setNftPictureNote(`${(jpeg.size / 1024).toFixed(1)} KiB. This square is the NFT image. It goes to Arweave.`);
+        return;
+      }
       if (pictureView) URL.revokeObjectURL(pictureView);
       setPicture(jpeg);
       setPictureCopy(body.url);
-      setPictureView(URL.createObjectURL(jpeg));
-      setPictureNote(`${(jpeg.size / 1024).toFixed(1)} KiB. This picture goes on the record and on Arweave.`);
+      setPictureView(view);
+      setPictureNote(`${(jpeg.size / 1024).toFixed(1)} KiB. This picture goes on the sheet and the buyer page. It goes to Arweave.`);
     } catch (cause) {
-      setPictureNote(cause instanceof Error ? cause.message : "Could not read that picture.");
+      setNote(cause instanceof Error ? cause.message : "Could not read that picture.");
     }
+  }
+
+  async function packedDraft(): Promise<SavedDraft> {
+    return {
+      step,
+      example,
+      draft,
+      withCoin,
+      coinInput,
+      coin,
+      payInput,
+      pay,
+      pictureCopy,
+      pictureNote,
+      pictureBase64: picture ? bytesToBase64(new Uint8Array(await picture.arrayBuffer())) : "",
+      nftPictureCopy,
+      nftPictureNote,
+      nftPictureBase64: nftPicture ? bytesToBase64(new Uint8Array(await nftPicture.arrayBuffer())) : "",
+    };
+  }
+
+  async function saveDraft() {
+    const body = JSON.stringify(await packedDraft(), null, 2);
+    writeRwaDraftRaw(body);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([body], { type: "application/json" }));
+    link.download = "par-rwa-draft.json";
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setDraftNote("Draft file downloaded. Load that file after the new UI is live.");
+  }
+
+  function loadDraft(file: File) {
+    void file.text().then((text) => {
+      const saved = readSavedDraft(text);
+      if (!saved) {
+        setDraftNote("That file is not a PAR draft.");
+        return;
+      }
+      applySaved(saved);
+      writeRwaDraftRaw(JSON.stringify(saved));
+      setDraftNote(
+        saved.nftPictureBase64
+          ? "Draft loaded."
+          : "Draft loaded. Upload the NFT image on Object. That box is new.",
+      );
+    });
   }
 
   const sheet = useMemo(
@@ -630,18 +720,16 @@ export function AssetDesk() {
       [
         "Token",
         coin
-          ? `${coin.name} (${coin.symbol}). Token address ${coin.mint}. ${coin.decimals} decimals. Supply ${coin.supply}. Quoted in ${coin.quoteSymbol}. Quote mint ${coin.quoteMint}. Pool ${coin.pool}. These facts are read from the coin and cannot be changed. ${COIN_WORDS} The picture on the Object step is the record image.`
+          ? `${coin.name} (${coin.symbol}). Token address ${coin.mint}. ${coin.decimals} decimals. Supply ${coin.supply}. Quoted in ${coin.quoteSymbol}. Quote mint ${coin.quoteMint}. Pool ${coin.pool}. These facts are read from the coin and cannot be changed. ${COIN_WORDS}`
           : pay
-            ? `The buyer pays in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals. The picture on the Object step is the record image.`
+            ? `The buyer pays in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals.`
             : "No token has been read yet.",
       ],
       [
         "Picture",
-        pictureView
-          ? coin
-            ? "The picture on this sheet is the record image. The coin keeps the image it was created with."
-            : "The picture on this sheet is the record image."
-          : "No picture yet. Add one on the Object step. That picture is the record image.",
+        pictureView && nftPictureView
+          ? "The sheet picture is the full object photo. The NFT image is the square wallets and Tensor show. Both go to Arweave."
+          : "Add the sheet picture and the NFT image on the Object step.",
       ],
       [
         withCoin === false ? "When it sells" : "Curve",
@@ -650,7 +738,7 @@ export function AssetDesk() {
           : "The sale is a fixed price or a bid in the token named above. The creator sets how many days before it opens.",
       ],
     ],
-    [draft, symbol, rail, waitUnit, shortClock, pictureView, coin, pay, sizeLine, withCoin],
+    [draft, symbol, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, pay, sizeLine, withCoin],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -852,6 +940,23 @@ export function AssetDesk() {
         </div>
       </section>
 
+      <div className="draft-bar">
+        <p className="eyebrow">Your work</p>
+        <h2>Save what you typed</h2>
+        <p className="note">
+          Press Save draft. A file named par-rwa-draft.json downloads. After the new page is live, press Load draft and pick that file.
+        </p>
+        <div className="asset-nav">
+          <button type="button" className="solid" onClick={() => void saveDraft()}>
+            Save draft
+          </button>
+          <button type="button" onClick={() => loadDraftRef.current?.click()}>
+            Load draft
+          </button>
+        </div>
+        {draftNote ? <p className="note">{draftNote}</p> : null}
+      </div>
+
       <ol className="asset-steps">
         {steps.map((name, item) => (
           <li key={name}>
@@ -902,21 +1007,46 @@ export function AssetDesk() {
             Story
             <textarea value={draft.story} onChange={(event) => patch({ story: event.target.value })} rows={4} />
           </label>
-          <label>
-            Picture of the asset
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void addPicture(file);
-              }}
-            />
-            <span className="note">
-              {pictureNote || "A photo or an artistic picture of the asset. It becomes the picture on the record."}
-            </span>
-          </label>
-          {pictureView ? <img className="asset-picture" src={pictureView} alt={draft.objectName || "Asset"} /> : null}
+          <div className="picture-pair">
+            <div className="picture-slot">
+              <p className="eyebrow">Picture of the asset</p>
+              <h2>Sheet picture</h2>
+              <label className="file">
+                Upload the sheet picture
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void storePicture(file, "sheet");
+                  }}
+                />
+                <span className="note">
+                  {pictureNote || "The full object photo. Front and back can sit here. This goes on the sheet and the buyer page, and to Arweave."}
+                </span>
+              </label>
+              {pictureView ? <img className="sheet-picture" src={pictureView} alt={draft.objectName || "Asset"} /> : null}
+            </div>
+            <div className="picture-slot picture-slot-nft">
+              <p className="eyebrow">NFT image</p>
+              <h2>This is the NFT image</h2>
+              <label className="file">
+                Upload the NFT image
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void storePicture(file, "nft");
+                  }}
+                />
+                <span className="note">
+                  {nftPictureNote || "This square goes on the NFT. Wallets and Tensor always show this. It also goes to Arweave."}
+                </span>
+              </label>
+              {nftPictureView ? <img className="nft-face" src={nftPictureView} alt={`${draft.objectName || "Asset"} NFT`} /> : null}
+            </div>
+          </div>
         </form>
       ) : null}
 
@@ -1278,6 +1408,8 @@ export function AssetDesk() {
           <article className="card">
             <p className="eyebrow">Product and rights</p>
             <h2>{draft.assetName || "Asset"}</h2>
+            {pictureView ? <img className="sheet-picture" src={pictureView} alt={draft.assetName || "Asset"} /> : null}
+            {nftPictureView ? <img className="nft-face" src={nftPictureView} alt={`${draft.assetName || "Asset"} NFT`} /> : null}
             <p>{draft.story}</p>
             <p>{draft.pitch.trim() || "No pitch."}</p>
             <dl>
@@ -1343,10 +1475,11 @@ export function AssetDesk() {
               {coin?.name || pay?.name || "Token"} <span>{symbol}</span>
             </h2>
             {pictureView ? (
-              <img className="asset-picture" src={pictureView} alt={coin?.name || pay?.name || "Record"} />
+              <img className="sheet-picture" src={pictureView} alt={coin?.name || pay?.name || "Record"} />
             ) : (
-              <p className="note">No picture yet. The picture from the Object step is the record image.</p>
+              <p className="note">No sheet picture yet. Add it on the Object step.</p>
             )}
+            {nftPictureView ? <img className="nft-face" src={nftPictureView} alt="NFT image" /> : null}
             <dl>
               <div>
                 <dt>Token address</dt>
@@ -1441,12 +1574,15 @@ export function AssetDesk() {
               </li>
             ))}
           </ol>
-          {pictureView ? <img className="asset-picture" src={pictureView} alt={draft.assetName || "Asset"} /> : null}
+          {pictureView ? <img className="sheet-picture" src={pictureView} alt={draft.assetName || "Asset"} /> : null}
+          {nftPictureView ? <img className="nft-face" src={nftPictureView} alt={`${draft.assetName || "Asset"} NFT`} /> : null}
           <RecordCreate
             draft={draft}
             rows={sheet}
             picture={picture}
             pictureCopy={pictureCopy}
+            nftPicture={nftPicture}
+            nftPictureCopy={nftPictureCopy}
             problem={firstProblem(draft, checks)}
             curveLines={sizeLine}
             preparedKeys={preparedKeys}
@@ -1471,7 +1607,25 @@ export function AssetDesk() {
             Next
           </button>
         ) : null}
+        <button type="button" onClick={() => void saveDraft()}>
+          Save draft
+        </button>
+        <button type="button" onClick={() => loadDraftRef.current?.click()}>
+          Load draft
+        </button>
+        <input
+          ref={loadDraftRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) loadDraft(file);
+          }}
+        />
       </div>
+      {draftNote ? <p className="note">{draftNote}</p> : null}
     </div>
   );
 }

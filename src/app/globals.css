@@ -848,7 +848,8 @@ input.bad {
 .card-shot,
 .token-preview,
 .object-shot,
-.asset-picture {
+.asset-picture,
+.nft-face {
   width: 12rem;
   max-width: 100%;
   aspect-ratio: 1;
@@ -860,6 +861,54 @@ input.bad {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--paper);
+}
+
+.sheet-picture {
+  width: min(100%, 28rem);
+  max-height: 18rem;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  margin: 0 0 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #111;
+}
+
+.picture-pair {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 720px) {
+  .picture-pair {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.picture-slot {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.picture-slot h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.picture-slot-nft {
+  border-color: #f3c75a;
+}
+
+.picture-slot .sheet-picture,
+.picture-slot .nft-face {
+  margin-bottom: 0;
 }
 
 .object-board {
@@ -1147,8 +1196,21 @@ textarea {
   border-color: transparent;
 }
 
-.asset-nav {
-  display: flex;
+.draft-bar {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem;
+  border: 1px solid #f3c75a;
+  border-radius: var(--radius);
+}
+
+.draft-bar h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.asset-nav {  display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
   margin-top: 1rem;

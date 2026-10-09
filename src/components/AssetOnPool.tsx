@@ -18,7 +18,19 @@ type AssetCard = {
   titleHref: string;
 };
 
-export function ObjectPicture({ src, alt, quiet = false, framed = false }: { src: string; alt: string; quiet?: boolean; framed?: boolean }) {
+export function ObjectPicture({
+  src,
+  alt,
+  quiet = false,
+  framed = false,
+  wide = false,
+}: {
+  src: string;
+  alt: string;
+  quiet?: boolean;
+  framed?: boolean;
+  wide?: boolean;
+}) {
   const [attempt, setAttempt] = useState(0);
   const [missing, setMissing] = useState(!src);
   useEffect(() => {
@@ -32,7 +44,7 @@ export function ObjectPicture({ src, alt, quiet = false, framed = false }: { src
   const shown = attempt > 0 ? `${src}${src.includes("?") ? "&" : "?"}try=${attempt}` : src;
   return (
     <img
-      className={framed ? "card-shot" : "object-shot"}
+      className={framed ? "card-shot" : wide ? "sheet-picture" : "object-shot"}
       src={shown}
       alt={alt}
       referrerPolicy="no-referrer"

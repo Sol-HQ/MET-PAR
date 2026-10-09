@@ -142,6 +142,8 @@ function assertOneStory(input: {
   sheetSha256: string;
   imageSha256: string;
   imageUrl: string;
+  sheetImageSha256: string;
+  sheetImageUrl: string;
   htmlUrl: string;
   noCoin: boolean;
   saleOpens: string;
@@ -153,6 +155,7 @@ function assertOneStory(input: {
       creator?: string;
       address?: string;
       image?: { sha256?: string; arweave?: string };
+      sheetImage?: { sha256?: string; arweave?: string };
       readableSheet?: string;
       token?: { mint?: string; pool?: string };
       title?: { address?: string; heldBy?: string; sale?: { opensDaysAfterGraduation?: number | null } };
@@ -183,9 +186,11 @@ function assertOneStory(input: {
   expect("sheet title", story?.title?.address || "", input.title);
   expect("sheet hash", field(input.recordRows, "sheet sha256"), input.sheetSha256);
   expect("image hash", field(input.recordRows, "image sha256"), input.imageSha256);
-  expect("sheet image hash", story?.image?.sha256 || "", input.imageSha256);
+  expect("nft image hash", story?.image?.sha256 || "", input.imageSha256);
   expect("picture", parsed.image || "", input.imageUrl);
-  expect("sheet picture", story?.image?.arweave || "", input.imageUrl);
+  expect("nft picture", story?.image?.arweave || "", input.imageUrl);
+  expect("sheet picture", story?.sheetImage?.arweave || "", input.sheetImageUrl);
+  expect("sheet picture hash", story?.sheetImage?.sha256 || "", input.sheetImageSha256);
   expect("record sheet link", field(input.recordRows, "full sheet"), input.htmlUrl);
   expect("title sheet link", field(input.titleRows, "full sheet"), input.htmlUrl);
   expect("readable sheet", story?.readableSheet || "", input.htmlUrl);
@@ -244,6 +249,7 @@ function sheetJson(input: {
   quoteMint: string;
   curveLines: string;
   image: { arweave: string; copy: string; sha256: string };
+  sheetImage: { arweave: string; copy: string; sha256: string };
   promise: Promise_;
   htmlUrl: string;
 }): string {
@@ -281,6 +287,7 @@ function sheetJson(input: {
         category: "image",
         files: [
           { uri: input.image.arweave, type: "image/jpeg" },
+          { uri: input.sheetImage.arweave, type: "image/jpeg" },
           { uri: input.htmlUrl, type: "text/html" },
         ],
       },
@@ -376,6 +383,7 @@ function sheetJson(input: {
         },
         sheet: input.rows.map(([title, body]) => ({ title, body })),
         image: input.image,
+        sheetImage: input.sheetImage,
         readableSheet: input.htmlUrl,
       },
     },
@@ -389,6 +397,8 @@ export function RecordCreate({
   rows,
   picture,
   pictureCopy,
+  nftPicture,
+  nftPictureCopy,
   problem,
   curveLines,
   preparedKeys,
@@ -400,6 +410,8 @@ export function RecordCreate({
   rows: [string, string][];
   picture: Blob | null;
   pictureCopy: string;
+  nftPicture: Blob | null;
+  nftPictureCopy: string;
   problem: string;
   curveLines: string;
   preparedKeys: Keys;
@@ -434,7 +446,7 @@ export function RecordCreate({
     setPlan(null);
     setAgreed(false);
     setGateOpen(false);
-  }, [draft, picture, cluster, coin, pay]);
+  }, [draft, picture, nftPicture, cluster, coin, pay]);
 
   function mark(label: string, link?: string) {
     setProgress((current) => [...current, { label, done: true, link }]);
@@ -454,7 +466,11 @@ export function RecordCreate({
       return;
     }
     if (!picture || !pictureCopy) {
-      setError("Add a picture of the asset on the Object step.");
+      setError("Add the sheet picture on the Object step.");
+      return;
+    }
+    if (!nftPicture || !nftPictureCopy) {
+      setError("Add the NFT image on the Object step.");
       return;
     }
     if (!wallet.publicKey || !wallet.signTransaction || !wallet.signMessage) {
@@ -540,7 +556,8 @@ export function RecordCreate({
         vault,
         quoteMint: draftPlan.quoteMint,
         curveLines,
-        image: { arweave: sheetSlot, copy: pictureCopy, sha256: "0".repeat(64) },
+        image: { arweave: sheetSlot, copy: nftPictureCopy, sha256: "0".repeat(64) },
+        sheetImage: { arweave: sheetSlot, copy: pictureCopy, sha256: "0".repeat(64) },
         htmlUrl: sheetSlot,
       });
       const sheetBytes = new TextEncoder().encode(sample).length;
@@ -558,6 +575,7 @@ export function RecordCreate({
           rows,
           promises,
           imageUrl: sheetSlot,
+          nftImageUrl: arweaveUrl("y".repeat(43)),
           attached: !draftPlan.noCoin,
         }),
       ).length;
@@ -723,15 +741,14 @@ export function RecordCreate({
       draftPlan.omitTitle = titleFit.omitted;
 
       const useRail = draftPlan.rail;
-      const walletOpens = useRail === "escrow" || useEdition ? "six" : "five";
       const bundleLine =
         cluster === "mainnet-beta" && useEdition
           ? "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Those three leave as one Jito bundle with one tip. They land in that order, or none land. The three addresses stay in this browser tab so a refresh can finish the same mint."
           : "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are separate signatures. The three addresses stay in this browser tab so a refresh can finish the same mint.";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
-        `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
-        `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record${useEdition ? ", the master edition" : ""}, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
+        `Order: you sign the promises, then the sheet picture, the NFT image, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
+        `The wallet signs the promises, four Arweave uploads, the record${useEdition ? ", the master edition" : ""}, and the title${useRail === "escrow" ? ", then the escrow deposit" : ""}.`,
         bundleLine,
         `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
@@ -753,7 +770,7 @@ export function RecordCreate({
         "The wallet signs this message. These are the words, in this order.",
         ...sampleMessage.split("\n"),
         draftPlan.tokenUri ? `The coin already has its link: ${draftPlan.tokenUri}` : `Payment token: ${draftPlan.tokenName} (${draftPlan.symbol}).`,
-        `Picture: ${(picture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
+        `Sheet picture: ${(picture.size / 1024).toFixed(1)} KiB. NFT image: ${(nftPicture.size / 1024).toFixed(1)} KiB. Record sheet: ${(sheetBytes / 1024).toFixed(1)} KiB. Arweave stores each without payment under 105 KiB. Arweave copies are permanent, even for a practice record.`,
         draftPlan.noCoin
           ? "The sale is a fixed price or a bid. You set the price and the wait on the sale page."
           : `Opening price ${draftPlan.par} ${draftPlan.quoteSymbol}. Pool price ${draftPlan.poolPrice} ${draftPlan.quoteSymbol}. Whole supply at the opening price ${draftPlan.wholeAtPar} ${draftPlan.quoteSymbol}. ${curveLines}`,
@@ -791,7 +808,7 @@ export function RecordCreate({
   }
 
   async function run() {
-    if (!plan || !picture || !wallet.publicKey || !wallet.signTransaction || !wallet.signMessage) return;
+    if (!plan || !picture || !nftPicture || !wallet.publicKey || !wallet.signTransaction || !wallet.signMessage) return;
     const { keys, pool } = plan;
     const payer = wallet.publicKey;
     const signTransaction = wallet.signTransaction;
@@ -845,8 +862,10 @@ export function RecordCreate({
         token: "solana",
         walletAdapter: { publicKey: payer, signMessage, signTransaction },
       });
-      const pictureBytes = new Uint8Array(await picture.arrayBuffer());
-      const imageSha256 = await sha256Hex(pictureBytes);
+      const sheetPictureBytes = new Uint8Array(await picture.arrayBuffer());
+      const sheetImageSha256 = await sha256Hex(sheetPictureBytes);
+      const nftPictureBytes = new Uint8Array(await nftPicture.arrayBuffer());
+      const imageSha256 = await sha256Hex(nftPictureBytes);
       const creationScope = `${payer.toBase58()}:${await sha256Hex(
         new TextEncoder().encode(
           JSON.stringify({
@@ -863,17 +882,22 @@ export function RecordCreate({
           }),
         ),
       )}`;
-      let imageId = savedArweaveId(creationScope, imageSha256);
-      if (!imageId) {
-        const imageUpload = await turbo.upload({
-          data: pictureBytes,
-          dataItemOpts: { tags: [{ name: "Content-Type", value: "image/jpeg" }] },
-        });
-        imageId = imageUpload.id;
-        keepArweaveId(creationScope, imageSha256, imageId);
+      async function storeFile(bytes: Uint8Array | string, sha256: string, contentType: string) {
+        let id = savedArweaveId(creationScope, sha256);
+        if (!id) {
+          const upload = await turbo.upload({
+            data: bytes,
+            dataItemOpts: { tags: [{ name: "Content-Type", value: contentType }] },
+          });
+          id = upload.id;
+          keepArweaveId(creationScope, sha256, id);
+        }
+        return arweaveUrl(id);
       }
-      const imageArweave = arweaveUrl(imageId);
-      mark("Picture stored on Arweave", imageArweave);
+      const sheetImageArweave = await storeFile(sheetPictureBytes, sheetImageSha256, "image/jpeg");
+      mark("Sheet picture stored on Arweave", sheetImageArweave);
+      const imageArweave = await storeFile(nftPictureBytes, imageSha256, "image/jpeg");
+      mark("NFT image stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
         ? "Sale path: a fixed price or a bid, chosen on the sale page. The creator sets how long before the sale opens. Tensor, or the PAR escrow."
@@ -891,20 +915,12 @@ export function RecordCreate({
         pathLine,
         rows,
         promises: plan.promises,
-        imageUrl: imageArweave,
+        imageUrl: sheetImageArweave,
+        nftImageUrl: imageArweave,
         attached: !plan.noCoin,
       });
       const htmlSha256 = await sha256Hex(new TextEncoder().encode(html));
-      let htmlId = savedArweaveId(creationScope, htmlSha256);
-      if (!htmlId) {
-        const htmlUpload = await turbo.upload({
-          data: html,
-          dataItemOpts: { tags: [{ name: "Content-Type", value: "text/html" }] },
-        });
-        htmlId = htmlUpload.id;
-        keepArweaveId(creationScope, htmlSha256, htmlId);
-      }
-      const htmlArweave = arweaveUrl(htmlId);
+      const htmlArweave = await storeFile(html, htmlSha256, "text/html");
       mark("Readable sheet stored on Arweave", htmlArweave);
 
       const sheet = sheetJson({
@@ -916,21 +932,13 @@ export function RecordCreate({
         vault,
         quoteMint: plan.quoteMint,
         curveLines,
-        image: { arweave: imageArweave, copy: pictureCopy, sha256: imageSha256 },
+        image: { arweave: imageArweave, copy: nftPictureCopy, sha256: imageSha256 },
+        sheetImage: { arweave: sheetImageArweave, copy: pictureCopy, sha256: sheetImageSha256 },
         promise,
         htmlUrl: htmlArweave,
       });
       const sheetSha256 = await sha256Hex(new TextEncoder().encode(sheet));
-      let sheetId = savedArweaveId(creationScope, sheetSha256);
-      if (!sheetId) {
-        const sheetUpload = await turbo.upload({
-          data: sheet,
-          dataItemOpts: { tags: [{ name: "Content-Type", value: "application/json" }] },
-        });
-        sheetId = sheetUpload.id;
-        keepArweaveId(creationScope, sheetSha256, sheetId);
-      }
-      const sheetArweave = arweaveUrl(sheetId);
+      const sheetArweave = await storeFile(sheet, sheetSha256, "application/json");
       mark("Record sheet stored on Arweave", sheetArweave);
 
       mark(coin ? "Using the coin already on chain" : `The buyer pays in ${plan.symbol}.`);
@@ -992,6 +1000,8 @@ export function RecordCreate({
         sheetSha256,
         imageSha256,
         imageUrl: imageArweave,
+        sheetImageSha256,
+        sheetImageUrl: sheetImageArweave,
         htmlUrl: htmlArweave,
         noCoin: plan.noCoin,
         saleOpens: plan.noCoin ? "the day the creator sets" : `${Number(draft.saleDays)} ${shortClock ? "seconds" : "days"} after graduation`,
@@ -1181,8 +1191,8 @@ export function RecordCreate({
       <h2>{coin ? "Token, record, and title" : "Record and title"}</h2>
       <p className="note">
         {coin
-          ? "The coin, the record, and the title are one asset. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. The coin trades. The master holds the picture, every word on the record sheet, the token mint, and the pool. It is sent to the program vault and stays there. One edition is made. That edition is the title, and it carries the same meta sheet. The NFT on the chain is the proof. PAR keeps a copy of those proofs."
-          : "This step makes the record and one title for one object. The token you named is what a buyer pays. The master holds the picture and every word on the record sheet. It is sent to the program vault and stays there. One edition is the title. The NFT on the chain is the proof. PAR keeps a copy of those proofs."}
+          ? "The coin, the record, and the title are one asset. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. The coin trades. The master holds the sheet picture, the NFT image, every word on the record sheet, the token mint, and the pool. It is sent to the program vault and stays there. One edition is made. That edition is the title, and it carries the same meta sheet. The NFT on the chain is the proof. PAR keeps a copy of those proofs."
+          : "This step makes the record and one title for one object. The token you named is what a buyer pays. The master holds the sheet picture, the NFT image, and every word on the record sheet. It is sent to the program vault and stays there. One edition is the title. The NFT on the chain is the proof. PAR keeps a copy of those proofs."}
       </p>
         <p className="note">
           {coin

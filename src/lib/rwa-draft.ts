@@ -85,10 +85,36 @@ export function clearRwaKeys(wallet: string, cluster: ClusterName) {
   }
 }
 
+function writeStore(store: Storage, value: string) {
+  try {
+    store.setItem(DRAFT_KEY, value);
+  } catch {
+    /* A full picture can exceed this store. The other store or this visit still holds it. */
+  }
+}
+
+/** The form, in this browser. Session first, then the longer-lived copy. */
+export function readRwaDraftRaw(): string {
+  if (typeof sessionStorage === "undefined") return "";
+  try {
+    return sessionStorage.getItem(DRAFT_KEY) || localStorage.getItem(DRAFT_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Keep a copy that survives a closed tab and a Redeploy on this same site. */
+export function writeRwaDraftRaw(value: string) {
+  if (typeof sessionStorage === "undefined" || !value) return;
+  writeStore(sessionStorage, value);
+  writeStore(localStorage, value);
+}
+
 /** Drop the saved real-world-asset form. The record already exists. */
 export function clearRwaDraft() {
   try {
     sessionStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(DRAFT_KEY);
   } catch {
     /* The draft stays in memory for this visit. */
   }
