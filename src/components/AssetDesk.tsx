@@ -464,6 +464,7 @@ export function AssetDesk() {
   const [nftPictureView, setNftPictureView] = useState("");
   const [nftPictureNote, setNftPictureNote] = useState("");
   const [draftNote, setDraftNote] = useState("");
+  const [draftOpen, setDraftOpen] = useState(false);
   const loadDraftRef = useRef<HTMLInputElement>(null);
   const { cluster } = useCluster();
   const { connection } = useConnection();
@@ -940,37 +941,70 @@ export function AssetDesk() {
         </div>
       </section>
 
-      <div className="draft-bar">
-        <p className="eyebrow">Your work</p>
-        <h2>Save what you typed</h2>
-        <p className="note">
-          Press Save draft. A file named par-rwa-draft.json downloads. After the new page is live, press Load draft and pick that file.
-        </p>
-        <div className="asset-nav">
-          <button type="button" className="solid" onClick={() => void saveDraft()}>
-            Save draft
+      <div className="asset-steps-row">
+        <ol className="asset-steps">
+          {steps.map((name, item) => (
+            <li key={name}>
+              <button
+                type="button"
+                aria-current={name === step ? "step" : undefined}
+                onClick={() => go(name)}
+              >
+                <span>{item + 1}</span>
+                {name}
+              </button>
+            </li>
+          ))}
+        </ol>
+        <div className="draft-menu">
+          <button
+            type="button"
+            className="draft-dots"
+            aria-expanded={draftOpen}
+            aria-haspopup="menu"
+            aria-label="Save or load draft"
+            onClick={() => setDraftOpen((open) => !open)}
+          >
+            ⋯
           </button>
-          <button type="button" onClick={() => loadDraftRef.current?.click()}>
-            Load draft
-          </button>
+          {draftOpen ? (
+            <div className="draft-menu-list" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setDraftOpen(false);
+                  void saveDraft();
+                }}
+              >
+                Save draft
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setDraftOpen(false);
+                  loadDraftRef.current?.click();
+                }}
+              >
+                Load draft
+              </button>
+            </div>
+          ) : null}
+          <input
+            ref={loadDraftRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) loadDraft(file);
+            }}
+          />
         </div>
-        {draftNote ? <p className="note">{draftNote}</p> : null}
       </div>
-
-      <ol className="asset-steps">
-        {steps.map((name, item) => (
-          <li key={name}>
-            <button
-              type="button"
-              aria-current={name === step ? "step" : undefined}
-              onClick={() => go(name)}
-            >
-              <span>{item + 1}</span>
-              {name}
-            </button>
-          </li>
-        ))}
-      </ol>
+      {draftNote ? <p className="note">{draftNote}</p> : null}
 
       {step === "Object" ? (
         <form>
@@ -1404,12 +1438,32 @@ export function AssetDesk() {
       ) : null}
 
       {step === "Buyer page" ? (
+        <>
+        <section className="nft-mock">
+          <p className="eyebrow">NFT in a wallet</p>
+          <article className="nft-mock-card">
+            {nftPictureView ? (
+              <img className="nft-mock-shot" src={nftPictureView} alt="" />
+            ) : (
+              <div className="nft-mock-shot nft-mock-empty">Add the NFT image on Object. Wallets and Tensor show that square, cropped to fill this frame.</div>
+            )}
+            <div className="nft-mock-body">
+              <h2>{draft.assetName ? `${draft.assetName} title` : "Title"}</h2>
+              <p>Edition 1 · Metaplex Core</p>
+              <p>{symbol ? `Paid in ${symbol}` : "Payment token is set on Price."}</p>
+            </div>
+          </article>
+        </section>
         <div className="rights-grid">
           <article className="card">
             <p className="eyebrow">Product and rights</p>
             <h2>{draft.assetName || "Asset"}</h2>
-            {pictureView ? <img className="sheet-picture" src={pictureView} alt={draft.assetName || "Asset"} /> : null}
-            {nftPictureView ? <img className="nft-face" src={nftPictureView} alt={`${draft.assetName || "Asset"} NFT`} /> : null}
+            <p className="eyebrow">Sheet picture</p>
+            {pictureView ? (
+              <img className="sheet-picture" src={pictureView} alt={draft.assetName || "Asset"} />
+            ) : (
+              <p className="note">No sheet picture yet. Add it on Object.</p>
+            )}
             <p>{draft.story}</p>
             <p>{draft.pitch.trim() || "No pitch."}</p>
             <dl>
@@ -1474,12 +1528,7 @@ export function AssetDesk() {
             <h2>
               {coin?.name || pay?.name || "Token"} <span>{symbol}</span>
             </h2>
-            {pictureView ? (
-              <img className="sheet-picture" src={pictureView} alt={coin?.name || pay?.name || "Record"} />
-            ) : (
-              <p className="note">No sheet picture yet. Add it on the Object step.</p>
-            )}
-            {nftPictureView ? <img className="nft-face" src={nftPictureView} alt="NFT image" /> : null}
+            <p className="note">The NFT mock is above. This panel is the payment token.</p>
             <dl>
               <div>
                 <dt>Token address</dt>
@@ -1548,6 +1597,7 @@ export function AssetDesk() {
             {sizeLine ? <p className="note">{sizeLine}</p> : null}
           </article>
         </div>
+        </>
       ) : null}
 
       {step === "Sheet" ? (
@@ -1607,25 +1657,7 @@ export function AssetDesk() {
             Next
           </button>
         ) : null}
-        <button type="button" onClick={() => void saveDraft()}>
-          Save draft
-        </button>
-        <button type="button" onClick={() => loadDraftRef.current?.click()}>
-          Load draft
-        </button>
-        <input
-          ref={loadDraftRef}
-          type="file"
-          accept="application/json,.json"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) loadDraft(file);
-          }}
-        />
       </div>
-      {draftNote ? <p className="note">{draftNote}</p> : null}
     </div>
   );
 }
