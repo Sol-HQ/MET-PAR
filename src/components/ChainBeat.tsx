@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { formatSolanaTime, watchFreshBlockhash } from "@/lib/chain-beat";
+import { formatLocalTime, formatSolanaTime, watchFreshBlockhash } from "@/lib/chain-beat";
 import { useCluster } from "@/lib/cluster";
 
 const POLL_MS = 16_000;
@@ -104,7 +104,13 @@ function useBeat() {
 export function ChainTime() {
   const beat = useBeat();
   const time = formatSolanaTime(beat?.unixTimestamp || 0);
-  return <p className="chain-time">Solana {time || "time"}</p>;
+  const local = formatLocalTime(beat?.unixTimestamp || 0);
+  return (
+    <p className="chain-time">
+      Solana {time || "time"}
+      {local ? ` · ${local}` : ""}
+    </p>
+  );
 }
 
 export function ChainSlot() {

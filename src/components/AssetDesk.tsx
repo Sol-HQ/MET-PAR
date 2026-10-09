@@ -177,6 +177,14 @@ function example(partial: Omit<Draft, "existsNow" | "marks" | "saleDays" | "sale
   };
 }
 
+/** Standing places a handoff does not ship to. The Treasury publishes the blocked list. The post office can stop a country for a time. */
+const NO_SHIP =
+  "It is not shipped to Cuba, Iran, North Korea, or the Crimea, Donetsk, and Luhansk regions of Ukraine. It is not shipped to a person or a company on the U.S. Treasury blocked list. It is not shipped to a country the post office has stopped taking packages to.";
+
+function handoff(line: string): string {
+  return `${line} ${NO_SHIP}`;
+}
+
 const EXAMPLES = {
   painting: example({
     objectName: "The painting",
@@ -191,7 +199,7 @@ const EXAMPLES = {
     work: "Original paint on canvas by the painter. Signed on the back.",
     claim: "Whoever holds the title can claim this painting from the painter.",
     shipDays: "30",
-    shipping: "The painter ships the painting packed and tracked, or the holder picks it up at the studio.",
+    shipping: handoff("The painter ships the painting packed and tracked, or the holder picks it up at the studio."),
     declared: "100",
     terms:
       "If this painting is not handed over, the painter pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -214,7 +222,7 @@ const EXAMPLES = {
     work: "Original art about the ecosystem the maker provides liquidity in.",
     claim: "This is the kite. Whoever holds the title claims a sister of it, a perfect copy. The kite on this page stays with the maker.",
     shipDays: "30",
-    shipping: "The maker builds that sister kite and ships it, or meets the title holder to hand it over.",
+    shipping: handoff("The maker builds that sister kite and ships it, or meets the title holder to hand it over."),
     declared: "2000",
     terms:
       "If that sister kite is not handed over, the maker pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -236,7 +244,7 @@ const EXAMPLES = {
     work: "The card's own print.",
     claim: "Whoever holds the title can claim this card from the collector.",
     shipDays: "14",
-    shipping: "The holder pays shipping, or meets the collector to take the card.",
+    shipping: handoff("The holder pays shipping, or meets the collector to take the card."),
     declared: "800",
     terms:
       "If this card is not handed over, the collector pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -257,7 +265,7 @@ const EXAMPLES = {
     work: "Original work by the artist.",
     claim: "Whoever holds the title can claim this piece from the artist.",
     shipDays: "30",
-    shipping: "The holder pays shipping, or meets the artist to take the piece.",
+    shipping: handoff("The holder pays shipping, or meets the artist to take the piece."),
     declared: "5000",
     terms:
       "If this piece is not handed over, the artist pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -280,7 +288,7 @@ const EXAMPLES = {
     work: "The watch and its serial number.",
     claim: "Whoever holds the title can claim this watch from the owner.",
     shipDays: "14",
-    shipping: "Insured shipment, or a meeting to hand over the watch.",
+    shipping: handoff("Insured shipment, or a meeting to hand over the watch."),
     declared: "8000",
     terms:
       "If this watch is not handed over, the owner pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -302,7 +310,7 @@ const EXAMPLES = {
     work: "The vehicle and its identification number.",
     claim: "Whoever holds the title can claim this vehicle from the owner.",
     shipDays: "30",
-    shipping: "The handoff is the signed ownership papers and the keys, at a place named on this page.",
+    shipping: handoff("The handoff is the signed ownership papers and the keys, at a place named on this page."),
     declared: "20000",
     terms:
       "If the ownership papers and the keys are not handed over, the owner pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -324,7 +332,7 @@ const EXAMPLES = {
     work: "The bar number and the vault record.",
     claim: "Whoever holds the title can claim this bar from the owner.",
     shipDays: "21",
-    shipping: "Release from the named vault, or insured delivery of that bar.",
+    shipping: handoff("Release from the named vault, or insured delivery of that bar."),
     declared: "12000",
     terms:
       "If this bar is not released, the owner pays the declared value to the title holder. The title holder keeps the title until the handoff is done, or until that amount is paid.",
@@ -1137,7 +1145,10 @@ export function AssetDesk() {
           </label>
           <label>
             Handoff
-            <textarea value={draft.shipping} onChange={(event) => patch({ shipping: event.target.value })} rows={2} />
+            <textarea value={draft.shipping} onChange={(event) => patch({ shipping: event.target.value })} rows={4} />
+            <span className="note">
+              The U.S. Treasury publishes the blocked list. You do not write the names. Before a shipment, a name can be checked at sanctionssearch.ofac.treas.gov. A country the post office has stopped is extra, and that list changes. These words lock when the asset is created.
+            </span>
           </label>
           <label>
             Declared value if the object cannot be delivered{unit ? `, ${unit}` : ""}

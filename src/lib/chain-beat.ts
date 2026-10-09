@@ -43,3 +43,12 @@ export function formatSolanaTime(unixTimestamp: number): string {
   if (!Number.isFinite(unixTimestamp) || unixTimestamp <= 0) return "";
   return `${new Date(unixTimestamp * 1000).toISOString().replace("T", " ").replace(/\.\d+Z$/, "")} UTC`;
 }
+
+export function formatLocalTime(unixTimestamp: number): string {
+  if (!Number.isFinite(unixTimestamp) || unixTimestamp <= 0) return "";
+  return new Date(unixTimestamp * 1000).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
