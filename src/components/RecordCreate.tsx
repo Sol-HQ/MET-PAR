@@ -21,7 +21,7 @@ import {
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
-import { landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
+import { JITO_TIP_LAMPORTS, landingCost, prepareBundle, prepareTransaction, sendPrepared, sendPreparedBundle, transactionBytes } from "@/lib/send";
 import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
@@ -573,7 +573,7 @@ export function RecordCreate({
         const omitted: string[] = [];
         let current = rows;
         for (;;) {
-          const prepared = await prepareTransaction(connection, payerKey, build(current), [signer]);
+          const prepared = await prepareTransaction(connection, payerKey, build(current), [signer], { tip: false });
           const bytes = transactionBytes(prepared.transaction);
           if (bytes === null) throw new Error(`The ${label} could not be measured.`);
           if (bytes <= 1232) return { prepared, bytes, omitted };
@@ -724,10 +724,15 @@ export function RecordCreate({
 
       const useRail = draftPlan.rail;
       const walletOpens = useRail === "escrow" || useEdition ? "six" : "five";
+      const bundleLine =
+        cluster === "mainnet-beta" && useEdition
+          ? "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Those three leave as one Jito bundle with one tip. They land in that order, or none land. The three addresses stay in this browser tab so a refresh can finish the same mint."
+          : "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are separate signatures. The three addresses stay in this browser tab so a refresh can finish the same mint.";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "real network"}`,
         `Order: you sign the promises, then your picture, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
         `The wallet opens ${walletOpens} times: the promises, three upload signatures, the record${useEdition ? ", the master edition" : ""}, the title${useRail === "escrow" ? ", and the escrow deposit" : ""}.`,
+        bundleLine,
         `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
         ...(draftPlan.noCoin
@@ -762,6 +767,11 @@ export function RecordCreate({
             ]
           : []),
         `Title rent: ${formatLamports(titleRent)}. ${landingCost(titlePrepared)} Title transaction: ${titleBytes} of 1232 bytes.`,
+        ...(cluster === "mainnet-beta" && useEdition
+          ? [
+              `Jito bundle tip: ${formatLamports(JITO_TIP_LAMPORTS)}. One transfer to a Jito tip account, inside the last packet that can hold it. That is what pays Jito to land the three together.`,
+            ]
+          : []),
         ...(recordFit.omitted.length || titleFit.omitted.length
           ? [
               `Some short fields stay off the NFT so the transaction fits in 1232 bytes. Those words stay on the Arweave sheet. Left off the record: ${recordFit.omitted.join(", ") || "none"}. Left off the title: ${titleFit.omitted.join(", ") || "none"}.`,
@@ -845,6 +855,9 @@ export function RecordCreate({
             mint: plan.mint,
             pool: plan.pool,
             rail: plan.rail,
+            record: keys.record.publicKey.toBase58(),
+            title: keys.title.publicKey.toBase58(),
+            collection: keys.collection.publicKey.toBase58(),
             rows,
             promises: plan.promises,
           }),
@@ -985,27 +998,45 @@ export function RecordCreate({
         delayDays: Number(draft.saleDays),
       });
 
-      const recordTx = new Transaction().add(
-        ...recordInstruction({
-          endpoint: connection.rpcEndpoint,
-          asset: keys.record,
-          payer,
-          vault: new PublicKey(vault),
-          name: draft.assetName,
-          uri: sheetArweave,
-          attributes: keepSheet(recordRows, plan.omitRecord),
-        }),
-      );
-      const recordSig = await sendPrepared(connection, await prepareTransaction(connection, payer, recordTx, [keys.record]), signTransaction, "The record is on chain.");
-      mark("Master sent to the program vault", explorerTx(recordSig, cluster));
-
       const useEdition = plan.rail !== "escrow";
-      if (useEdition) {
-        const already = await connection.getAccountInfo(keys.collection.publicKey, "confirmed");
-        if (already) {
-          mark("Master edition already on chain", explorerAccount(keys.collection.publicKey.toBase58(), cluster));
-        } else {
-          const collectionTx = new Transaction().add(
+      const recordExists = Boolean(await connection.getAccountInfo(keys.record.publicKey, "confirmed"));
+      const collectionExists = useEdition
+        ? Boolean(await connection.getAccountInfo(keys.collection.publicKey, "confirmed"))
+        : true;
+      const titleExists = Boolean(await connection.getAccountInfo(keys.title.publicKey, "confirmed"));
+
+      const pending: Array<{
+        kind: "record" | "collection" | "title";
+        transaction: Transaction;
+        signers: Keypair[];
+        landed: string;
+        done: string;
+      }> = [];
+      if (!recordExists) {
+        pending.push({
+          kind: "record",
+          transaction: new Transaction().add(
+            ...recordInstruction({
+              endpoint: connection.rpcEndpoint,
+              asset: keys.record,
+              payer,
+              vault: new PublicKey(vault),
+              name: draft.assetName,
+              uri: sheetArweave,
+              attributes: keepSheet(recordRows, plan.omitRecord),
+            }),
+          ),
+          signers: [keys.record],
+          landed: "The record is on chain.",
+          done: "Master sent to the program vault",
+        });
+      } else {
+        mark("Master already on chain", explorerAccount(keys.record.publicKey.toBase58(), cluster));
+      }
+      if (useEdition && !collectionExists) {
+        pending.push({
+          kind: "collection",
+          transaction: new Transaction().add(
             ...editionCollectionInstructions({
               endpoint: connection.rpcEndpoint,
               collection: keys.collection,
@@ -1013,30 +1044,76 @@ export function RecordCreate({
               name: titleName(draft.assetName),
               uri: sheetArweave,
             }),
-          );
-          const collectionSig = await sendPrepared(
+          ),
+          signers: [keys.collection],
+          landed: "The master edition is on chain.",
+          done: "Master edition of one, ready for the title",
+        });
+      } else if (useEdition) {
+        mark("Master edition already on chain", explorerAccount(keys.collection.publicKey.toBase58(), cluster));
+      }
+      if (!titleExists) {
+        pending.push({
+          kind: "title",
+          transaction: new Transaction().add(
+            ...titleInstructions({
+              endpoint: connection.rpcEndpoint,
+              asset: keys.title,
+              collection: useEdition ? keys.collection.publicKey : undefined,
+              creator: payer,
+              name: titleName(draft.assetName),
+              uri: sheetArweave,
+              attributes: keepSheet(titleRows, plan.omitTitle),
+            }),
+          ),
+          signers: [keys.title],
+          landed: "The title is in your wallet.",
+          done: `Title minted to your wallet${plan.rail === "creator" ? ". It stays there until the sale" : ""}`,
+        });
+      } else {
+        mark("Title already on chain", explorerAccount(keys.title.publicKey.toBase58(), cluster));
+      }
+
+      let recordSig = "";
+      let titleSig = "";
+      const bundle = cluster === "mainnet-beta" && pending.length > 1;
+      if (bundle) {
+        const prepared = await prepareBundle(
+          connection,
+          payer,
+          pending.map((part) => ({ transaction: part.transaction, signers: part.signers })),
+        );
+        if (!prepared.some((part) => part.tipLamports > 0)) {
+          throw new Error("The Jito tip did not fit. Press Review create again.");
+        }
+        const signatures = await sendPreparedBundle(
+          connection,
+          prepared,
+          signTransaction,
+          pending.map((part) => part.landed),
+        );
+        pending.forEach((part, index) => {
+          const signature = signatures[index] || "";
+          if (part.kind === "record") recordSig = signature;
+          if (part.kind === "title") titleSig = signature;
+          mark(part.done, explorerTx(signature, cluster));
+        });
+      } else {
+        for (const part of pending) {
+          const signature = await sendPrepared(
             connection,
-            await prepareTransaction(connection, payer, collectionTx, [keys.collection]),
+            await prepareTransaction(connection, payer, part.transaction, part.signers, {
+              tip: cluster === "mainnet-beta",
+            }),
             signTransaction,
-            "The master edition is on chain.",
+            part.landed,
           );
-          mark("Master edition of one, ready for the title", explorerTx(collectionSig, cluster));
-          await waitForAccount(connection, keys.collection.publicKey);
+          if (part.kind === "record") recordSig = signature;
+          if (part.kind === "title") titleSig = signature;
+          mark(part.done, explorerTx(signature, cluster));
+          if (part.kind === "collection") await waitForAccount(connection, keys.collection.publicKey);
         }
       }
-      const titleTx = new Transaction().add(
-        ...titleInstructions({
-          endpoint: connection.rpcEndpoint,
-          asset: keys.title,
-          collection: useEdition ? keys.collection.publicKey : undefined,
-          creator: payer,
-          name: titleName(draft.assetName),
-          uri: sheetArweave,
-          attributes: keepSheet(titleRows, plan.omitTitle),
-        }),
-      );
-      const titleSig = await sendPrepared(connection, await prepareTransaction(connection, payer, titleTx, [keys.title]), signTransaction, "The title is in your wallet.");
-      mark(`Title minted to your wallet${plan.rail === "creator" ? ". It stays there until the sale" : ""}`, explorerTx(titleSig, cluster));
 
       let depositSig: string | undefined;
       if (plan.rail === "escrow") {
@@ -1090,7 +1167,7 @@ export function RecordCreate({
       setPlan(null);
     } catch (cause) {
       setError(
-        `${cause instanceof Error ? cause.message : "The create stopped."} Steps marked done are already stored. Press Review create to start fresh.`,
+        `${cause instanceof Error ? cause.message : "The create stopped."} Steps marked done are already stored. Press Review create again. This tab still has the same addresses.`,
       );
       setPlan(null);
     } finally {

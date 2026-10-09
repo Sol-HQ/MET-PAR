@@ -133,10 +133,10 @@ export async function prepareTransaction(
   payer: PublicKey,
   transaction: Transaction,
   signers: Keypair[],
-  options?: { tip?: boolean },
+  options?: { tip?: boolean; latest?: { blockhash: string; lastValidBlockHeight: number } },
 ): Promise<PreparedTransaction> {
   transaction.feePayer = payer;
-  const latest = await connection.getLatestBlockhash("confirmed");
+  const latest = options?.latest ?? (await connection.getLatestBlockhash("confirmed"));
   transaction.recentBlockhash = latest.blockhash;
   let tipLamports = 0;
   if (options?.tip !== false && jitoTipLamports(connection.rpcEndpoint) > 0) {
@@ -241,6 +241,16 @@ function payerSignature(raw: Uint8Array): string {
   return encodeBase58(raw.subarray(1, 65));
 }
 
+function rawToBase64(raw: Uint8Array): string {
+  let binary = "";
+  for (const byte of raw) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function cloneTransaction(transaction: Transaction): Transaction {
+  return Transaction.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false }));
+}
+
 /** The same signed bytes can be handed to the network more than once. Only one copy can land. */
 async function pushSigned(connection: Connection, raw: Uint8Array, tip: boolean): Promise<void> {
   const sends: Promise<unknown>[] = [connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })];
@@ -252,11 +262,55 @@ async function relayJito(raw: Uint8Array): Promise<string> {
   const response = await fetch("/api/jito", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transaction: btoa(String.fromCharCode(...raw)) }),
+    body: JSON.stringify({ transaction: rawToBase64(raw) }),
   });
   const body = (await response.json().catch(() => null)) as { signature?: string; error?: string } | null;
   if (!response.ok || !body?.signature) throw new Error(body?.error || "Jito did not take the transaction.");
   return body.signature;
+}
+
+/** One Jito bundle. Do not also send the parts on ordinary RPC, or they can land one at a time. */
+async function relayBundle(raws: Uint8Array[]): Promise<string> {
+  const response = await fetch("/api/jito", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ transactions: raws.map(rawToBase64) }),
+  });
+  const body = (await response.json().catch(() => null)) as { bundle?: string; error?: string } | null;
+  if (!response.ok || !body?.bundle) throw new Error(body?.error || "Jito did not take the bundle.");
+  return body.bundle;
+}
+
+/**
+ * One shared blockhash. The tip sits on the last packet that can still hold it, so the bundle pays Jito once.
+ */
+export async function prepareBundle(
+  connection: Connection,
+  payer: PublicKey,
+  parts: Array<{ transaction: Transaction; signers: Keypair[] }>,
+): Promise<PreparedTransaction[]> {
+  const latest = await connection.getLatestBlockhash("confirmed");
+  let tipAt = -1;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const trial = await prepareTransaction(connection, payer, cloneTransaction(parts[index].transaction), parts[index].signers, {
+      tip: true,
+      latest,
+    });
+    if (trial.tipLamports > 0) {
+      tipAt = index;
+      break;
+    }
+  }
+  const prepared: PreparedTransaction[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    prepared.push(
+      await prepareTransaction(connection, payer, cloneTransaction(parts[index].transaction), parts[index].signers, {
+        tip: index === tipAt,
+        latest,
+      }),
+    );
+  }
+  return prepared;
 }
 
 function clusterOf(endpoint: string): ClusterName {
@@ -282,7 +336,7 @@ export async function finishSignature(
   blockhash: string,
   lastValidBlockHeight: number,
   landed: string,
-  resend?: { raw: Uint8Array; tip: boolean },
+  resend?: { raw: Uint8Array; tip: boolean } | { bundle: Uint8Array[] },
 ): Promise<void> {
   let stop = false;
   const repeater = resend
@@ -290,7 +344,8 @@ export async function finishSignature(
         while (!stop) {
           await new Promise((resolve) => setTimeout(resolve, 2000));
           if (stop) return;
-          await pushSigned(connection, resend.raw, resend.tip);
+          if ("bundle" in resend) await relayBundle(resend.bundle).catch(() => undefined);
+          else await pushSigned(connection, resend.raw, resend.tip);
         }
       })()
     : null;
@@ -356,5 +411,43 @@ export async function sendPrepared(
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
     reportFailure(connection, cause, signature || undefined);
+  }
+}
+
+/**
+ * Signs each packet, then hands the set to Jito as one bundle. They land in order or not at all.
+ * One leftover packet uses the ordinary send, which still tips Jito when the tip is inside it.
+ */
+export async function sendPreparedBundle(
+  connection: Connection,
+  prepared: PreparedTransaction[],
+  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  landed: string[],
+): Promise<string[]> {
+  if (prepared.length === 0) return [];
+  if (prepared.length === 1) {
+    return [await sendPrepared(connection, prepared[0], signTransaction, landed[0])];
+  }
+  const latest = await connection.getLatestBlockhash("confirmed");
+  const raws: Uint8Array[] = [];
+  const signatures: string[] = [];
+  try {
+    for (let index = 0; index < prepared.length; index += 1) {
+      const ready = transactionForWallet(prepared[index], latest.blockhash, latest.lastValidBlockHeight);
+      const signed = await signTransaction(ready.transaction);
+      const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared[index].signers);
+      raws.push(raw);
+      signatures.push(payerSignature(raw));
+    }
+    await relayBundle(raws);
+    for (let index = 0; index < signatures.length; index += 1) {
+      await finishSignature(connection, signatures[index], latest.blockhash, latest.lastValidBlockHeight, landed[index] || "Transaction confirmed.", {
+        bundle: raws,
+      });
+    }
+    return signatures;
+  } catch (cause) {
+    if (cause instanceof ReportedTxError) throw cause;
+    reportFailure(connection, cause, signatures[0] || undefined);
   }
 }

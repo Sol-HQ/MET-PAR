@@ -1,7 +1,6 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Keypair } from "@solana/web3.js";
 import { signedPictureHeaders } from "@/lib/picture";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -14,7 +13,7 @@ import { shrinkImageUnder } from "@/lib/image";
 import { BILLION_SUPPLY, type LaunchChoice } from "@/lib/launch";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import { FREE_UPLOAD_BYTES } from "@/lib/record";
-import { clearRwaDraft, rwaDraftKey } from "@/lib/rwa-draft";
+import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaKeys, rwaDraftKey, writeRwaKeys } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
@@ -462,11 +461,19 @@ export function AssetDesk() {
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
   const unit = coin?.quoteSymbol || pay?.symbol || "";
   const [escrowHint, setEscrowHint] = useState("");
-  const [preparedKeys] = useState(() => ({
-    record: Keypair.generate(),
-    title: Keypair.generate(),
-    collection: Keypair.generate(),
-  }));
+  const [preparedKeys, setPreparedKeys] = useState(makeRwaKeys);
+  const wallet = publicKey?.toBase58() || "";
+  useEffect(() => {
+    if (!wallet) return;
+    const stored = readRwaKeys(wallet, cluster);
+    if (stored) {
+      setPreparedKeys(stored);
+      return;
+    }
+    const next = makeRwaKeys();
+    writeRwaKeys(wallet, cluster, next);
+    setPreparedKeys(next);
+  }, [wallet, cluster]);
   const tokenMint = coin?.mint || pay?.mint || "";
   const poolAddress = coin?.pool || "";
   const steps: Step[] = withCoin === false ? [...PLAIN_STEPS] : [...COIN_STEPS];
@@ -1434,7 +1441,10 @@ export function AssetDesk() {
             preparedKeys={preparedKeys}
             coin={coin}
             pay={pay}
-            onCreated={clearRwaDraft}
+            onCreated={() => {
+              clearRwaDraft();
+              if (publicKey) clearRwaKeys(publicKey.toBase58(), cluster);
+            }}
           />
         </div>
       ) : null}
