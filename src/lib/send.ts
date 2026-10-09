@@ -1,4 +1,5 @@
 import { PublicKey, SystemProgram, Transaction, VersionedTransaction, type Connection, type Keypair } from "@solana/web3.js";
+import { noteFreshBlockhash } from "./chain-beat";
 import { explorerTx, type ClusterName } from "./constants";
 import { formatLamports } from "./format";
 import { explainTx } from "./tx-error";
@@ -137,6 +138,7 @@ export async function prepareTransaction(
 ): Promise<PreparedTransaction> {
   transaction.feePayer = payer;
   const latest = options?.latest ?? (await connection.getLatestBlockhash("confirmed"));
+  noteFreshBlockhash(latest);
   transaction.recentBlockhash = latest.blockhash;
   let tipLamports = 0;
   if (options?.tip !== false && jitoTipLamports(connection.rpcEndpoint) > 0) {
@@ -393,6 +395,7 @@ export async function sendPrepared(
   let signature = "";
   try {
     const latest = await connection.getLatestBlockhash("confirmed");
+    noteFreshBlockhash(latest);
     const ready = transactionForWallet(prepared, latest.blockhash, latest.lastValidBlockHeight);
     const signed = await signTransaction(ready.transaction);
     const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
@@ -429,6 +432,7 @@ export async function sendPreparedBundle(
     return [await sendPrepared(connection, prepared[0], signTransaction, landed[0])];
   }
   const latest = await connection.getLatestBlockhash("confirmed");
+  noteFreshBlockhash(latest);
   const raws: Uint8Array[] = [];
   const signatures: string[] = [];
   try {

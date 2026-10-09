@@ -163,6 +163,32 @@ button.text {
   font-weight: 600;
 }
 
+.wallet-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+}
+
+.chain-beat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--muted);
+  text-align: right;
+}
+
+.chain-hash {
+  max-width: 16.5rem;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
 .banner, .error, .status, .note {
   font-family: var(--mono);
   font-size: 0.82rem;
@@ -1262,5 +1288,11 @@ textarea {
   .top, footer, .listings a {
     flex-direction: column;
     align-items: flex-start;
+  }
+  .wallet-stack, .chain-beat {
+    align-items: flex-start;
+  }
+  .chain-beat {
+    text-align: left;
   }
 }

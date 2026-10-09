@@ -117,6 +117,11 @@ export function wsUrl(cluster: ClusterName): string {
   return cluster === "devnet" ? "wss://api.devnet.solana.com" : "wss://api.mainnet-beta.solana.com";
 }
 
+/** Keyless public HTTP. The header clock and blockhash read this so the keyed RPC is kept for signed work. */
+export function publicRpcUrl(cluster: ClusterName): string {
+  return cluster === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com";
+}
+
 export function quoteDecimalsFor(kind: QuoteKind): number {
   if (kind === "sol") return SOL_DECIMALS;
   return QUOTE_DECIMALS;

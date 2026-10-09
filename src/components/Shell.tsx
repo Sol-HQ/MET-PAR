@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import type { ReactNode } from "react";
 import { isAdminWallet } from "@/lib/admins";
+import { ChainBeat } from "@/components/ChainBeat";
 import { TxNotice } from "@/components/TxNotice";
 import { DBC_PROGRAM_ID } from "@/lib/constants";
 import { useCluster } from "@/lib/cluster";
@@ -49,7 +50,10 @@ export function Shell({ children }: { children: ReactNode }) {
               Admin
             </Link>
           ) : null}
-          <WalletMultiButton />
+          <div className="wallet-stack">
+            <WalletMultiButton />
+            <ChainBeat />
+          </div>
         </div>
       </header>
       <p className="note sec-line">
