@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { formatSolanaTime, watchFreshBlockhash } from "@/lib/chain-beat";
 import { useCluster } from "@/lib/cluster";
 
@@ -14,7 +14,9 @@ type Beat = {
   blockhash: string;
 };
 
-export function ChainBeat() {
+const BeatContext = createContext<Beat | null>(null);
+
+export function ChainBeatProvider({ children }: { children: ReactNode }) {
   const { cluster } = useCluster();
   const [beat, setBeat] = useState<Beat | null>(null);
   const [now, setNow] = useState(0);
@@ -86,15 +88,31 @@ export function ChainBeat() {
     };
   }, [cluster]);
 
-  const elapsed = beat && beat.unixTimestamp > 0 ? beat.unixTimestamp + Math.max(0, Math.floor((now - beat.readAt) / 1000)) : 0;
-  const time = formatSolanaTime(elapsed);
-  const hash = beat?.blockhash || "";
+  const value = useMemo(() => {
+    if (!beat) return null;
+    const elapsed = beat.unixTimestamp > 0 ? beat.unixTimestamp + Math.max(0, Math.floor((now - beat.readAt) / 1000)) : 0;
+    return { ...beat, unixTimestamp: elapsed || beat.unixTimestamp };
+  }, [beat, now]);
 
-  return (
-    <p className="chain-beat" aria-live="polite">
-      <span>Solana {time || "time"}</span>
-      {beat?.slot ? <span>Slot {beat.slot.toLocaleString("en-US")}</span> : null}
-      <span className="chain-hash">{hash || "Recent blockhash"}</span>
-    </p>
-  );
+  return <BeatContext.Provider value={value}>{children}</BeatContext.Provider>;
+}
+
+function useBeat() {
+  return useContext(BeatContext);
+}
+
+export function ChainTime() {
+  const beat = useBeat();
+  const time = formatSolanaTime(beat?.unixTimestamp || 0);
+  return <p className="chain-time">Solana {time || "time"}</p>;
+}
+
+export function ChainSlot() {
+  const beat = useBeat();
+  return <p className="chain-slot">{beat?.slot ? `Slot ${beat.slot.toLocaleString("en-US")}` : "Slot"}</p>;
+}
+
+export function ChainHash() {
+  const beat = useBeat();
+  return <p className="chain-hash">{beat?.blockhash || "Recent blockhash"}</p>;
 }

@@ -5,7 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import type { ReactNode } from "react";
 import { isAdminWallet } from "@/lib/admins";
-import { ChainBeat } from "@/components/ChainBeat";
+import { ChainBeatProvider, ChainHash, ChainSlot, ChainTime } from "@/components/ChainBeat";
 import { TxNotice } from "@/components/TxNotice";
 import { DBC_PROGRAM_ID } from "@/lib/constants";
 import { useCluster } from "@/lib/cluster";
@@ -18,43 +18,51 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="page">
       <header className="top">
-        <Link href="/" className="brand">
-          <span className="mark">PAR</span>
-          <span className="brand-line">Fair launch on Meteora</span>
-        </Link>
-        <div className="top-actions">
-          <div className="segmented" role="group" aria-label="Network">
-            <button
-              type="button"
-              aria-pressed={cluster === "devnet"}
-              onClick={() => setCluster("devnet")}
-            >
-              Devnet
-            </button>
-            <button
-              type="button"
-              aria-pressed={cluster === "mainnet-beta"}
-              onClick={() => setCluster("mainnet-beta")}
-            >
-              Mainnet
-            </button>
-          </div>
-          <Link href="/pools" className="admin-link">
-            Pools
-          </Link>
-          <Link href="/faqs" className="admin-link">
-            FAQs
-          </Link>
-          {admin ? (
-            <Link href="/admin" className="admin-link">
-              Admin
+        <ChainBeatProvider>
+          <div className="top-row">
+            <Link href="/" className="brand">
+              <span className="mark">PAR</span>
+              <span className="brand-line">Fair launch on Meteora</span>
             </Link>
-          ) : null}
-          <div className="wallet-stack">
-            <WalletMultiButton />
-            <ChainBeat />
+            <div className="top-actions">
+              <div className="segmented" role="group" aria-label="Network">
+                <button
+                  type="button"
+                  aria-pressed={cluster === "devnet"}
+                  onClick={() => setCluster("devnet")}
+                >
+                  Devnet
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={cluster === "mainnet-beta"}
+                  onClick={() => setCluster("mainnet-beta")}
+                >
+                  Mainnet
+                </button>
+              </div>
+              <Link href="/pools" className="admin-link">
+                Pools
+              </Link>
+              <Link href="/faqs" className="admin-link">
+                FAQs
+              </Link>
+              {admin ? (
+                <Link href="/admin" className="admin-link">
+                  Admin
+                </Link>
+              ) : null}
+              <div className="wallet-stack">
+                <WalletMultiButton />
+                <ChainSlot />
+              </div>
+            </div>
           </div>
-        </div>
+          <div className="chain-rail">
+            <ChainTime />
+            <ChainHash />
+          </div>
+        </ChainBeatProvider>
       </header>
       <p className="note sec-line">
         Do not promise that a price will go up, or promise a return.
