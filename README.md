@@ -18,9 +18,9 @@ The same product can connect a coin to a separately documented real-world asset 
 | --- | --- |
 | **Project** | Met-PAR-4 (PAR) |
 | **Live app** | [meteora.surf](https://www.meteora.surf) |
-| **Mainnet reference** | [NIGHTMARES pool page](https://www.meteora.surf/pool/2Ea8EspX6PB5HAcECnveCEiPVHqaVm48HQeAXrYLwc4n?c=mainnet) · [mint on Solana Explorer](https://explorer.solana.com/address/9Gfy3oiQTRqCj3CeBqEdRtWoZMMsgAKcfb3jAeQan2N2) |
+| **Mainnet references** | **Token:** [NIGHTMARES pool page](https://www.meteora.surf/pool/2Ea8EspX6PB5HAcECnveCEiPVHqaVm48HQeAXrYLwc4n?c=mainnet) · [mint on Solana Explorer](https://explorer.solana.com/address/9Gfy3oiQTRqCj3CeBqEdRtWoZMMsgAKcfb3jAeQan2N2)<br />**Standalone RWA:** [PZ-4CO w/autograph title sale page](https://www.meteora.surf/t/FhmvuPhuayviUA6s67wnquQaJievZu6W7hrk9JrFB8gL?c=mainnet) · [title on Solana Explorer](https://explorer.solana.com/address/FhmvuPhuayviUA6s67wnquQaJievZu6W7hrk9JrFB8gL) |
 | **Hackathon track** | [Best use of Meteora’s Dynamic Bonding Curve](https://superteam.fun/earn/listing/meteora-dbc) · Crypto World’s Fair |
-| **Core programs** | [Meteora DBC](https://explorer.solana.com/address/dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN) · [Meteora DAMM v2](https://explorer.solana.com/address/cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG) |
+| **Meteora programs** | [Dynamic Bonding Curve (DBC)](https://explorer.solana.com/address/dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN) · [DAMM v2 (`cp_amm`)](https://explorer.solana.com/address/cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG) · [Meteora Lock](https://explorer.solana.com/address/LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn)<br />DAMM v2 fee compounding is configured as a mode of the DAMM v2 migration/pool, not a separate program. |
 | **Primary networks** | Solana Devnet for practice; Solana Mainnet Beta for real launches |
 | **Source access for judges** | This repository is private. Request read access from the project owner. |
 
