@@ -6,6 +6,7 @@ import { ObjectPicture } from "@/components/AssetOnPool";
 import { objectPictureUrl } from "@/lib/sheet-html";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
+import { HandoffDesk } from "@/components/HandoffDesk";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
 import { explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
@@ -535,6 +536,7 @@ export default async function SalePage({
           />
         </>
       ) : null}
+      <HandoffDesk cluster={cluster} title={address} />
       <h2>On chain</h2>
       <p className="note">
         The record was minted {recordMint?.at ? day(recordMint.at) : "at a time the chain did not return"}

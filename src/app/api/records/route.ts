@@ -3,6 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import { acceptedQuoteMints, rpcUrl, type ClusterName } from "@/lib/constants";
 import { readCopy, writeCopy } from "@/lib/record-copy";
 import { REMOVED_RECORDS, readRecord, RECORD_VAULT, sha256Hex } from "@/lib/record";
+import { syncHeliusHook } from "@/lib/handoff-server";
 import { hasIndex, hasItem, saveItem } from "@/lib/store";
 import { ESCROW_PROGRAM, listingAddress, readTitle, TITLE_KIND, agreedCreator, agreedHolder } from "@/lib/title";
 
@@ -133,5 +134,6 @@ export async function POST(request: Request) {
     },
     signatures,
   );
+  await syncHeliusHook(cluster).catch(() => undefined);
   return Response.json({ saved: true });
 }

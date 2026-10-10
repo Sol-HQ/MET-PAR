@@ -5,6 +5,7 @@ import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.j
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type Draft } from "@/components/AssetDesk";
+import { HandoffDesk } from "@/components/HandoffDesk";
 import { MainnetGate, ReviewFile, reviewText } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { explorerAccount, explorerTx } from "@/lib/constants";
@@ -1286,6 +1287,7 @@ export function RecordCreate({
           .
         </p>
       ) : null}
+      {finished ? <HandoffDesk cluster={cluster} title={finished.title} mailOnly /> : null}
       {error ? <p className="error">{error}</p> : null}
       {gateOpen && plan ? (
         <MainnetGate
