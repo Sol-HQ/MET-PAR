@@ -236,7 +236,8 @@ export function HandoffDesk({
     setBusy(true);
     setError("");
     try {
-      if (!email.trim()) throw new Error("Enter the email the seller should use.");
+      if (!email.trim()) throw new Error("Enter your email, then press Send.");
+      const sentText = [buyerName.trim(), buyerAddress.trim(), firstMessage.trim()].filter(Boolean).join(" ");
       const body = await post(
         "buyer",
         JSON.stringify({
@@ -244,12 +245,13 @@ export function HandoffDesk({
           address: buyerAddress.trim(),
           email: email.trim(),
           message: firstMessage.trim(),
-          subscribe: agree,
+          subscribe: true,
         }),
       );
       setFirstMessage("");
-      if (body.notice === "same") setNote("That contact is already saved for the seller.");
-      else setNote("Saved. The seller sees your name, mailing address, and email on this page. Wait to hear from the seller.");
+      if (body.notice === "same") setNote("That is already on the handoff card.");
+      else if (sentText) setNote("Sent. It is on the handoff card with the time. The seller receives it by email through the PAR platform.");
+      else setNote("Your email is on file. The seller does not see it. Write a message and press Send when you want the seller to receive it.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The contact did not save.");
     } finally {
@@ -309,42 +311,42 @@ export function HandoffDesk({
               : "Once the purchase is complete, the buyer stays signed in with the wallet that holds the title, or signs in again with that wallet, and leaves a name, a mailing address, and an email."}
           </p>
           <ol className="handoff-road">
-            <li>The seller connects the creator wallet, checks the box, and subscribes to sale email from the PAR platform. This can happen while the title is in that wallet, listed, or in escrow.</li>
-            <li>When a buyer holds the title, PAR emails the seller once. The clock starts then and counts the good faith delivery days (GFD).</li>
-            <li>The buyer leaves a name, a mailing address, and an email here, as soon as that wallet holds the title or a few minutes later, then waits to hear from the seller.</li>
-            <li>Each person can write a note on this page. PAR emails that note to the other person and copies the PAR platform. The buyer does not see the seller's subscription address. The name, mailing address, email, and notes stay with the two wallets, the PAR platform, and an admin. This page says whether each note was emailed.</li>
+            <li>Before a list, the seller can subscribe with a private email, and can leave a contact line. That line can be an email or a phone number. Until a buyer holds the title, only the seller and an admin see it. The subscription address stays private.</li>
+            <li>When a buyer holds the title, PAR emails the seller to check this sale page. The buyer signs in with that wallet and sees the seller's contact line, and every message sent or waiting, with the time.</li>
+            <li>The buyer enters a private email and presses Send. A message is optional. Send is what tells the seller. The two addresses do not have to be shared. PAR carries the message.</li>
+            <li>Later messages work the same way. Each person writes and presses Send. The handoff card keeps each one with the time, and says whether it was emailed.</li>
             <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not.</li>
           </ol>
         </>
       )}
       {buyerOpen ? (
         <>
-          <h3>For the seller</h3>
-          <p className="note">You can leave this as soon as this wallet holds the title, or a few minutes later.</p>
+          <h3>Send to the seller</h3>
+          {sellerProof ? (
+            <p>The seller wrote{signed?.proofs.seller?.at ? ` ${when(signed.proofs.seller.at)}` : ""}: {sellerProof}</p>
+          ) : (
+            <p className="note">The seller has not left a contact line yet. You can still send.</p>
+          )}
+          <label>
+            Your email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
+            <span className="note">Private. The seller does not see this address. PAR uses it to send you replies. {PLATFORM_MAIL} is the platform copy, so use your own.</span>
+          </label>
           <label>
             Name
             <input value={buyerName} onChange={(event) => setBuyerName(event.target.value)} autoComplete="name" maxLength={80} />
           </label>
           <label>
             Mailing address
-            <textarea value={buyerAddress} onChange={(event) => setBuyerAddress(event.target.value)} rows={4} maxLength={220} autoComplete="street-address" />
+            <textarea value={buyerAddress} onChange={(event) => setBuyerAddress(event.target.value)} rows={3} maxLength={220} autoComplete="street-address" />
           </label>
           <label>
-            Email
-            <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-            <span className="note">The seller sees this email after signing in with the creator wallet. You can leave the email on its own and wait for the seller to write first. It stays off the public page.</span>
-          </label>
-          <label className="agree">
-            <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
-            <span>I also want email from the PAR platform about this purchase.</span>
-          </label>
-          <label>
-            Message for the seller
+            Message
             <textarea value={firstMessage} onChange={(event) => setFirstMessage(event.target.value)} rows={4} maxLength={500} />
-            <span className="note">Optional. Leave it blank to wait for the seller.</span>
+            <span className="note">Optional. This is what the seller sees. You can include a shipping address, a phone number, or an email. You can also leave it blank and only keep your private email on file.</span>
           </label>
           <button type="button" className="solid" disabled={busy || !wallet || !email.trim()} onClick={() => void leaveBuyer()}>
-            {busy ? "Saving…" : wallet ? "Leave this for the seller" : "Connect the wallet that holds the title"}
+            {busy ? "Sending…" : "Send"}
           </button>
         </>
       ) : null}
@@ -368,7 +370,7 @@ export function HandoffDesk({
             <div className="record-promises">
               <p className="eyebrow">Handoff card</p>
               <p>
-                Platform mail is {PLATFORM_MAIL}. Messages are sent and received there. The buyer does not see your subscription address. The buyer sees this card after that wallet holds the title.
+                Copies and replies go to {PLATFORM_MAIL}. The buyer does not see your subscription address. The buyer sees this card after that wallet holds the title.
               </p>
               <p>
                 On file: {signed.role === "admin" ? signed.sellerMail || "no seller address yet" : signed.email}
@@ -410,7 +412,7 @@ export function HandoffDesk({
           {signed.role === "holder" && signed.place === "held" ? (
             <div className="record-promises">
               <p className="eyebrow">Handoff card</p>
-              <p>Platform mail is {PLATFORM_MAIL}. Purchase messages are sent and received there.</p>
+              <p>Copies and replies go to {PLATFORM_MAIL}. Purchase messages leave from the PAR platform.</p>
               {sellerProof ? <p>The seller wrote: {sellerProof}</p> : <p className="note">The seller has not left a line yet.</p>}
               <h3>Letters</h3>
               {signed.letters?.length ? (
@@ -439,7 +441,7 @@ export function HandoffDesk({
               <label>
                 Email for this sale
                 <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-                <span className="note">Private. The buyer does not see this address. You can change it and subscribe again. {PLATFORM_MAIL} is where the platform sends and receives. The same inbox still gets each message once.</span>
+                <span className="note">Private. Use your own email, then you can change it and subscribe again. The buyer does not see this address. Copies and replies go to {PLATFORM_MAIL}. Messages leave as PAR platform &lt;platform@meteora.surf&gt;.</span>
               </label>
               <button type="button" disabled={busy || (agree && !email.trim())} onClick={() => void saveMail()}>
                 {busy ? "Saving…" : agree ? "Subscribe to sale email" : "Stop PAR email"}
@@ -453,7 +455,7 @@ export function HandoffDesk({
                   <label>
                     How the buyer can reach you
                     <textarea value={line} onChange={(event) => setLine(event.target.value)} rows={4} maxLength={500} />
-                    <span className="note">An email, a ship-to, or a place to meet. The buyer sees this after signing in with the wallet that holds the title. Leave it blank and save to clear it.</span>
+                    <span className="note">An email or a phone number. Until a buyer holds the title, only you and an admin see this. After that, the buyer sees this line. Your subscription email stays private. Leave it blank and save to clear it.</span>
                   </label>
                   <button type="button" disabled={busy} onClick={() => void saveLine()}>
                     {busy ? "Saving…" : "Save the handoff line"}
@@ -517,7 +519,7 @@ export function HandoffDesk({
                         </span>
                       </label>
                       <button type="button" disabled={busy || !message.trim()} onClick={() => void sendNote()}>
-                        {busy ? "Sending…" : "Send the note"}
+                        {busy ? "Sending…" : "Send"}
                       </button>
                       {signed.otherSubscribed ? null : <p className="note">PAR keeps the note until the other person subscribes, then sends it.</p>}
                     </>

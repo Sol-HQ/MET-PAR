@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { isAdminWallet } from "@/lib/admins";
 import { serverRpcUrl, type ClusterName } from "@/lib/constants";
-import { handoffMessage, type HandoffPublic } from "@/lib/handoff-message";
+import { handoffMessage, PLATFORM_MAIL, type HandoffPublic } from "@/lib/handoff-message";
 import { acceptBuyerLeave, acceptNote, cleanReach, mailIdentity, mailReady, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
 import { listHandoffLetters, readHandoffMail, readHandoffNoteBySignature, readHandoffReach, readHandoffSubscription, readHandoffThread, readItemByTitle, writeHandoffReach, clearHandoffReach } from "@/lib/store";
 import { ESCROW_PROGRAM, listingAddress, readTitle, tensorListAddress } from "@/lib/title";
@@ -78,11 +78,13 @@ export async function POST(request: Request) {
   if (kind === "mail") {
     const saved = await saveSubscription({ cluster, item, wallet, side: creator ? "sale" : "purchase", text });
     if (saved === "bad") return fail(creator ? "Enter the sale email." : "Enter the purchase email.", 400);
+    if (saved === "platform") return fail(`Use your own email. ${PLATFORM_MAIL} is the platform copy. It already receives a copy of each message.`, 400);
     notice = saved;
     await noteHolder(cluster, title).catch(() => undefined);
   } else if (kind === "buyer") {
     const saved = await acceptBuyerLeave({ cluster, item, wallet, text, signature });
-    if (saved === "bad") return fail("Enter the email the seller should use.", 400);
+    if (saved === "bad") return fail("Enter your email, then press Send.", 400);
+    if (saved === "platform") return fail(`Use your own email. ${PLATFORM_MAIL} is the platform copy. It already receives a copy of each message.`, 400);
     if (saved === "soon") return fail("Wait a moment before saving the contact again.", 429);
     notice = saved === "same" || saved === "replay" ? "same" : "saved";
     await noteHolder(cluster, title).catch(() => undefined);

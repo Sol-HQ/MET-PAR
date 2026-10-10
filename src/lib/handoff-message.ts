@@ -56,7 +56,7 @@ export function buyerCardText(card: BuyerCard): string {
   const lines: string[] = [];
   if (card.name) lines.push(`Name: ${card.name}`);
   if (card.address) lines.push(`Mailing address: ${card.address}`);
-  lines.push(`Email: ${card.email}`);
+  if (card.email) lines.push(`Email: ${card.email}`);
   return lines.join("\n");
 }
 
@@ -86,9 +86,10 @@ export function readBuyerCard(body: string): BuyerCard | null {
     if (mode === "address") address = `${address}\n${line}`;
     else return null;
   }
-  const clean = cleanEmail(email);
-  if (!clean) return null;
-  return { name: name.trim(), address: address.trim(), email: clean };
+  const clean = email ? cleanEmail(email) : "";
+  if (email && !clean) return null;
+  if (!name.trim() && !address.trim() && !clean) return null;
+  return { name: name.trim(), address: address.trim(), email: clean || "" };
 }
 
 /** The wallet signs these exact lines. The server rejects anything else. */

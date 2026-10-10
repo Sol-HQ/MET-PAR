@@ -1145,7 +1145,7 @@ export function AssetDesk() {
               : withCoin
                 ? `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program, and not before ${draft.saleDays || "the"} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of it and keep the rest. PAR takes none of that sale. `
                 : "No coin is attached. On the sale page you list one price through Tensor, and you can delist whenever you want. Delist returns the title to your wallet. You can list it again. "}
-            On that sale page you subscribe with the email that should receive the sale. The platform inbox is metpar02@gmail.com. Messages are sent and received there. If that is also your sale email, each message arrives once. After a buyer holds the title, a note on the sale page carries the tracking number, and the insurance if you bought it. That note is the email. The Tensor list is not on this step.
+            On that sale page you subscribe with your own email. Copies and replies go to metpar02@gmail.com. Messages leave as PAR platform &lt;platform@meteora.surf&gt;. After a buyer holds the title, a note on the sale page carries the tracking number, and the insurance if you bought it. That note is the email. The Tensor list is not on this step.
           </p>
           {withCoin ? <>
           <div className="segmented" role="group" aria-label="Title path">

@@ -5,7 +5,6 @@ import { serverRpcUrl, type ClusterName } from "./constants";
 import {
   HANDOFF_DAY_MS,
   PLATFORM_MAIL,
-  parAddress,
   parFrom,
   parLetter,
   parSubject,
@@ -179,7 +178,7 @@ async function sendAbout(
   const key = process.env.RESEND_API_KEY;
   const fromRaw = platformFromRaw();
   const from = parFrom(fromRaw);
-  const reply = parAddress(fromRaw);
+  const reply = PLATFORM_MAIL;
   const subject = parSubject(side, name, what);
   const lines = parLetter(side, name, [...detail, `A copy of this message goes to ${PLATFORM_MAIL}.`], what !== "Email stopped");
   const html = [`<p><strong>PAR platform</strong></p>`, ...lines.filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`)].join("");
@@ -242,7 +241,7 @@ async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, 
     kind === "home"
       ? ["The title is back in your wallet.", `Sale page: ${page}`]
       : [
-          "A buyer now holds the title.",
+          "Someone bought this. A buyer now holds the title. Check the sale page.",
           `Sale page: ${page}`,
           days
             ? `The sheet sets ${days} ${days === 1 ? "day" : "days"} (GFD), a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
@@ -266,9 +265,10 @@ export async function saveSubscription(input: {
   wallet: string;
   side: HandoffSide;
   text: string;
-}): Promise<"sent" | "saved" | "same" | "stopped" | "bad"> {
+}): Promise<"sent" | "saved" | "same" | "stopped" | "bad" | "platform"> {
   const parsed = parseSubscribe(input.text);
   if (!parsed) return "bad";
+  if (parsed !== "stop" && parsed.email.toLowerCase() === PLATFORM_MAIL.toLowerCase()) return "platform";
   const prior = await readHandoffMail(input.cluster, input.wallet);
   const name = objectName(input.item.name);
   const page = saleUrl(input.item.title, input.cluster);
@@ -341,7 +341,7 @@ function cardLines(card: { name: string; address: string; email: string }, messa
     lines.push("Mailing address:");
     for (const line of card.address.split("\n")) if (line.trim()) lines.push(line.trim());
   }
-  lines.push(`Email: ${card.email}`);
+  if (card.email) lines.push(`Email: ${card.email}`);
   if (message) {
     lines.push("The buyer wrote:");
     lines.push(message);
@@ -354,9 +354,9 @@ async function mailBuyerContact(cluster: ClusterName, item: IndexedTitle, owner:
   if (!seller) return "wait";
   const reach = await readHandoffReach(cluster, item.title, owner);
   const card = reach ? readBuyerCard(reach.body) : null;
-  if (!card) return "wait";
+  if (!card && !message) return "wait";
   const result = await sendAbout(seller, "sale", objectName(item.name), "The buyer left contact", [
-    ...cardLines(card, message),
+    ...(card ? cardLines(card, message) : ["The buyer wrote on the sale page.", message]),
     `Sale page: ${saleUrl(item.title, cluster)}`,
   ], { cluster, title: item.title, kind: "buyer-contact" });
   return result;
@@ -369,15 +369,16 @@ export async function acceptBuyerLeave(input: {
   wallet: string;
   text: string;
   signature: string;
-}): Promise<"bad" | "soon" | "replay" | "same" | "saved"> {
+}): Promise<"bad" | "soon" | "replay" | "same" | "saved" | "platform"> {
   if (input.text.length > 2500) return "bad";
   const parsed = parseBuyerLeave(input.text);
   if (!parsed) return "bad";
   const name = oneLine(parsed.name, 80);
   const address = cleanReach(parsed.address).slice(0, 220);
   const message = cleanReach(parsed.message).slice(0, 500);
-  const cardText = buyerCardText({ name, address, email: parsed.email });
-  if (cardText.length > 500 || !readBuyerCard(cardText)) return "bad";
+  const cardText = buyerCardText({ name, address, email: "" });
+  if (cardText.length > 500) return "bad";
+  if (cardText && !readBuyerCard(cardText)) return "bad";
   const existing = message ? await readHandoffNoteBySignature(input.cluster, input.signature) : null;
   if (existing) return "replay";
   if (message) {
@@ -386,13 +387,15 @@ export async function acceptBuyerLeave(input: {
   }
   const current = await readHandoffReach(input.cluster, input.item.title, input.wallet);
   if (current && current.body !== cardText && Date.now() - Date.parse(current.updated_at) < NOTE_GAP_MS) return "soon";
+  if (parsed.subscribe && parsed.email.toLowerCase() === PLATFORM_MAIL.toLowerCase()) return "platform";
   const prior = await readHandoffMail(input.cluster, input.wallet);
   const sameMail = parsed.subscribe ? prior === parsed.email : !prior;
   if (current?.body === cardText && !message && sameMail) return "same";
   const hold = await readHandoffHold(input.cluster, input.item.title, input.wallet);
-  await writeHandoffReach(input.cluster, input.item.title, input.wallet, cardText);
+  if (cardText) await writeHandoffReach(input.cluster, input.item.title, input.wallet, cardText);
   if (parsed.subscribe) {
-    await saveSubscription({ cluster: input.cluster, item: input.item, wallet: input.wallet, side: "purchase", text: `subscribe\n${parsed.email}` });
+    const subscribed = await saveSubscription({ cluster: input.cluster, item: input.item, wallet: input.wallet, side: "purchase", text: `subscribe\n${parsed.email}` });
+    if (subscribed === "platform") return "platform";
   } else if (prior) {
     await saveSubscription({ cluster: input.cluster, item: input.item, wallet: input.wallet, side: "purchase", text: "stop" });
   }
@@ -466,19 +469,21 @@ async function introduceBuyer(cluster: ClusterName, item: IndexedTitle, owner: s
   const message = pending.map((note) => note.body).join("\n\n");
   const detail = card
     ? [...cardLines(card, message), `Sale page: ${saleUrl(item.title, cluster)}`]
-    : [
-        "The buyer subscribed to purchase email from the PAR platform.",
-        "You can write a note on the sale page. PAR sends it only to the buyer.",
-        `Sale page: ${saleUrl(item.title, cluster)}`,
-      ];
-  const result = await sendAbout(seller, "sale", objectName(item.name), card ? "The buyer left contact" : "The buyer can receive notes", detail, {
+    : message
+      ? ["The buyer wrote on the sale page:", message, `Check the sale page: ${saleUrl(item.title, cluster)}`]
+      : [
+          "The buyer subscribed to purchase email from the PAR platform.",
+          "You can write a note on the sale page. PAR sends it only to the buyer.",
+          `Sale page: ${saleUrl(item.title, cluster)}`,
+        ];
+  const result = await sendAbout(seller, "sale", objectName(item.name), card || message ? "The buyer left contact" : "The buyer can receive notes", detail, {
     cluster,
     title: item.title,
     kind: "intro",
   });
   if (result === "sent") {
     await markHandoffIntro(cluster, item.title, owner, "sent");
-    if (card) for (const note of pending) await markHandoffNote(note.id, "sent");
+    if (card || message) for (const note of pending) await markHandoffNote(note.id, "sent");
   }
   return result === "retry";
 }
