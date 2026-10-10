@@ -23,6 +23,22 @@ function fail(error: string, status: number) {
   return Response.json({ error }, { status });
 }
 
+/** The bytes at the record link, and only when they hash to the hash sealed on the record. */
+async function sheetSealedOnChain(record: { uri: string; attributes: Record<string, string> }): Promise<string | null> {
+  const expected = record.attributes["sheet sha256"] || "";
+  if (!expected || !record.uri.startsWith("https://")) return null;
+  try {
+    const response = await fetch(record.uri, { cache: "no-store" });
+    if (!response.ok) return null;
+    const text = await response.text();
+    if (!text || text.length > 110_000) return null;
+    const hash = await sha256Hex(new TextEncoder().encode(text));
+    return hash === expected ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     asset?: string;
@@ -43,15 +59,21 @@ export async function POST(request: Request) {
   const endpoint = rpcUrl(cluster);
   const record = await readRecord(endpoint, asset);
   if (!record.exists) return fail("That record is not on chain yet.", 404);
-  const hash = await sha256Hex(new TextEncoder().encode(sheet));
-  if (hash !== record.attributes["sheet sha256"]) return fail("That record sheet does not match the hash on the record.", 409);
+  let filed = sheet;
+  let hash = await sha256Hex(new TextEncoder().encode(filed));
+  if (hash !== record.attributes["sheet sha256"]) {
+    const sealed = await sheetSealedOnChain(record);
+    if (!sealed) return fail("That record sheet does not match the hash on the record.", 409);
+    filed = sealed;
+    hash = record.attributes["sheet sha256"];
+  }
   if (record.attributes["title held by"] === "escrow program" && cluster !== "devnet") {
     return fail("The escrow is not on this network.", 409);
   }
 
   const titleAddress = record.attributes.title || "";
   if (!hasIndex()) {
-    await writeCopy(cluster, asset, sheet);
+    await writeCopy(cluster, asset, filed);
     return Response.json({ saved: true });
   }
   if (!ADDRESS.test(titleAddress)) return fail("That record names no title.", 409);
@@ -59,7 +81,7 @@ export async function POST(request: Request) {
     return fail("The program vault does not hold this master locked.", 409);
   }
 
-  const parsed = JSON.parse(sheet) as Sheet;
+  const parsed = JSON.parse(filed) as Sheet;
   const facts = record.attributes;
   const title = await readTitle(endpoint, titleAddress);
   if (!title.exists) return fail("The title is not on chain yet.", 404);
@@ -130,7 +152,7 @@ export async function POST(request: Request) {
       image_sha256: facts["image sha256"] || "",
       sale_delay_days: delay,
       burn_percent: burn,
-      sheet,
+      sheet: filed,
     },
     signatures,
   );
