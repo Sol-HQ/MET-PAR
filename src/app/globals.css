@@ -102,6 +102,119 @@ button.solid {
   border-color: var(--orange-deep);
 }
 
+.fold-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.fold-head h2,
+.fold-head button.fold-open {
+  margin: 0;
+}
+
+.fold-head button.fold-open {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.claim-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 1.25rem;
+  row-gap: 0.75rem;
+}
+
+.claim-line > p {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+}
+
+.claim-line .fold.fold-end {
+  display: contents;
+}
+
+.claim-line button.fold-open.fold-end {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: center;
+  margin: 0;
+}
+
+.claim-line .fold-body {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+button.fold-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.85rem;
+  padding: 0.2rem 0.15rem;
+  border: 0;
+  background: transparent;
+  color: var(--orange);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fold-dots {
+  font-size: 1.45rem;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.fold-arrow {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fold-body {
+  margin-top: 0.2rem;
+}
+
+.fold.fold-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.fold.fold-end .fold-body {
+  align-self: stretch;
+  width: 100%;
+}
+
+button.fold-open.fold-end {
+  width: auto;
+  flex: 0 0 auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.fold-end-words {
+  background: var(--orange-soft);
+  color: var(--orange);
+  border-radius: var(--pill);
+  padding: 0.22rem 0.7rem;
+}
+
+.sale-page .specs summary {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+
 button.text {
   border: 0;
   padding: 0;
@@ -411,6 +524,23 @@ label.agree input {
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+}
+
+.sale-page dl.specs-body {
+  max-width: none;
+  align-items: start;
+  gap: 0.7rem 1.4rem;
+  padding: 0.8rem 0.95rem 0.85rem;
+}
+
+.sale-page dl.specs-body > div {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+}
+
+.sale-page dl.specs-body dd {
+  line-height: 1.35;
 }
 
 .specs-body h2 {

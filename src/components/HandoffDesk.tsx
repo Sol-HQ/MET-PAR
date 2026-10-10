@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { isAdminWallet } from "@/lib/admins";
 import type { ClusterName } from "@/lib/constants";
 import { handoffCloseMs, handoffEndsAt, handoffMessage, PLATFORM_MAIL, readBuyerCard, type BuyerCard, type HandoffPublic } from "@/lib/handoff-message";
+import { Fold } from "@/components/Fold";
 import { bytesToBase64 } from "@/lib/picture";
 
 type DeskNote = { from: "seller" | "buyer"; body: string; at: string; mail?: "pending" | "sent" | "wait" | "skip" };
@@ -310,26 +311,36 @@ export function HandoffDesk({
   return (
     <article className="card">
       <p className="eyebrow">Handoff</p>
-      <h2>How to be reached</h2>
-      <p>{shown ? clockLine(shown) : "Reading the title."}</p>
-      {shown ? <HandoffClock view={shown} /> : null}
       {mailOnly ? (
-        <p className="note">Confirm sale email from the PAR platform while the title is still yours. The sale page counts the handoff days after a buyer holds the title.</p>
-      ) : (
         <>
-          <p>
-            {shown?.place === "held"
-              ? "The purchase is complete. The buyer stays signed in with the wallet that holds the title, or signs in again with that wallet, and leaves a name, a mailing address, and an email."
-              : "Once the purchase is complete, the buyer stays signed in with the wallet that holds the title, or signs in again with that wallet, and leaves a name, a mailing address, and an email."}
-          </p>
-          <ol className="handoff-road">
-            <li>Before a list, the seller can subscribe with a private email, and can leave a contact line. That line can be an email or a phone number. Until a buyer holds the title, only the seller and an admin see it. The subscription address stays private.</li>
-            <li>When a buyer holds the title, PAR emails the seller to check this sale page. The buyer signs in with that wallet and sees the seller's contact line, and every message sent or waiting, with the time.</li>
-            <li>The buyer enters a private email and presses Send. A message is optional. Send is what tells the seller. The two addresses do not have to be shared. PAR carries the message.</li>
-            <li>Later messages work the same way. Each person writes and presses Send. The handoff card keeps each one with the time, and says whether it was emailed.</li>
-            <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not.</li>
-          </ol>
+          <h2>How to be reached</h2>
+          <p>{shown ? clockLine(shown) : "Reading the title."}</p>
+          {shown ? <HandoffClock view={shown} /> : null}
+          <p className="note">Confirm sale email from the PAR platform while the title is still yours. The sale page counts the handoff days after a buyer holds the title.</p>
         </>
+      ) : (
+        <Fold
+          label="How to be reached"
+          tail={
+            <>
+              <p>{shown ? clockLine(shown) : "Reading the title."}</p>
+              {shown ? <HandoffClock view={shown} /> : null}
+              <p>
+                {shown?.place === "held"
+                  ? "The purchase is complete. The buyer stays signed in with the wallet that holds the title, or signs in again with that wallet, and leaves a name, a mailing address, and an email."
+                  : "Once the purchase is complete, the buyer stays signed in with the wallet that holds the title, or signs in again with that wallet, and leaves a name, a mailing address, and an email."}
+              </p>
+            </>
+          }
+        >
+            <ol className="handoff-road">
+              <li>Before a list, the seller can subscribe with a private email, and can leave a contact line. That line can be an email or a phone number. Until a buyer holds the title, only the seller and an admin see it. The subscription address stays private.</li>
+              <li>When a buyer holds the title, PAR emails the seller to check this sale page. The buyer signs in with that wallet and sees the seller's contact line, and every message sent or waiting, with the time.</li>
+              <li>The buyer enters a private email and presses Send. A message is optional. Send is what tells the seller. The two addresses do not have to be shared. PAR carries the message.</li>
+              <li>Later messages work the same way. Each person writes and presses Send. The handoff card keeps each one with the time, and says whether it was emailed.</li>
+              <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not.</li>
+            </ol>
+        </Fold>
       )}
       {buyerOpen ? (
         <>

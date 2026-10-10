@@ -6,6 +6,7 @@ import { ObjectPicture } from "@/components/AssetOnPool";
 import { objectPictureUrl } from "@/lib/sheet-html";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
+import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
@@ -287,7 +288,7 @@ export default async function SalePage({
     handoffText ? ["Handoff", handoffText] : null,
     sheet.record?.redemption?.ifClaimGoesWrong ? ["If a claim goes wrong", sheet.record.redemption.ifClaimGoesWrong] : null,
     sheet.record?.redemption?.declaredValue
-      ? ["Declared value", `${sheet.record.redemption.declaredValue} ${sheet.record.redemption.declaredUnit || ""}`.trim()]
+      ? ["Declared value", `$${sheet.record.redemption.declaredValue.trim().replace(/^\$/, "")}`]
       : null,
     pitch ? ["Pitch", pitch] : null,
   ].filter((row): row is [string, string] => Boolean(row));
@@ -394,22 +395,28 @@ export default async function SalePage({
               <ObjectPicture src={picture} alt={namedObject || "The RWA"} wide />
             </>
           ) : null}
-          <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
-          {handoffDays ? (
-            <>
-              <p>{goodFaithDelivery(handoffDays)}</p>
-              <p>{SHIP_ADVICE}</p>
-            </>
-          ) : null}
+          <div className="claim-line">
+            <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
+            {handoffDays ? (
+              <Fold end lead="Read the claim facts">
+                <p>{goodFaithDelivery(handoffDays)}</p>
+                <p>{SHIP_ADVICE}</p>
+              </Fold>
+            ) : null}
+          </div>
           <p>For the unique information on this RWA, read the meta sheet.</p>
           {sheetRows.length > 0 ? (
-            <details className="specs">
+            <details className="specs" open>
               <summary>Meta sheet …</summary>
               <dl className="specs-body">
-                {sheetRows.map(([label, value]) => (
-                  <div key={label}>
-                    <dt>{label}</dt>
-                    <dd>{value}</dd>
+                {[sheetRows.filter((_, index) => index % 2 === 0), sheetRows.filter((_, index) => index % 2 === 1)].map((column, side) => (
+                  <div key={side}>
+                    {column.map(([label, value]) => (
+                      <div key={label}>
+                        <dt>{label}</dt>
+                        <dd>{value}</dd>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </dl>
@@ -576,7 +583,7 @@ export default async function SalePage({
         </>
       ) : null}
       <HandoffDesk cluster={cluster} title={address} />
-      <h2>On chain</h2>
+      <Fold label="On chain">
       <p className="note">
         The record was minted {recordMint?.at ? day(recordMint.at) : "at a time the chain did not return"}
         {recordMint ? (
@@ -660,6 +667,7 @@ export default async function SalePage({
         ) : null}
         . PAR is software. It does not hold, insure, or guarantee the item.
       </p>
+      </Fold>
     </section>
   );
 }
