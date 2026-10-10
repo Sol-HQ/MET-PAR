@@ -2,23 +2,41 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { isAdminWallet } from "@/lib/admins";
 import type { ClusterName } from "@/lib/constants";
-import { handoffCloseMs, handoffEndsAt, handoffMessage, readBuyerCard, type HandoffPublic } from "@/lib/handoff-message";
+import { handoffCloseMs, handoffEndsAt, handoffMessage, readBuyerCard, type BuyerCard, type HandoffPublic } from "@/lib/handoff-message";
 import { bytesToBase64 } from "@/lib/picture";
 
 type DeskNote = { from: "seller" | "buyer"; body: string; at: string };
+type Proof = { body: string; at: string };
 
 type Signed = HandoffPublic & {
-  role: "creator" | "holder";
+  role: "creator" | "holder" | "admin";
   email: string | null;
+  sellerMail: string | null;
+  buyerMail: string | null;
   mine: string;
   mineAt: string | null;
   theirs: string;
   theirsAt: string | null;
+  proofs: { buyer: Proof | null; seller: Proof | null };
   otherSubscribed: boolean;
   notes: DeskNote[];
   notice: "sent" | "saved" | "same" | "stopped" | "wait" | null;
 };
+
+function ContactProof({ card, at, who }: { card: BuyerCard; at: string; who: string }) {
+  return (
+    <div>
+      <p>
+        {who} left contact{at ? ` ${when(at)}` : ""}
+      </p>
+      {card.name ? <p>Name: {card.name}</p> : null}
+      {card.address ? <p className="handoff-address">Mailing address: {card.address}</p> : null}
+      <p>Email: {card.email}</p>
+    </div>
+  );
+}
 
 function clockLine(view: HandoffPublic): string {
   if (!view.indexed) return "This title is not in the PAR index, so this box stays closed.";
@@ -251,8 +269,11 @@ export function HandoffDesk({
 
   const shown = signed ?? view;
   const sale = signed?.role === "creator";
-  const buyerOpen = Boolean(shown && shown.place === "held" && !mailOnly && (!signed || signed.role === "holder"));
-  const buyerCard = signed?.theirs ? readBuyerCard(signed.theirs) : null;
+  const party = signed?.role === "creator" || signed?.role === "holder";
+  const buyerOpen = Boolean(signed?.role === "holder" && signed.place === "held" && !mailOnly);
+  const buyerProof = signed?.proofs.buyer ? readBuyerCard(signed.proofs.buyer.body) : null;
+  const sellerProof = signed?.proofs.seller?.body ?? "";
+  const admin = isAdminWallet(wallet);
   return (
     <article className="card">
       <p className="eyebrow">Handoff</p>
@@ -272,7 +293,7 @@ export function HandoffDesk({
             <li>The seller connects the creator wallet, checks the box, and subscribes to sale email from the PAR platform. This can happen while the title is in that wallet, listed, or in escrow.</li>
             <li>When a buyer holds the title, PAR emails the seller once. The clock starts then and counts down the days on the sheet.</li>
             <li>The buyer leaves a name, a mailing address, and an email here, as soon as that wallet holds the title or a few minutes later, then waits to hear from the seller.</li>
-            <li>Each person can write a note on this page. PAR emails that note only to the other person.</li>
+            <li>Each person can write a note on this page. PAR emails that note only to the other person. The name, mailing address, email, and notes stay with the two wallets, the PAR platform, and an admin.</li>
             <li>When the handoff days run close, PAR emails the seller once, to remind them of the handoff and the promise on the sheet.</li>
           </ol>
         </>
@@ -292,7 +313,7 @@ export function HandoffDesk({
           <label>
             Email
             <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-            <span className="note">The seller sees this email with your name and mailing address. You can leave the email on its own and wait for the seller to write first.</span>
+            <span className="note">The seller sees this email after signing in with the creator wallet. You can leave the email on its own and wait for the seller to write first. It stays off the public page.</span>
           </label>
           <label className="agree">
             <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
@@ -310,7 +331,17 @@ export function HandoffDesk({
       ) : null}
       {!signed ? (
         <button type="button" className="solid" disabled={busy || !wallet} onClick={() => void open()}>
-          {busy ? "Waiting for the wallet…" : wallet ? (shown?.place === "held" ? "Sign in with the wallet that holds the title" : "Sign in to this handoff") : shown?.place === "held" ? "Connect the wallet that holds the title" : "Connect the creator wallet or the holder wallet"}
+          {busy
+            ? "Waiting for the wallet…"
+            : wallet
+              ? admin
+                ? "Sign in as admin to read this handoff"
+                : shown?.place === "held"
+                  ? "Sign in with the wallet that holds the title"
+                  : "Sign in to this handoff"
+              : shown?.place === "held"
+                ? "Connect the wallet that holds the title"
+                : "Connect the creator wallet or the holder wallet"}
         </button>
       ) : (
         <>
@@ -337,33 +368,38 @@ export function HandoffDesk({
                   <label>
                     How the buyer can reach you
                     <textarea value={line} onChange={(event) => setLine(event.target.value)} rows={4} maxLength={500} />
-                    <span className="note">An email, a ship-to, or a place to meet. This line shows on the page after a buyer holds the title. Leave it blank and save to clear it.</span>
+                    <span className="note">An email, a ship-to, or a place to meet. The buyer sees this after signing in with the wallet that holds the title. Leave it blank and save to clear it.</span>
                   </label>
                   <button type="button" disabled={busy} onClick={() => void saveLine()}>
                     {busy ? "Saving…" : "Save the handoff line"}
                   </button>
                 </>
               ) : null}
-              {buyerCard ? (
-                <div>
-                  <p>
-                    {sale ? "The buyer left" : "The seller wrote"}
-                    {signed.theirsAt ? ` ${when(signed.theirsAt)}` : ""}
-                  </p>
-                  {buyerCard.name ? <p>Name: {buyerCard.name}</p> : null}
-                  {buyerCard.address ? <p className="handoff-address">Mailing address: {buyerCard.address}</p> : null}
-                  <p>Email: {buyerCard.email}</p>
-                </div>
-              ) : signed.theirs ? (
+              <h3>Between the two wallets</h3>
+              <p className="note">Only the seller wallet, the buyer wallet, the PAR platform, and an admin can see these.</p>
+              {buyerProof && signed.proofs.buyer ? (
+                <ContactProof card={buyerProof} at={signed.proofs.buyer.at} who="The buyer" />
+              ) : signed.proofs.buyer ? (
                 <p>
-                  {sale ? "The buyer wrote" : "The seller wrote"}
-                  {signed.theirsAt ? ` ${when(signed.theirsAt)}` : ""}: {signed.theirs}
+                  The buyer wrote{signed.proofs.buyer.at ? ` ${when(signed.proofs.buyer.at)}` : ""}: {signed.proofs.buyer.body}
                 </p>
               ) : signed.place === "held" ? (
-                <p className="note">{sale ? "The buyer has not left contact yet." : "The seller has not left a line yet."}</p>
+                <p className="note">The buyer has not left contact yet.</p>
               ) : (
-                <p className="note">The other line shows after a buyer holds the title.</p>
+                <p className="note">The buyer's contact shows here after that wallet holds the title.</p>
               )}
+              {sellerProof ? (
+                <p>
+                  The seller wrote{signed.proofs.seller?.at ? ` ${when(signed.proofs.seller.at)}` : ""}: {sellerProof}
+                </p>
+              ) : (
+                <p className="note">The seller has not left a line yet.</p>
+              )}
+              {signed.role === "admin" ? (
+                <p className="note">
+                  Sale email on file: {signed.sellerMail || "none"}. Purchase email on file: {signed.buyerMail || "none"}.
+                </p>
+              ) : null}
               {signed.place === "held" ? (
                 <>
                   {signed.notes.length ? (
@@ -381,15 +417,19 @@ export function HandoffDesk({
                   ) : (
                     <p className="note">No notes yet.</p>
                   )}
-                  <label>
-                    {sale ? "Note to the buyer" : "Note to the seller"}
-                    <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} maxLength={500} />
-                    <span className="note">PAR emails this note from the PAR platform. It stays off the NFT.</span>
-                  </label>
-                  <button type="button" disabled={busy || !message.trim()} onClick={() => void sendNote()}>
-                    {busy ? "Sending…" : "Send the note"}
-                  </button>
-                  {signed.otherSubscribed ? null : <p className="note">PAR keeps the note until the other person subscribes, then sends it.</p>}
+                  {party ? (
+                    <>
+                      <label>
+                        {sale ? "Note to the buyer" : "Note to the seller"}
+                        <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} maxLength={500} />
+                        <span className="note">PAR emails this note from the PAR platform. The other wallet sees it here after signing in. It stays off the NFT and off the public page.</span>
+                      </label>
+                      <button type="button" disabled={busy || !message.trim()} onClick={() => void sendNote()}>
+                        {busy ? "Sending…" : "Send the note"}
+                      </button>
+                      {signed.otherSubscribed ? null : <p className="note">PAR keeps the note until the other person subscribes, then sends it.</p>}
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </>

@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import { isAdminWallet } from "@/lib/admins";
 import { serverRpcUrl, type ClusterName } from "@/lib/constants";
 import { handoffMessage, type HandoffPublic } from "@/lib/handoff-message";
 import { acceptBuyerLeave, acceptNote, cleanReach, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
@@ -66,8 +67,11 @@ export async function POST(request: Request) {
   const place = !owner ? "none" : owner === tensor ? "listed" : escrow && owner === escrow ? "escrow" : owner === item.creator ? "wallet" : "held";
   const creator = wallet === item.creator;
   const holder = place === "held" && wallet === owner;
+  const adminRead = !creator && !holder && isAdminWallet(wallet);
   if (kind === "buyer") {
     if (!holder) return fail("Sign in with the wallet that holds the title.", 403);
+  } else if (adminRead) {
+    if (kind !== "read") return fail("An admin can read this handoff. The seller and the buyer send the notes.", 403);
   } else if (!creator && !holder) return fail("This wallet is not the creator or the holder.", 403);
 
   let notice: "sent" | "saved" | "same" | "stopped" | "wait" | null = null;
@@ -108,21 +112,30 @@ export async function POST(request: Request) {
     heldAt: null,
     daysLeft: null,
   };
-  const mine = await readHandoffReach(cluster, title, wallet);
-  const otherWallet = creator ? (view.place === "held" ? owner : "") : item.creator;
+  const holderWallet = view.place === "held" ? owner : "";
+  const mine = creator || holder ? await readHandoffReach(cluster, title, wallet) : null;
+  const otherWallet = creator ? holderWallet : item.creator;
   const theirs = view.place === "held" && otherWallet ? await readHandoffReach(cluster, title, otherWallet) : null;
-  const otherSubscribed = Boolean(otherWallet && (await readHandoffMail(cluster, otherWallet)));
+  const buyerReach = holderWallet ? await readHandoffReach(cluster, title, holderWallet) : null;
+  const sellerReach = await readHandoffReach(cluster, title, item.creator);
+  const otherSubscribed = Boolean(!adminRead && otherWallet && (await readHandoffMail(cluster, otherWallet)));
   const thread =
     view.place === "held" ? await readHandoffThread(cluster, title, [item.creator, owner].filter((row) => row.length > 0)) : [];
   return Response.json(
     {
       ...view,
-      role: creator ? "creator" : "holder",
-      email: await readHandoffMail(cluster, wallet),
+      role: adminRead ? "admin" : creator ? "creator" : "holder",
+      email: adminRead ? null : await readHandoffMail(cluster, wallet),
+      sellerMail: adminRead ? await readHandoffMail(cluster, item.creator) : null,
+      buyerMail: adminRead && holderWallet ? await readHandoffMail(cluster, holderWallet) : null,
       mine: mine?.body ?? "",
       mineAt: mine?.updated_at ?? null,
       theirs: theirs?.body ?? "",
       theirsAt: theirs?.updated_at ?? null,
+      proofs: {
+        buyer: buyerReach ? { body: buyerReach.body, at: buyerReach.updated_at } : null,
+        seller: sellerReach ? { body: sellerReach.body, at: sellerReach.updated_at } : null,
+      },
       otherSubscribed,
       notes: thread.reverse().map((row) => ({
         from: row.wallet === item.creator ? "seller" : "buyer",
