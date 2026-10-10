@@ -35,6 +35,7 @@ import {
   markHandoffNudge,
   readAnyOtherHold,
   readHandoffHold,
+  insertHandoffLetter,
   readHandoffMail,
   readHandoffNoteBySignature,
   readHandoffReach,
@@ -48,7 +49,7 @@ import {
   writeHandoffMail,
   writeHeliusHook,
 } from "./store";
-import { ESCROW_PROGRAM, listingAddress, readTitle, saleUrl, tensorListAddress } from "./title";
+import { ESCROW_PROGRAM, listingAddress, readTitle, saleUrl, SHIP_ADVICE, tensorListAddress } from "./title";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const HOOK_REFRESH_MS = 10 * 60 * 1000;
@@ -150,46 +151,82 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** The From line, once the mail service is connected. Null until then, so the page does not invent an address. */
-export function mailIdentity(): string | null {
-  const raw = process.env.HANDOFF_FROM;
-  if (!process.env.RESEND_API_KEY || !raw) return null;
-  return parFrom(raw);
+function platformFromRaw(): string {
+  return process.env.HANDOFF_FROM?.trim() || `PAR platform <${PLATFORM_MAIL}>`;
 }
 
+/** The locked From line. The platform inbox is metpar02@gmail.com. */
+export function mailIdentity(): string | null {
+  return parFrom(platformFromRaw());
+}
+
+/** True only when this site can hand a letter to the mail service. */
+export function mailReady(): boolean {
+  return Boolean(process.env.RESEND_API_KEY && mailIdentity());
+}
+
+type LetterLog = { cluster: ClusterName; title: string; kind: string };
+
 /** Sale mail goes to the seller. Purchase mail goes to the buyer. The platform inbox is copied on both. */
-async function sendAbout(email: string, side: HandoffSide, name: string, what: string, detail: string[]): Promise<"sent" | "idle" | "retry"> {
+async function sendAbout(
+  email: string,
+  side: HandoffSide,
+  name: string,
+  what: string,
+  detail: string[],
+  log: LetterLog,
+): Promise<"sent" | "idle" | "retry"> {
   const key = process.env.RESEND_API_KEY;
-  const fromRaw = process.env.HANDOFF_FROM;
-  if (!key || !fromRaw) return "idle";
+  const fromRaw = platformFromRaw();
   const from = parFrom(fromRaw);
   const reply = parAddress(fromRaw);
   const subject = parSubject(side, name, what);
-  if (!from || !reply || !subject.startsWith("PAR platform · ")) return "idle";
-  const lines = parLetter(side, name, [...detail, "A copy of this message goes to the PAR platform."], what !== "Email stopped");
+  const lines = parLetter(side, name, [...detail, `A copy of this message goes to ${PLATFORM_MAIL}.`], what !== "Email stopped");
   const html = [`<p><strong>PAR platform</strong></p>`, ...lines.filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`)].join("");
   const copy = PLATFORM_MAIL.toLowerCase() === email.toLowerCase() ? undefined : [PLATFORM_MAIL];
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        from,
-        to: [email],
-        cc: copy,
-        reply_to: reply,
-        subject,
-        text: lines.join("\n"),
-        html,
-        headers: { "X-PAR-Platform": "PAR platform", "X-PAR-About": side },
-      }),
-    });
-    if (response.ok) return "sent";
-    if (response.status >= 500) return "retry";
-    return "idle";
-  } catch {
-    return "retry";
+  let status: "sent" | "idle" | "retry" = "idle";
+  let note = "";
+  if (!key) note = "The mail key is not on this site.";
+  else if (!from || !reply || !subject.startsWith("PAR platform · ")) note = "The From address is not valid.";
+  else {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          from,
+          to: [email],
+          cc: copy,
+          reply_to: reply,
+          subject,
+          text: lines.join("\n"),
+          html,
+          headers: { "X-PAR-Platform": "PAR platform", "X-PAR-About": side },
+        }),
+      });
+      if (response.ok) status = "sent";
+      else if (response.status >= 500) {
+        status = "retry";
+        note = "The mail service did not accept it.";
+      } else {
+        note = "The mail service refused the From address.";
+      }
+    } catch {
+      status = "retry";
+      note = "The mail service did not answer.";
+    }
   }
+  await insertHandoffLetter({
+    cluster: log.cluster,
+    title: log.title,
+    kind: log.kind,
+    side,
+    subject: subject.slice(0, 200),
+    body: lines.join("\n").slice(0, 4000),
+    status,
+    note: note.slice(0, 200),
+  }).catch(() => undefined);
+  return status;
 }
 
 async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, kind: "held" | "home"): Promise<"sent" | "idle" | "retry"> {
@@ -210,10 +247,15 @@ async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, 
           days
             ? `The sheet sets ${days} ${days === 1 ? "day" : "days"} (GFD), a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
             : "The sheet names the handoff. The clock on the sale page follows it.",
-          "You still owe the holder the object.",
+          "Once the object is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+          SHIP_ADVICE,
           "Write on the sale page when you are ready. PAR sends each note only to the buyer.",
         ];
-  const result = await sendAbout(email, "sale", name, kind === "home" ? "The title is back in your wallet" : "A buyer holds the title", detail);
+  const result = await sendAbout(email, "sale", name, kind === "home" ? "The title is back in your wallet" : "A buyer holds the title", detail, {
+    cluster,
+    title: item.title,
+    kind,
+  });
   if (result === "sent") await markHandoffMail(cluster, item.title, owner, "sent");
   return result;
 }
@@ -237,7 +279,7 @@ export async function saveSubscription(input: {
         "You cleared this subscription.",
         `PAR will not send more messages about this ${input.side === "sale" ? "sale" : "purchase"} to this address.`,
         `Sale page: ${page}`,
-      ]);
+      ], { cluster: input.cluster, title: input.item.title, kind: "stopped" });
     }
     return "stopped";
   }
@@ -255,7 +297,11 @@ export async function saveSubscription(input: {
           "Notes the seller writes on the sale page come to this address.",
           `Sale page: ${page}`,
         ];
-  const result = await sendAbout(parsed.email, input.side, name, "You are subscribed", detail);
+  const result = await sendAbout(parsed.email, input.side, name, "You are subscribed", detail, {
+    cluster: input.cluster,
+    title: input.item.title,
+    kind: "subscribed",
+  });
   return result === "sent" ? "sent" : "saved";
 }
 
@@ -312,7 +358,7 @@ async function mailBuyerContact(cluster: ClusterName, item: IndexedTitle, owner:
   const result = await sendAbout(seller, "sale", objectName(item.name), "The buyer left contact", [
     ...cardLines(card, message),
     `Sale page: ${saleUrl(item.title, cluster)}`,
-  ]);
+  ], { cluster, title: item.title, kind: "buyer-contact" });
   return result;
 }
 
@@ -399,10 +445,11 @@ async function remindSeller(cluster: ClusterName, item: IndexedTitle, owner: str
     days
       ? `Your ${days} ${days === 1 ? "day" : "days"} (GFD) are the best effort to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
       : "The date on the sheet is the best effort to put the object in the mail, with a shipper, or in the holder's hands.",
-    "You still owe the holder the object.",
+    "Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+    SHIP_ADVICE,
     `Sale page: ${saleUrl(item.title, cluster)}`,
     "Open that page, read the buyer's note, and answer on the page.",
-  ]);
+  ], { cluster, title: item.title, kind: "reminder" });
   if (result === "sent") await markHandoffNudge(cluster, item.title, owner, "sent");
   return result === "retry";
 }
@@ -424,7 +471,11 @@ async function introduceBuyer(cluster: ClusterName, item: IndexedTitle, owner: s
         "You can write a note on the sale page. PAR sends it only to the buyer.",
         `Sale page: ${saleUrl(item.title, cluster)}`,
       ];
-  const result = await sendAbout(seller, "sale", objectName(item.name), card ? "The buyer left contact" : "The buyer can receive notes", detail);
+  const result = await sendAbout(seller, "sale", objectName(item.name), card ? "The buyer left contact" : "The buyer can receive notes", detail, {
+    cluster,
+    title: item.title,
+    kind: "intro",
+  });
   if (result === "sent") {
     await markHandoffIntro(cluster, item.title, owner, "sent");
     if (card) for (const note of pending) await markHandoffNote(note.id, "sent");
@@ -452,8 +503,15 @@ async function deliverNotes(cluster: ClusterName, item: IndexedTitle, owner: str
       objectName(item.name),
       fromSeller ? "A note from the seller" : "A note from the buyer",
       fromSeller
-        ? ["The seller wrote this on the sale page:", note.body, "Answer on the sale page. PAR sends your answer only to the seller.", `Sale page: ${saleUrl(item.title, cluster)}`]
+        ? [
+            "The seller wrote this on the sale page:",
+            note.body,
+            "Once the object is in the mail and in transit, the seller is not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+            "Answer on the sale page. PAR sends your answer only to the seller.",
+            `Sale page: ${saleUrl(item.title, cluster)}`,
+          ]
         : ["The buyer wrote this on the sale page:", note.body, "Answer on the sale page. PAR sends your answer only to the buyer.", `Sale page: ${saleUrl(item.title, cluster)}`],
+      { cluster, title: item.title, kind: "note" },
     );
     if (result === "sent") await markHandoffNote(note.id, "sent");
     else if (result === "retry") retry = true;

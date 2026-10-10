@@ -14,7 +14,7 @@ import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
-import { creatorSalePercent, ESCROW_PROGRAM, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 const TOKEN_DECIMALS = 6;
 
@@ -39,7 +39,7 @@ type Sheet = {
     pitch?: string;
     object?: { story?: string; name?: string; kind?: string; existsNow?: boolean; holder?: string; where?: string };
     claim?: { text?: string };
-    redemption?: { handoff?: string; ifClaimGoesWrong?: string; declaredValue?: string; declaredUnit?: string };
+    redemption?: { handoff?: string; handoffDays?: string | number; ifClaimGoesWrong?: string; declaredValue?: string; declaredUnit?: string };
     title?: { promises?: string[] };
     token?: { name?: string; symbol?: string; supply?: string };
     image?: { arweave?: string };
@@ -255,6 +255,7 @@ export default async function SalePage({
   const pitch = (sheet.record?.pitch || "").trim();
   const claimText = (sheet.record?.claim?.text || sheet.claim || "").trim();
   const handoffText = (sheet.record?.redemption?.handoff || sheet.handoff || "").trim();
+  const handoffDays = sheet.record?.redemption?.handoffDays;
   const existsNow = sheet.record?.object?.existsNow;
   const objectHolder = (sheet.record?.object?.holder || "").trim();
   const where = (sheet.record?.object?.where || "").trim();
@@ -330,6 +331,12 @@ export default async function SalePage({
           <p>{rwaBasics}</p>
           <ObjectPicture src={picture} alt={namedObject || "The RWA"} wide />
           <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
+          {handoffDays ? (
+            <>
+              <p>{goodFaithDelivery(handoffDays)}</p>
+              <p>{SHIP_ADVICE}</p>
+            </>
+          ) : null}
           <p>For the unique information on this RWA, read the meta sheet.</p>
           {sheetRows.length > 0 ? (
             <details className="specs">

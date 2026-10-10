@@ -200,6 +200,9 @@ export function SaleTrade({
         </label>
       ) : null}
       <div className="asset-nav">
+        {noCoin && holdsTitle && isCreator && open ? (
+          <p className="note">No coin is attached. You can list this title, and you can delist it. Delist returns the title to your wallet. You can list it again.</p>
+        ) : null}
         {holdsTitle && isCreator && open ? (
           <button type="button" className="solid" disabled={busy} onClick={list}>
             {busy ? "Listing…" : "List on this page"}
@@ -212,10 +215,14 @@ export function SaleTrade({
         ) : null}
         {listing && isCreator && listing.seller === creator ? (
           <button type="button" disabled={busy} onClick={delist}>
-            {busy ? "Working…" : "Take the listing down"}
+            {busy ? "Working…" : noCoin ? "Delist" : "Take the listing down"}
           </button>
         ) : null}
       </div>
+      {noCoin && listing && isCreator ? (
+        <p className="note">No coin is attached. Delist returns this title to your wallet. You can list it again.</p>
+      ) : null}
+      {noCoin && listing && !wallet ? <p className="note">Connect the creator wallet to delist. The title returns to that wallet.</p> : null}
       {!wallet && listing && !open ? <p className="note">Connect the creator wallet to take this listing down.</p> : null}
       {!wallet && !listing && holdsTitle ? <p className="note">Connect the creator wallet to list it.</p> : null}
       {!wallet && canBuy ? <p className="note">Connect a wallet to buy it.</p> : null}

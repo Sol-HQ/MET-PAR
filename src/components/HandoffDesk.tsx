@@ -8,6 +8,15 @@ import { handoffCloseMs, handoffEndsAt, handoffMessage, PLATFORM_MAIL, readBuyer
 import { bytesToBase64 } from "@/lib/picture";
 
 type DeskNote = { from: "seller" | "buyer"; body: string; at: string; mail?: "pending" | "sent" | "wait" | "skip" };
+type Letter = {
+  kind: string;
+  side: "sale" | "purchase";
+  subject: string;
+  body: string;
+  status: "sent" | "idle" | "retry";
+  note: string;
+  at: string;
+};
 type Proof = { body: string; at: string };
 
 type Signed = HandoffPublic & {
@@ -23,8 +32,17 @@ type Signed = HandoffPublic & {
   otherSubscribed: boolean;
   notes: DeskNote[];
   mailFrom: string | null;
+  mailReady: boolean;
+  mailAt: string | null;
+  letters: Letter[];
   notice: "sent" | "saved" | "same" | "stopped" | "wait" | null;
 };
+
+function letterState(status: Letter["status"]): string {
+  if (status === "sent") return "Sent";
+  if (status === "retry") return "Not sent yet";
+  return "Not sent";
+}
 
 function ContactProof({ card, at, who }: { card: BuyerCard; at: string; who: string }) {
   return (
@@ -86,7 +104,7 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
         <p className="handoff-clock">{view.handoffDays ? `${unit(view.handoffDays, "day", "days")} (GFD)` : "Handoff"}</p>
         <p className="note">
           {view.handoffDays
-            ? "Good faith delivery. By this day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. The clock starts when a buyer holds the title. The seller still owes the holder the object."
+            ? "Good faith delivery. By this day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not. The clock starts when a buyer holds the title."
             : "The sheet names the handoff. The clock starts when a buyer holds the title."}
         </p>
       </>
@@ -101,10 +119,10 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
       </p>
       <p className="note">
         {left <= 0
-          ? "The good faith date has passed. Time with the carrier or customs does not count. The seller still owes the holder the object."
+          ? "The good faith date has passed. Once the object is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not."
           : close
-            ? "The good faith date is close. By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. The seller still owes the holder the object."
-            : `${unit(view.handoffDays, "day", "days")} (GFD). By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`}
+            ? "The good faith date is close. By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Once it is in transit, the seller is not liable for a mistake in the mail."
+            : `${unit(view.handoffDays, "day", "days")} (GFD). By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in transit, the seller is not liable for a mistake in the mail.`}
       </p>
     </>
   );
@@ -206,7 +224,7 @@ export function HandoffDesk({
       if (body.notice === "sent") setNote(`PAR sent a confirmation as ${body.mailFrom || "the PAR platform"}. A copy goes to the platform inbox.`);
       else if (body.notice === "same") setNote("That address is already on file.");
       else if (body.notice === "stopped") setNote("Those PAR emails will stop.");
-      else setNote("The address is on file. No email was sent. This site has no mail service connected yet, so there is no From address.");
+      else setNote(`The address is on file. ${body.mailReady ? "The confirmation was not accepted by the mail service." : "The mail key is not on this site yet, so the letter is recorded and not delivered."}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The email did not save.");
     } finally {
@@ -295,7 +313,7 @@ export function HandoffDesk({
             <li>When a buyer holds the title, PAR emails the seller once. The clock starts then and counts the good faith delivery days (GFD).</li>
             <li>The buyer leaves a name, a mailing address, and an email here, as soon as that wallet holds the title or a few minutes later, then waits to hear from the seller.</li>
             <li>Each person can write a note on this page. PAR emails that note to the other person and copies the PAR platform. The buyer does not see the seller's subscription address. The name, mailing address, email, and notes stay with the two wallets, the PAR platform, and an admin. This page says whether each note was emailed.</li>
-            <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object to a shipper or into the holder's hands. The seller still owes the holder the object.</li>
+            <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not.</li>
           </ol>
         </>
       )}
@@ -346,6 +364,72 @@ export function HandoffDesk({
         </button>
       ) : (
         <>
+          {(sale && signed.email) || signed.role === "admin" ? (
+            <div className="record-promises">
+              <p className="eyebrow">Handoff card</p>
+              <p>
+                Platform mail is {PLATFORM_MAIL}. Messages are sent and received there. The buyer does not see your subscription address. The buyer sees this card after that wallet holds the title.
+              </p>
+              <p>
+                On file: {signed.role === "admin" ? signed.sellerMail || "no seller address yet" : signed.email}
+                {signed.role !== "admin" && signed.mailAt ? ` since ${when(signed.mailAt)}` : ""}.{" "}
+                {(signed.role === "admin" ? signed.sellerMail : signed.email)?.toLowerCase() === PLATFORM_MAIL
+                  ? "This inbox is also the platform inbox, so each message arrives once."
+                  : `A copy of each message also goes to ${PLATFORM_MAIL}.`}
+              </p>
+              <p>
+                Messages leave as {signed.mailFrom || `PAR platform <${PLATFORM_MAIL}>`}.{" "}
+                {signed.mailReady
+                  ? "Mail is connected."
+                  : "The mail key is not on this site yet, so a letter is recorded here and is not delivered."}
+              </p>
+              {sellerProof ? (
+                <p>Saved handoff line{signed.proofs.seller?.at ? ` ${when(signed.proofs.seller.at)}` : ""}: {sellerProof}</p>
+              ) : (
+                <p>No handoff line is saved yet.</p>
+              )}
+              <h3>Letters</h3>
+              {signed.letters?.length ? (
+                <ul className="handoff-notes">
+                  {signed.letters.map((item, index) => (
+                    <li key={`${item.at}-${index}`}>
+                      <span className="note">
+                        {when(item.at)} · {item.side === "sale" ? "To the seller" : "To the buyer"} · {letterState(item.status)}
+                      </span>
+                      <p>{item.subject}</p>
+                      {item.note ? <p className="note">{item.note}</p> : null}
+                      {item.body ? <p>{item.body}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="note">No letter has been written yet. The address on file stays. A letter is written the next time PAR sends.</p>
+              )}
+            </div>
+          ) : null}
+          {signed.role === "holder" && signed.place === "held" ? (
+            <div className="record-promises">
+              <p className="eyebrow">Handoff card</p>
+              <p>Platform mail is {PLATFORM_MAIL}. Purchase messages are sent and received there.</p>
+              {sellerProof ? <p>The seller wrote: {sellerProof}</p> : <p className="note">The seller has not left a line yet.</p>}
+              <h3>Letters</h3>
+              {signed.letters?.length ? (
+                <ul className="handoff-notes">
+                  {signed.letters.map((item, index) => (
+                    <li key={`${item.at}-${index}`}>
+                      <span className="note">
+                        {when(item.at)} · {item.side === "sale" ? "To the seller" : "To the buyer"} · {letterState(item.status)}
+                      </span>
+                      <p>{item.subject}</p>
+                      {item.body ? <p>{item.body}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="note">No letter has been written yet.</p>
+              )}
+            </div>
+          ) : null}
           {sale ? (
             <>
               <label className="agree">
@@ -355,16 +439,8 @@ export function HandoffDesk({
               <label>
                 Email for this sale
                 <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-                <span className="note">Private. The buyer does not see this address. You can change it and subscribe again.</span>
+                <span className="note">Private. The buyer does not see this address. You can change it and subscribe again. {PLATFORM_MAIL} is where the platform sends and receives. The same inbox still gets each message once.</span>
               </label>
-              {signed.email ? (
-                <p className="note">
-                  On file: {signed.email}.{" "}
-                  {signed.mailFrom
-                    ? `Messages leave as ${signed.mailFrom}. A copy of each message also goes to ${PLATFORM_MAIL}.`
-                    : "No message has been sent. This site has no mail service connected yet, so there is no From address."}
-                </p>
-              ) : null}
               <button type="button" disabled={busy || (agree && !email.trim())} onClick={() => void saveMail()}>
                 {busy ? "Saving…" : agree ? "Subscribe to sale email" : "Stop PAR email"}
               </button>
@@ -434,7 +510,11 @@ export function HandoffDesk({
                       <label>
                         {sale ? "Note to the buyer" : "Note to the seller"}
                         <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} maxLength={500} />
-                        <span className="note">PAR emails this note from the PAR platform. The other wallet sees it here after signing in. It stays off the NFT and off the public page.</span>
+                        <span className="note">
+                          {sale
+                            ? "When you ship, write the tracking number here, and the insurance if you bought it. PAR emails this note to the buyer. PAR strongly recommends tracking on every shipment, and insurance as well when the object is over $100. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not."
+                            : "PAR emails this note from the PAR platform. The other wallet sees it here after signing in. It stays off the NFT and off the public page."}
+                        </span>
                       </label>
                       <button type="button" disabled={busy || !message.trim()} onClick={() => void sendNote()}>
                         {busy ? "Sending…" : "Send the note"}

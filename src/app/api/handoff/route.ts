@@ -2,8 +2,8 @@ import { PublicKey } from "@solana/web3.js";
 import { isAdminWallet } from "@/lib/admins";
 import { serverRpcUrl, type ClusterName } from "@/lib/constants";
 import { handoffMessage, type HandoffPublic } from "@/lib/handoff-message";
-import { acceptBuyerLeave, acceptNote, cleanReach, mailIdentity, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
-import { readItemByTitle, readHandoffMail, readHandoffNoteBySignature, readHandoffReach, readHandoffThread, writeHandoffReach, clearHandoffReach } from "@/lib/store";
+import { acceptBuyerLeave, acceptNote, cleanReach, mailIdentity, mailReady, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
+import { listHandoffLetters, readHandoffMail, readHandoffNoteBySignature, readHandoffReach, readHandoffSubscription, readHandoffThread, readItemByTitle, writeHandoffReach, clearHandoffReach } from "@/lib/store";
 import { ESCROW_PROGRAM, listingAddress, readTitle, tensorListAddress } from "@/lib/title";
 
 export const runtime = "nodejs";
@@ -121,6 +121,9 @@ export async function POST(request: Request) {
   const otherSubscribed = Boolean(!adminRead && otherWallet && (await readHandoffMail(cluster, otherWallet)));
   const thread =
     view.place === "held" ? await readHandoffThread(cluster, title, [item.creator, owner].filter((row) => row.length > 0)) : [];
+  const subscription = !adminRead && (creator || holder) ? await readHandoffSubscription(cluster, wallet) : null;
+  const letters = creator || holder || adminRead ? await listHandoffLetters(cluster, title).catch(() => []) : [];
+  const hideSaleBody = holder && !creator && !adminRead;
   return Response.json(
     {
       ...view,
@@ -144,6 +147,17 @@ export async function POST(request: Request) {
         mail: row.mail,
       })),
       mailFrom: mailIdentity(),
+      mailReady: mailReady(),
+      mailAt: subscription?.updated_at ?? null,
+      letters: letters.map((row) => ({
+        kind: row.kind,
+        side: row.side,
+        subject: row.subject,
+        body: hideSaleBody && row.side === "sale" ? "" : row.body,
+        status: row.status,
+        note: row.note,
+        at: row.created_at,
+      })),
       notice,
     },
     { headers: { "cache-control": "no-store" } },

@@ -16,7 +16,7 @@ import { FREE_UPLOAD_BYTES } from "@/lib/record";
 import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaDraftRaw, readRwaKeys, writeRwaDraftRaw, writeRwaKeys } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
-import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, poolsPath, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
+import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, poolsPath, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE } from "@/lib/title";
 
 /** The pool price sits 20% above par, inside the PAR rule of at most twice par. */
 const POOL_LIFT = 1.2;
@@ -1131,15 +1131,21 @@ export function AssetDesk() {
             <textarea value={draft.claim} onChange={(event) => patch({ claim: event.target.value })} rows={4} />
           </label>
           <p className="note">
-            There is one asset and one title.{" "}
-            {withCoin
-              ? `${COIN_WORDS} The title can be bought ${draft.saleDays || "some"} ${waitUnit} after graduation. `
-              : "The token is what a buyer pays for this title. After it exists, the sale page takes one price. You list it through Tensor's marketplace program. "}
+            This box is the claim: what the holder of the title receives. If the object is over $100 and you will insure the shipment, write here that there will be insurance when it is sent.
+          </p>
+          <p className="note">
+            Redemption is the next step. That box is the good faith delivery days (GFD), how the object is handed over, and what you do if a claim goes wrong.
+          </p>
+          <p className="note">
+            Review create shows the sentence you sign. It includes the good faith date. Once the object is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.
+          </p>
+          <p className="note">
             {withCoin && rail === "escrow"
-              ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}%, pays you ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program.`
+              ? `Escrow is selected. The title goes into the PAR escrow. At the sale the program burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}%, pays you ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}%, and pays ${SALE_PROGRAM_FEE_PERCENT}% to the PAR program. `
               : withCoin
-                ? `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of it and keep the rest. The listing may also show on Tensor's site. PAR takes none of that sale.`
-                : "You can also name up to three wallets that take a fixed amount of that payment. The PAR program keeps 2% of an escrow sale."}
+                ? `Tensor is selected. The title stays in your wallet. You list it on its PAR sale page through Tensor's marketplace program, and not before ${draft.saleDays || "the"} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of it and keep the rest. PAR takes none of that sale. `
+                : "No coin is attached. On the sale page you list one price through Tensor, and you can delist whenever you want. Delist returns the title to your wallet. You can list it again. "}
+            On that sale page you subscribe with the email that should receive the sale. The platform inbox is metpar02@gmail.com. Messages are sent and received there. If that is also your sale email, each message arrives once. After a buyer holds the title, a note on the sale page carries the tracking number, and the insurance if you bought it. That note is the email. The Tensor list is not on this step.
           </p>
           {withCoin ? <>
           <div className="segmented" role="group" aria-label="Title path">
@@ -1308,7 +1314,7 @@ export function AssetDesk() {
             Good faith delivery days (GFD)
             <input value={draft.shipDays} onChange={(event) => patch({ shipDays: event.target.value })} inputMode="numeric" />
             <span className="note">
-              {draft.shipDays.trim() || "These"} days (GFD) is a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. A package sent on the day before the date can still be in transit after the date. You still owe the holder the object.
+              {draft.shipDays.trim() || "These"} days (GFD) is a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. A package sent on the day before the date can still be in transit after the date. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not. {SHIP_ADVICE}
             </span>
           </label>
           <label>
@@ -1336,6 +1342,9 @@ export function AssetDesk() {
               These words lock when the asset is created.
             </span>
           </label>
+          <p className="note">
+            Review create shows this day count in the sentence you sign. The sale page is where the buyer reads it, where you subscribe with your own email, and where you list or delist on Tensor. The tracking number goes in a note there after a buyer holds the title.
+          </p>
           <p className="note">
             PAR does not hold the object, the tokens, or this payment. The person named on this page owes what
             this card says.
@@ -1508,7 +1517,7 @@ export function AssetDesk() {
               <div>
                 <dt>Redemption</dt>
                 <dd>
-                  The title holder claims it. {draft.shipDays} days (GFD). By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. You still owe the holder the object. {draft.shipping}
+                  The title holder claims it. {draft.shipDays} days (GFD). By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not. {draft.shipping}
                 </dd>
               </div>
               <div>

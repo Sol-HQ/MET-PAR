@@ -451,6 +451,51 @@ export async function deleteHandoffHold(cluster: ClusterName, title: string, own
   );
 }
 
+export type LetterRow = {
+  kind: string;
+  side: "sale" | "purchase";
+  subject: string;
+  body: string;
+  status: "sent" | "idle" | "retry";
+  note: string;
+  created_at: string;
+};
+
+export async function insertHandoffLetter(row: {
+  cluster: ClusterName;
+  title: string;
+  kind: string;
+  side: "sale" | "purchase";
+  subject: string;
+  body: string;
+  status: "sent" | "idle" | "retry";
+  note: string;
+}): Promise<void> {
+  await rest("handoff_letter", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: JSON.stringify(row),
+  });
+}
+
+export async function listHandoffLetters(cluster: ClusterName, title: string): Promise<LetterRow[]> {
+  const response = await rest(
+    `handoff_letter?select=kind,side,subject,body,status,note,created_at&cluster=eq.${encodeURIComponent(cluster)}&title=eq.${encodeURIComponent(title)}&order=created_at.asc&limit=40`,
+  );
+  return (await response.json()) as LetterRow[];
+}
+
+export async function readHandoffSubscription(
+  cluster: ClusterName,
+  wallet: string,
+): Promise<{ email: string; updated_at: string } | null> {
+  const response = await rest(
+    `handoff_mail?select=email,updated_at&cluster=eq.${encodeURIComponent(cluster)}&wallet=eq.${encodeURIComponent(wallet)}&limit=1`,
+  );
+  const rows = (await response.json()) as { email: string; updated_at: string }[];
+  return rows[0] ?? null;
+}
+
 export async function readHeliusHook(cluster: ClusterName): Promise<{ hook_id: string; updated_at: string } | null> {
   const response = await rest(
     `helius_hooks?select=hook_id,updated_at&cluster=eq.${encodeURIComponent(cluster)}&limit=1`,
