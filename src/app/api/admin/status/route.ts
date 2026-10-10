@@ -9,6 +9,16 @@ function clusterOf(value: string | null): ClusterName | null {
   return value === "devnet" || value === "mainnet-beta" ? value : null;
 }
 
+/** The status page is public. A failed pass must not carry a URL or a key into that response. */
+function publicWatcherNote(note: string): string {
+  return note
+    .replace(/https?:\/\/\S+/gi, "a network address")
+    .replace(/api-key[=:][^\s&]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
 export async function GET(request: Request) {
   const cluster = clusterOf(new URL(request.url).searchParams.get("cluster"));
   if (!cluster) return Response.json({ error: "That network is not a PAR cluster." }, { status: 400 });
@@ -25,7 +35,15 @@ export async function GET(request: Request) {
     listCoins(cluster),
     readWatcher(),
   ]);
-  return Response.json({ index: true, objects, coins, watcher }, { headers: { "cache-control": "no-store" } });
+  return Response.json(
+    {
+      index: true,
+      objects,
+      coins,
+      watcher: watcher ? { ...watcher, note: publicWatcherNote(watcher.note) } : null,
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function POST(request: Request) {

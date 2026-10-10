@@ -69,6 +69,15 @@ async function indexRest(path, init = {}) {
   return response;
 }
 
+function publicNote(note) {
+  return String(note || "")
+    .replace(/https?:\/\/\S+/gi, "a network address")
+    .replace(/api-key[=:][^\s&]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
 async function writeBeat(result) {
   await indexRest("jobs?on_conflict=name", {
     method: "POST",
@@ -78,7 +87,7 @@ async function writeBeat(result) {
       cluster: "devnet",
       last_at: new Date().toISOString(),
       ok: result.ok,
-      note: result.note.slice(0, 180),
+      note: publicNote(result.note),
       watched: result.watched,
       marked: result.marked,
       settled: result.settled,
