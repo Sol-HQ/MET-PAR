@@ -1397,6 +1397,39 @@ textarea {
   margin-top: 16px;
 }
 
+.sale-listing {
+  display: grid;
+  gap: 0.85rem;
+  align-items: start;
+  margin: 0.45rem 0 0.15rem;
+}
+
+.sale-listing-side {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+
+.sale-page .nft-mock-card {
+  max-width: none;
+}
+
+.sale-page .nft-mock-body {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sale-page .nft-mock-body h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+@media (min-width: 860px) {
+  .sale-listing {
+    grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  }
+}
+
 .sale-page {
   gap: 0.28rem;
   padding: 0.75rem 0.85rem;

@@ -14,15 +14,8 @@ import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
+import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
 import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
-
-const TOKEN_DECIMALS = 6;
-
-function formatUnits(amount: bigint, decimals: number): string {
-  const scale = BigInt(10) ** BigInt(decimals);
-  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
-  return `${(amount / scale).toLocaleString("en-US")}${fraction ? `.${fraction}` : ""}`;
-}
 
 export const dynamic = "force-dynamic";
 
@@ -260,6 +253,14 @@ export default async function SalePage({
   const objectHolder = (sheet.record?.object?.holder || "").trim();
   const where = (sheet.record?.object?.where || "").trim();
   const picture = objectPictureUrl(sheet);
+  let nftImage = typeof sheet.image === "string" ? sheet.image.trim() : "";
+  if (title.exists && title.uri.startsWith("https://")) {
+    const meta = (await fetch(title.uri, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)) as { image?: string } | null;
+    if (typeof meta?.image === "string" && meta.image.trim()) nftImage = meta.image.trim();
+  }
+  const face = nftImage || picture;
   const distinctObject = Boolean(namedObject) && namedObject !== tokenName && namedObject !== symbol;
   const hasObject = Boolean(
     distinctObject || story || objectKind || objectHolder || where || claimText || handoffText || picture || existsNow === true || existsNow === false,
@@ -311,6 +312,42 @@ export default async function SalePage({
     status?.rail === "escrow"
       ? "The sale of the title (NFT) runs through the PAR escrow on this page."
       : "The creator lists the title (NFT) through Tensor on this page.";
+  const listedHere = Boolean(status?.tensor && status.tensor.currency === record?.attributes.mint);
+  const listPrice = listedHere && status?.tensor ? formatTokenAmount(status.tensor.amount, decimals) : "";
+  const payPrice = listedHere && status?.tensor ? formatTokenAmount(buyerTotal(status.tensor.amount), decimals) : "";
+  const tensorSale =
+    status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
+      <>
+        <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
+        <p className="note">
+          {tensorOpen
+            ? `This title (NFT) is available for purchase through Tensor's program, paid in ${symbol}.`
+            : noCoin
+              ? `The creator lists this title (NFT) through Tensor, paid in ${symbol}.`
+              : `The creator lists this title (NFT) through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
+        </p>
+        <SaleTrade
+          pageCluster={cluster}
+          title={address}
+          mint={record.attributes.mint}
+          creator={creatorAccount}
+          symbol={symbol}
+          burn={Number.isFinite(burn) ? burn : 0}
+          delayDays={Number.isFinite(delay) ? delay : 0}
+          finishedAt={finishedAt}
+          graduated={graduated === true}
+          holdsTitle={creatorHolds}
+          decimals={decimals}
+          noCoin={noCoin}
+          collection={status.collection}
+          listing={
+            status.tensor
+              ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
+              : null
+          }
+        />
+      </>
+    ) : null;
 
   return (
     <section className="card record-create sale-page">
@@ -325,11 +362,38 @@ export default async function SalePage({
             : `${tokenLabel} is a token. It is not paired with a real-world asset.`}
       </p>
       {stateLine !== saleLine ? <p className="note">{holderLine} {saleLine}</p> : <p className="note">{holderLine}</p>}
+      <section className="sale-listing">
+        <article className="nft-mock-card">
+          {face ? (
+            <img className="nft-mock-shot" src={face} alt={pageTitle} />
+          ) : (
+            <div className="nft-mock-shot nft-mock-empty">The NFT image is not on this page.</div>
+          )}
+          <div className="nft-mock-body">
+            <p className="eyebrow">The NFT</p>
+            <h2>{title.name || pageTitle}</h2>
+            <p>Edition 1 · Metaplex Core</p>
+            {listPrice ? (
+              <p>
+                Listed for {listPrice} {symbol}. A buyer pays {payPrice} {symbol}.
+              </p>
+            ) : (
+              <p>{shownState}</p>
+            )}
+          </div>
+        </article>
+        <div className="sale-listing-side">{tensorSale}</div>
+      </section>
       {saleKind !== "token" ? (
         <>
           <h2>The RWA</h2>
           <p>{rwaBasics}</p>
-          <ObjectPicture src={picture} alt={namedObject || "The RWA"} wide />
+          {picture && picture !== face ? (
+            <>
+              <p className="eyebrow">The object</p>
+              <ObjectPicture src={picture} alt={namedObject || "The RWA"} wide />
+            </>
+          ) : null}
           <p>The holder of the title (NFT) can claim this RWA. {claimPath}</p>
           {handoffDays ? (
             <>
@@ -511,38 +575,6 @@ export default async function SalePage({
           />
         </>
       ) : null}
-      {status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
-        <>
-          <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
-          <p className="note">
-            {tensorOpen
-              ? `This title (NFT) is available for purchase through Tensor's program, paid in ${symbol}.`
-              : noCoin
-                ? `The creator lists this title (NFT) through Tensor, paid in ${symbol}.`
-                : `The creator lists this title (NFT) through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
-          </p>
-          <SaleTrade
-            pageCluster={cluster}
-            title={address}
-            mint={record.attributes.mint}
-            creator={creatorAccount}
-            symbol={symbol}
-            burn={Number.isFinite(burn) ? burn : 0}
-            delayDays={Number.isFinite(delay) ? delay : 0}
-            finishedAt={finishedAt}
-            graduated={graduated === true}
-            holdsTitle={creatorHolds}
-            decimals={decimals}
-            noCoin={noCoin}
-            collection={status.collection}
-            listing={
-              status.tensor
-                ? { amount: status.tensor.amount.toString(), currency: status.tensor.currency, seller: status.tensor.seller }
-                : null
-            }
-          />
-        </>
-      ) : null}
       <HandoffDesk cluster={cluster} title={address} />
       <h2>On chain</h2>
       <p className="note">
@@ -564,7 +596,7 @@ export default async function SalePage({
       </p>
       {status?.tensor ? (
         <p className="note">
-          Listed on Tensor for {formatUnits(status.tensor.amount, TOKEN_DECIMALS)}{" "}
+          Listed on Tensor for {formatTokenAmount(status.tensor.amount, decimals)}{" "}
           {status.tensor.currency === record?.attributes.mint ? symbol : "another currency"}. Tensor adds about{" "}
           {TENSOR_TAKER_FEE_PERCENT}% on the buyer&apos;s side.
         </p>

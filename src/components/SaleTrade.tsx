@@ -222,7 +222,6 @@ export function SaleTrade({
       {noCoin && listing && isCreator ? (
         <p className="note">No coin is attached. Delist returns this title to your wallet. You can list it again.</p>
       ) : null}
-      {noCoin && listing && !wallet ? <p className="note">Connect the creator wallet to delist. The title returns to that wallet.</p> : null}
       {!wallet && listing && !open ? <p className="note">Connect the creator wallet to take this listing down.</p> : null}
       {!wallet && !listing && holdsTitle ? <p className="note">Connect the creator wallet to list it.</p> : null}
       {!wallet && canBuy ? <p className="note">Connect a wallet to buy it.</p> : null}
