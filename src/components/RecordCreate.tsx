@@ -22,7 +22,7 @@ import {
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
-import { JITO_TIP_LAMPORTS, landingCost, prepareBundle, prepareTransaction, sendPrepared, sendPreparedBundle, transactionBytes } from "@/lib/send";
+import { JITO_TIP_LAMPORTS, landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
 import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
@@ -731,9 +731,7 @@ export function RecordCreate({
 
       const useRail = draftPlan.rail;
       const bundleLine =
-        cluster === "mainnet-beta" && useEdition
-          ? "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Those three leave as one Jito bundle with one tip. They land in that order, or none land. The three addresses stay in this browser tab so a refresh can finish the same mint."
-          : "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are separate signatures. The three addresses stay in this browser tab so a refresh can finish the same mint.";
+        "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Each one lands before the next signature opens. A fresh blockhash is taken for that signature. The three addresses stay in this browser tab, so a later try only signs whatever is still missing.";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "Solana Mainnet"}`,
         `Order: you sign the promises, then the sheet picture, the NFT image, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
@@ -776,7 +774,7 @@ export function RecordCreate({
         `Title rent: ${formatLamports(titleRent)}. ${landingCost(titlePrepared)} Title transaction: ${titleBytes} of 1232 bytes.`,
         ...(cluster === "mainnet-beta" && useEdition
           ? [
-              `Jito bundle tip: ${formatLamports(JITO_TIP_LAMPORTS)}. One transfer to a Jito tip account, inside the last packet that can hold it. That is what pays Jito to land the three together.`,
+              `Jito tip: ${formatLamports(JITO_TIP_LAMPORTS)} on each signature that has room for it. It is paid only when that signature lands.`,
             ]
           : []),
         ...(recordFit.omitted.length || titleFit.omitted.length
@@ -1076,43 +1074,19 @@ export function RecordCreate({
 
       let recordSig = "";
       let titleSig = "";
-      const bundle = cluster === "mainnet-beta" && pending.length > 1;
-      if (bundle) {
-        const prepared = await prepareBundle(
+      for (const part of pending) {
+        const signature = await sendPrepared(
           connection,
-          payer,
-          pending.map((part) => ({ transaction: part.transaction, signers: part.signers })),
-        );
-        if (!prepared.some((part) => part.tipLamports > 0)) {
-          throw new Error("The Jito tip did not fit. Press Review create again.");
-        }
-        const signatures = await sendPreparedBundle(
-          connection,
-          prepared,
+          await prepareTransaction(connection, payer, part.transaction, part.signers, {
+            tip: cluster === "mainnet-beta",
+          }),
           signTransaction,
-          pending.map((part) => part.landed),
+          part.landed,
         );
-        pending.forEach((part, index) => {
-          const signature = signatures[index] || "";
-          if (part.kind === "record") recordSig = signature;
-          if (part.kind === "title") titleSig = signature;
-          mark(part.done, explorerTx(signature, cluster));
-        });
-      } else {
-        for (const part of pending) {
-          const signature = await sendPrepared(
-            connection,
-            await prepareTransaction(connection, payer, part.transaction, part.signers, {
-              tip: cluster === "mainnet-beta",
-            }),
-            signTransaction,
-            part.landed,
-          );
-          if (part.kind === "record") recordSig = signature;
-          if (part.kind === "title") titleSig = signature;
-          mark(part.done, explorerTx(signature, cluster));
-          if (part.kind === "collection") await waitForAccount(connection, keys.collection.publicKey);
-        }
+        if (part.kind === "record") recordSig = signature;
+        if (part.kind === "title") titleSig = signature;
+        mark(part.done, explorerTx(signature, cluster));
+        if (part.kind === "collection") await waitForAccount(connection, keys.collection.publicKey);
       }
 
       let depositSig: string | undefined;
