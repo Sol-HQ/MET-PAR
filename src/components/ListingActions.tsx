@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { WSOL, type ClusterName } from "@/lib/constants";
 
-function jupiterTradeUrl(quoteMint: string, baseMint: string): string {
-  return `https://jup.ag/swap/${quoteMint}-${baseMint}`;
+function jupiterTokenUrl(mint: string): string {
+  return `https://jup.ag/tokens/${mint}`;
 }
 
 function priced(amount: string, sol: boolean): string {
@@ -60,7 +60,7 @@ export function ListingActions({
         {copied ? "Copied" : "Copy mint"}
       </button>
       {mint ? (
-        <a href={jupiterTradeUrl(quoteMint, mint)} target="_blank" rel="noreferrer" title="Opens Jupiter on the real network.">
+        <a href={jupiterTokenUrl(mint)} target="_blank" rel="noreferrer" title="Opens this token on Jupiter.">
           {cluster === "devnet" ? "Jupiter, real network" : "Trade on Jupiter"}
         </a>
       ) : (
