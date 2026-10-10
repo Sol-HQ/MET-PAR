@@ -250,7 +250,14 @@ function rawToBase64(raw: Uint8Array): string {
 }
 
 function cloneTransaction(transaction: Transaction): Transaction {
-  return Transaction.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false }));
+  // A packet has no blockhash until prepareTransaction stamps the fresh one.
+  // Serializing here throws "recentBlockhash required" and the stamp never happens.
+  const copy = new Transaction();
+  copy.feePayer = transaction.feePayer;
+  if (transaction.recentBlockhash) copy.recentBlockhash = transaction.recentBlockhash;
+  if (transaction.lastValidBlockHeight) copy.lastValidBlockHeight = transaction.lastValidBlockHeight;
+  if (transaction.instructions.length > 0) copy.add(...transaction.instructions);
+  return copy;
 }
 
 /** The same signed bytes can be handed to the network more than once. Only one copy can land. */
