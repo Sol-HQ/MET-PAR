@@ -23,7 +23,7 @@ import {
   sha256Hex,
 } from "@/lib/record";
 import { JITO_TIP_LAMPORTS, bytesWithDurableNonce, landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
-import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { namedPay, readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import {
@@ -441,7 +441,7 @@ export function RecordCreate({
     sale: draft.sale,
     shortClock: cluster === "devnet" && rail === "escrow",
     attached: Boolean(coin),
-    paySymbol: coin?.symbol || pay?.symbol || draft.symbol,
+    paySymbol: coin?.symbol || namedPay(pay)?.symbol || draft.symbol,
   });
 
   useEffect(() => {

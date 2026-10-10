@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { readClassicMint, readCoin, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { namedPay, readClassicMint, readCoin, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { DEFAULT_MIGRATION_FEE_BPS, USDC_DEVNET, USDC_MAINNET, WSOL } from "@/lib/constants";
 import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
@@ -73,7 +73,7 @@ function readSavedDraft(rawText?: string): SavedDraft | null {
       coinInput: typeof parsed.coinInput === "string" ? parsed.coinInput : "",
       coin: parsed.coin && typeof parsed.coin.mint === "string" ? parsed.coin : null,
       payInput: typeof parsed.payInput === "string" ? parsed.payInput : "",
-      pay: parsed.pay && typeof parsed.pay.mint === "string" ? parsed.pay : null,
+      pay: namedPay(parsed.pay && typeof parsed.pay.mint === "string" ? parsed.pay : null),
       pictureCopy: typeof parsed.pictureCopy === "string" ? parsed.pictureCopy : "",
       pictureNote: typeof parsed.pictureNote === "string" ? parsed.pictureNote : "",
       pictureBase64: typeof parsed.pictureBase64 === "string" ? parsed.pictureBase64 : "",
@@ -477,10 +477,11 @@ export function AssetDesk() {
   const [pay, setPay] = useState<PayFacts | null>(null);
   const [payNote, setPayNote] = useState("");
   const [restored, setRestored] = useState(false);
-  const symbol = (coin?.symbol || pay?.symbol || draft.symbol).trim().toUpperCase();
+  const priced = namedPay(pay);
+  const symbol = (coin?.symbol || priced?.symbol || draft.symbol).trim().toUpperCase();
   const escrowLive = escrowDepositAllowed(cluster, publicKey?.toBase58());
   const rail = chosenRail(cluster, escrowLive ? draft.hold : "wallet");
-  const unit = coin?.quoteSymbol || pay?.symbol || "";
+  const unit = coin?.quoteSymbol || priced?.symbol || "";
   const [escrowHint, setEscrowHint] = useState("");
   const [preparedKeys, setPreparedKeys] = useState(makeRwaKeys);
   const wallet = publicKey?.toBase58() || "";
@@ -564,7 +565,7 @@ export function AssetDesk() {
           coinInput,
           coin,
           payInput,
-          pay,
+          pay: namedPay(pay),
           pictureCopy,
           pictureNote,
           pictureBase64,
@@ -716,14 +717,14 @@ export function AssetDesk() {
             }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
             ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, only for ${coin.symbol}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
-            : `The buyer pays in ${pay?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`,
+            : `The buyer pays in ${priced?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`,
       ],
       [
         "Token",
         coin
           ? `${coin.name} (${coin.symbol}). Token address ${coin.mint}. ${coin.decimals} decimals. Supply ${coin.supply}. Quoted in ${coin.quoteSymbol}. Quote mint ${coin.quoteMint}. Pool ${coin.pool}. These facts are read from the coin and cannot be changed. ${COIN_WORDS}`
-          : pay
-            ? `The buyer pays in ${pay.name} (${pay.symbol}). Token address ${pay.mint}. ${pay.decimals} decimals.`
+          : priced
+            ? `The buyer pays in ${priced.name} (${priced.symbol}). Token address ${priced.mint}. ${priced.decimals} decimals.`
             : "No token has been read yet.",
       ],
       [
@@ -739,7 +740,7 @@ export function AssetDesk() {
           : "The sale is a list at one price in the token named above. The creator sets that price on the sale page.",
       ],
     ],
-    [draft, symbol, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, pay, sizeLine, withCoin],
+    [draft, symbol, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, priced, sizeLine, withCoin],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -1351,8 +1352,8 @@ export function AssetDesk() {
               ? coin
                 ? `The coin is ${coin.name} (${coin.symbol}). Token address ${coin.mint}. Supply ${coin.supply}. That name is read from the coin.`
                 : "The token name is read on the Coin step. Paste the token address there."
-              : pay
-                ? `The price is paid in ${pay.name} (${pay.symbol}). Token address ${pay.mint}.`
+              : priced
+                ? `The price is paid in ${priced.name} (${priced.symbol}). Token address ${priced.mint}.`
                 : "The price token is read on the Price step."}
           </p>
         </form>
@@ -1410,13 +1411,13 @@ export function AssetDesk() {
             Read this token
           </button>
           {payNote ? <p className="note">{payNote}</p> : null}
-          {pay ? (
+          {priced ? (
             <>
               <p className="note">Read from the token. These fields cannot be edited.</p>
-              <label>Name<input value={pay.name} readOnly /></label>
-              <label>Symbol<input value={pay.symbol} readOnly /></label>
-              <label>Token address<input value={pay.mint} readOnly /></label>
-              <label>Decimals<input value={String(pay.decimals)} readOnly /></label>
+              <label>Name<input value={priced.name} readOnly /></label>
+              <label>Symbol<input value={priced.symbol} readOnly /></label>
+              <label>Token address<input value={priced.mint} readOnly /></label>
+              <label>Decimals<input value={String(priced.decimals)} readOnly /></label>
             </>
           ) : null}
         </form>

@@ -105,6 +105,13 @@ export async function readCoin(connection: Connection, mint: string): Promise<Co
   };
 }
 
+/** Wrapped SOL stores no name. A draft saved from the first read still says TOKEN. */
+export function namedPay(pay: PayFacts | null): PayFacts | null {
+  if (!pay || pay.mint !== WSOL) return pay;
+  if (pay.name === "SOL" && pay.symbol === "SOL") return pay;
+  return { ...pay, name: "SOL", symbol: "SOL" };
+}
+
 /** An ordinary SPL token the escrow can settle. Token-2022 is refused before a sale can be opened. */
 export async function readClassicMint(connection: Connection, mint: string): Promise<PayFacts> {
   const trimmed = mint.trim();
