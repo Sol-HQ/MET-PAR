@@ -394,6 +394,21 @@ function sheetJson(input: {
   );
 }
 
+/** What the creator signs, in the order the wallet asks, before any SOL moves. */
+export function signSteps(edition: boolean, escrow: boolean): string[] {
+  return [
+    "You sign the promises. That is a message. No SOL moves.",
+    "The pictures and the sheet upload. The wallet may ask you to approve the upload. That approval does not create the record or the title.",
+    "The first time this wallet creates a record here, the wallet asks for one short signature that opens a nonce account. A nonce is a timer you own. It keeps the next signatures from expiring while you read them. The rent in it stays yours. It is not the record and not the title. Only your wallet can use it.",
+    "You sign the record, then wait until this page says it landed. The master goes to the program vault and stays locked. It cannot be moved or burned.",
+    ...(edition ? ["You sign the master edition, then wait. That edition allows one title and no more."] : []),
+    escrow
+      ? "You sign the title, then wait. Then you sign the escrow deposit, then wait."
+      : "You sign the title, then wait. The title lands in your wallet, and it stays there until you list it.",
+    "If the wallet shows Advance nonce, that line only updates the timer inside the same signature you are reading. After it lands, that signature cannot be sent again. A piece already on chain is skipped, and you are not charged for it again.",
+  ];
+}
+
 export function RecordCreate({
   draft,
   rows,
@@ -737,13 +752,10 @@ export function RecordCreate({
       draftPlan.omitTitle = titleFit.omitted;
 
       const useRail = draftPlan.rail;
-      const bundleLine =
-        "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Each one lands before the next one opens. You can read the wallet prompt. When the packet has room, that signature stays valid while you read. When it does not, an aged signature is offered again, and a signature that already landed is not charged again.";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "Solana Mainnet"}`,
-        `Order: you sign the promises, then the sheet picture, the NFT image, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
-        `The wallet signs the promises, four Arweave uploads, the record${useEdition ? ", the master edition" : ""}, and the title${useRail === "escrow" ? ", then the escrow deposit" : ""}.`,
-        bundleLine,
+        "Signing. Each signature lands before the next wallet opens. Read the prompt. Wait for this page before you approve the next one.",
+        ...signSteps(useEdition, useRail === "escrow"),
         `Token: ${draftPlan.tokenName} (${draftPlan.symbol})`,
         `Token mint: ${mint}`,
         ...(draftPlan.noCoin
@@ -1175,6 +1187,15 @@ export function RecordCreate({
             : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
           {coin && cluster !== "devnet" && rail !== "escrow" ? ` ${ESCROW_PATH}` : ""}
         </p>
+        <div className="record-promises">
+          <p className="eyebrow">Signing</p>
+          <p className="note">Each signature lands before the next wallet opens. Read the prompt, then wait for this page.</p>
+          <ol>
+            {signSteps(rail !== "escrow", rail === "escrow").map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ol>
+        </div>
       {!finished ? (
         <div className="record-promises">
           <p className="eyebrow">Creator promises</p>

@@ -482,7 +482,7 @@ async function ensureNonceAccount(
   if (saved && (await readNonceValue(connection, saved))) return saved;
   reportTx({
     kind: "ok",
-    text: "One short signature creates a durable account. After that, a signature can stay open while you read it. This is not the record.",
+    text: "The next signature opens a nonce account that only your wallet can use. It is a timer so later signatures do not expire while you read them. It is not the record and not the title.",
   });
   const nonceKey = Keypair.generate();
   const lamports = await connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LENGTH);
@@ -498,7 +498,7 @@ async function ensureNonceAccount(
     connection,
     await prepareTransaction(connection, payer, create, [nonceKey], { tip: false }),
     signTransaction,
-    "A durable signature account is ready. Later signatures can stay open while you read them.",
+    "The nonce account is ready. The next signatures can stay open while you read them.",
     null,
   );
   rememberNonce(payer.toBase58(), nonceKey.publicKey);
