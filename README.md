@@ -2,7 +2,7 @@
 
 <p align="center">
 	<img src="public/share.png" alt="PAR's illustrated project artwork" width="560" /><br /><br />
-	<strong>A named-price launch. A Meteora pool. One title for one real-world object.</strong><br />
+	<strong>A named-price launch. A Meteora pool. One title for one real-world asset.</strong><br />
 	<a href="https://www.meteora.surf">Open PAR</a> ·
 	<a href="https://superteam.fun/earn/listing/meteora-dbc">Meteora DBC track</a> ·
 	<a href="https://docs.meteora.ag/developer-guides/dbc">Meteora DBC docs</a>
