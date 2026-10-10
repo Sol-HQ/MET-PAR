@@ -48,7 +48,7 @@ Meteora’s [DBC](https://docs.meteora.ag/developer-guides/dbc) is the launch pr
 
 The track asks for meaningful DBC/DAMM v2 use, novel curve or fee design, useful end-to-end launch experiences, and projects with real potential and traction. PAR responds with:
 
-1. **A shelf-shaped DBC launch** for an explicit price-discovery experiment.
+1. **A shelf-shaped DBC launch** for an explicit price-discovery.
 2. **A creator-facing launch desk** that turns the chosen settings into a transaction review, then wallet-signed instructions.
 3. **The DBC-to-DAMM v2 lifecycle**, including creator-reserve locking where configured and optional post-graduation fee compounding.
 4. **An RWA/title workflow** that keeps a tradeable payment coin distinct from a single transferable title NFT and the creator’s written promise.
@@ -149,7 +149,7 @@ PAR’s RWA feature is a product workflow layered beside the token launch, not a
 
 When a coin is attached, it is payment for the title and may also carry the project’s cultural/meme identity. It is **not** a share of the object and does not pay dividends. A title may also be created without an attached coin, using an existing token as its payment currency.
 
-### Tensor and what is—and is not—enforced
+### Tensor and what is, and is not, enforced
 
 On the Mainnet creator-wallet path, the title sale uses Tensor’s marketplace program. The buyer pays the listing currency amount plus Tensor’s buyer-side fee; the listed amount is paid to the creator according to the marketplace transaction. The sale page only exposes its own list/buy controls when its checks and configured wait allow it.
 
