@@ -1,36 +1,270 @@
-# PAR
+# Met-PAR-4
 
-The site is [www.meteora.surf](https://www.meteora.surf).
+<p align="center">
+	<img src="public/share.png" alt="PAR's illustrated project artwork" width="560" /><br /><br />
+	<strong>A named-price launch. A Meteora pool. One title for one real-world object.</strong><br />
+	<a href="https://www.meteora.surf">Open PAR</a> ·
+	<a href="https://superteam.fun/earn/listing/meteora-dbc">Meteora DBC track</a> ·
+	<a href="https://docs.meteora.ag/developer-guides/dbc">Meteora DBC docs</a>
+</p>
 
-PAR is a Meteora Dynamic Bonding Curve launch where most tokens sold to buyers stay within 10% of one price. You set that price. A buyer now and a buyer later can pay nearly the same. The shelf is a share of the sale, and it lasts until those tokens are bought. The trading fee can fall over 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days, so a rush at the open costs more while the price is still near par. The last slice of the sale walks the price to the pool you set. The pool locks. Later buys can move the price higher, and later sells can move it lower.
+PAR is a Solana launch desk built around Meteora’s **Dynamic Bonding Curve (DBC)** and its graduation into **DAMM v2**. Its experiment is a curve with a shelf: instead of making every buyer chase a continuously rising launch price, the creator can set a named opening price, keep at least half of the tokens sold on the curve within a 10% price band, and then walk the remaining curve segment toward the configured graduation price.
 
-Leave PAR off and the price climbs from the first token to the last.
+The same product can connect a coin to a separately documented real-world asset (RWA). The coin is payment and culture—not equity, not a fractional ownership token, and not a promise of proceeds. A one-of-one title NFT is the claim the creator describes. The creator’s signed record, its on-chain hashes, and its sale page make that distinction visible and inspectable.
 
-The curve program is `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`. The app is [Meteora](https://app.meteora.ag). The curve docs are [Meteora DBC](https://docs.meteora.ag/core-products/dbc/what-is-dbc).
+> **The idea in one line:** the coin can trade; the title is the claim; Meteora supplies the launch-to-liquidity path.
 
-A real-world asset is a separate page. It adds one master, sent to the program vault, and one edition, which is the title. The coin is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share, and it pays nothing. After graduation the coin trades for a set number of days, and the creator lists the title through Tensor. PAR keeps a copy of the proofs. The NFT on the chain is the proof. The escrow path can be tested on the practice network by the platform wallets. It is not a mainnet option.
+| | |
+| --- | --- |
+| **Project** | Met-PAR-4 (PAR) |
+| **Live app** | [meteora.surf](https://www.meteora.surf) |
+| **Mainnet reference** | [NIGHTMARES pool page](https://www.meteora.surf/pool/2Ea8EspX6PB5HAcECnveCEiPVHqaVm48HQeAXrYLwc4n?c=mainnet) · [mint on Solana Explorer](https://explorer.solana.com/address/9Gfy3oiQTRqCj3CeBqEdRtWoZMMsgAKcfb3jAeQan2N2) |
+| **Hackathon track** | [Best use of Meteora’s Dynamic Bonding Curve](https://superteam.fun/earn/listing/meteora-dbc) · Crypto World’s Fair |
+| **Core programs** | [Meteora DBC](https://explorer.solana.com/address/dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN) · [Meteora DAMM v2](https://explorer.solana.com/address/cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG) |
+| **Primary networks** | Solana Devnet for practice; Solana Mainnet Beta for real launches |
+| **Source access for judges** | This repository is private. Request read access from the project owner; the listing specifically names GitHub user [`dannxbt`](https://github.com/dannxbt). |
 
-## Launches
+<details>
+<summary><strong>Contents</strong></summary>
 
-Starter, Solid, and Deep use 1,000,000,000 tokens. With PAR off and USDC as the quote, they lock about $10,000, $25,000, and $50,000. 800,000,000 tokens are sold and 200,000,000 migrate. Thin test locks about $750 USDC. On the real network, $750 is the smallest USDC curve Meteora opens by itself. A larger USDC curve is opened the same way once it fills. With PAR on, those cards do not set the quote amount. The prices do.
+- [Why PAR fits the track](#why-par-fits-the-track)
+- [Product tour](#product-tour)
+- [The Meteora lifecycle](#the-meteora-lifecycle)
+- [What the PAR curve actually guarantees](#what-the-par-curve-actually-guarantees)
+- [Fees, migration, and the creator reserve](#fees-migration-and-the-creator-reserve)
+- [The RWA record and title](#the-rwa-record-and-title)
+- [A safe reviewer walkthrough](#a-safe-reviewer-walkthrough)
+- [Architecture](#architecture)
+- [Run locally](#run-locally)
+- [Tests and current verification limits](#tests-and-current-verification-limits)
+- [Boundaries and risks](#boundaries-and-risks)
+- [References](#references)
 
-Par fixed is only the shelf. It uses 1,000,000,000 tokens, opens at $0.00005, and the pool locks at $0.00006. About 466,589,438 tokens and about $27,995 USDC lock together.
+</details>
 
-Custom takes a supply and two prices. Turn PAR on for the shelf. The share of the supply that migrates fills in from those prices, as a percent and as a token count. Type either one and the other follows. The pool price moves with it. Par stays.
+## Why PAR fits the track
 
-With PAR on, the pool price has to sit above the 10% shelf and at or under twice par. That band locks about 35% to 48% of the supply. The buttons are 35%, 40%, 45%, and 48%. At par $1, a pool of $1.20 locks 46.7%, which is 466,589,438 tokens. 35% is the low end, with the pool almost double par. 48% is the high end, just above the 10% shelf. A climb with PAR off still migrates at least 20%. On one billion tokens that is 200,000,000.
+Meteora’s [DBC](https://docs.meteora.ag/developer-guides/dbc) is the launch primitive here—not a decorative integration. PAR builds and signs DBC configuration, creates curve pools, reads and quotes their state, routes pre-graduation trades through the curve, and hands completed pools to Meteora **DAMM v2**. The configured graduation fee, fee schedule, quote asset, optional creator reserve, and optional DAMM v2 fee compounding are part of that launch configuration.
 
-The quote is USDC or SOL. On a SOL curve, 0.002 and 0.0002 are fractions of one SOL, and a buyer can type ten dollars and PAR spends the SOL that ten dollars buys at the live price. USDC cards lock about $10,000, $25,000, $50,000, and $750. SOL cards lock 10 SOL, 25 SOL, 50 SOL, and 1 SOL. On the real network, Meteora opens a SOL curve by itself at 10 SOL. A 1 SOL curve is small enough to fill on the practice network, and someone signs once to open its trading pool. With PAR on, a price of 1 means 1 USDC or 1 SOL per token, and that lock is large. The creator chooses a falling fee or a flat fee, from 0.25% to 99%. A falling fee opens at the typed percent and falls to the settled fee over 1 hour, 6 hours, 12 hours, 24 hours, 48 hours, or 7 days. A flat fee stays at the typed percent on every trade until migration, and the clock is ignored. Of that fee, Meteora keeps 20%, the platform keeps the saved platform percent (20 unless an admin changes it), and the token creator receives the rest. Fees wait until they are claimed.
+The track asks for meaningful DBC/DAMM v2 use, novel curve or fee design, useful end-to-end launch experiences, and projects with real potential and traction. PAR responds with:
 
-Before the curve fills, trading happens on this site. There is no Meteora trading pool yet. After the curve fills, the trading pool is on Meteora: app.meteora.ag on the real network, and devnet.meteora.ag on the practice network. Practice tokens do not show on Jupiter. Fun Launch is a starter for building a launch page. It is not a public list of these tokens.
+1. **A shelf-shaped DBC launch** for an explicit price-discovery experiment.
+2. **A creator-facing launch desk** that turns the chosen settings into a transaction review, then wallet-signed instructions.
+3. **The DBC-to-DAMM v2 lifecycle**, including creator-reserve locking where configured and optional post-graduation fee compounding.
+4. **An RWA/title workflow** that keeps a tradeable payment coin distinct from a single transferable title NFT and the creator’s written promise.
 
-After the curve fills, the creator chooses the pool fee: 0.25% (the default), 0.30%, 1%, 2%, 4%, or 6%. That fee is split the same way. Locked tokens and locked USDC stay in the pool. The claim buttons on this site withdraw the curve fee from before migration. A token already created keeps the split, the prices, the curve fee, and the pool fee written into its template.
+PAR does **not** currently integrate DLMM or claim to implement every idea in the listing. The work is centered on DBC, DAMM v2, and the optional Meteora locker path.
 
-## Run
+| Listing’s judging lens | What a reviewer can inspect in PAR |
+| --- | --- |
+| **Depth of Meteora integration** | The launch configuration, DBC curve trades, DBC-to-DAMM v2 migration, optional locker, and configured fee compounding described below |
+| **Technical execution** | Parameter validation, quote-mint checks, transaction review/simulation, wallet signing, on-chain state reads, and hash-linked RWA records |
+| **Originality and taste** | The PAR shelf as a price-discovery alternative, plus a deliberately separate coin/payment-token and one-title claim model |
+| **Impact potential** | A reusable launch-and-title workflow that can be applied to additional objects and eligible quote assets; this is a design direction, not a claim of scale already achieved |
+| **Traction / volume** | The live app and linked Mainnet reference pool; current pool state and volume must be checked directly because they change over time |
+
+## Product tour
+
+### 1. Configure a launch
+
+At [meteora.surf](https://www.meteora.surf), a creator chooses a launch preset or custom settings: supply, opening and graduation prices, quote mint, fee behavior, fee duration, and post-graduation pool settings. The creator reviews the planned configuration and transaction costs before signing. The app separates quote placed into a curve from SOL rent and network fees; creating a pool does not mean the launch quote is already spent.
+
+PAR offers two curve styles:
+
+- **PAR shelf:** a high-weight first segment spans the named opening price to at most 10% above it, followed by a segment that reaches the creator’s graduation price.
+- **Regular climb:** the conventional rising-price path, with no shelf segment.
+
+### 2. Trade the curve
+
+Before graduation, the DBC virtual pool is the market. The pool page reads current curve state and prepares buy/sell transactions against DBC. The app supports SOL and USDC presets, plus eligible custom SPL or Token-2022 quote mints subject to Meteora’s quote constraints and badge requirements.
+
+### 3. Graduate into DAMM v2
+
+When a curve is complete, the configured migration path opens a Meteora DAMM v2 pool. Where the launch reserved creator tokens, the DBC locker step must be completed before pool opening. On Devnet, there are no Meteora migration keepers for this app’s practice flow: a wallet completes the locker/open steps and pays the relevant account rent. On Mainnet, eligible pools may be migrated by Meteora keepers; the UI also exposes manual actions where appropriate.
+
+### 4. Optionally attach an object
+
+The asset workflow adds a Master record and a one-of-one Title NFT. The coin and the title remain different assets with different meanings. The Title sale page lets the creator list through Tensor’s marketplace program when the app’s sale conditions allow it; a no-coin RWA can instead use an existing payment token.
+
+## The Meteora lifecycle
+
+```mermaid
+flowchart LR
+		A[Creator reviews launch settings] --> B[DBC config / template]
+		B --> C[Create SPL token and DBC curve]
+		C --> D[Buy and sell on DBC curve]
+		D --> E{Curve complete?}
+		E -- No --> D
+		E -- Yes, creator reserve set --> F[Create DBC locker]
+		E -- No reserve --> G[Graduate]
+		F --> G
+		G --> H[Migrate to DAMM v2]
+		H --> I[Trade on DAMM v2]
+		I --> J{Compounding configured?}
+		J -- Yes --> K[Configured share of pool fees compounds]
+		J -- No --> I
+```
+
+| Lifecycle stage | PAR’s role | Meteora surface |
+| --- | --- | --- |
+| Configure | Builds the selected curve, quote, fee, reserve, and migration parameters for review | DBC SDK configuration builders |
+| Create | Requests wallet signatures for the launch template and pool/token creation | DBC `createConfig` / `createPool` transaction builders |
+| Curve trading | Reads curve state and builds buy/sell transactions | DBC state, quote, swap instructions |
+| Creator reserve | Prepares a lock for reserved creator tokens, when configured | DBC migration locker |
+| Graduation | Opens migration to the chosen supported DAMM v2 fee setup | DBC `migrateToDammV2` |
+| Post-graduation trading | Reads pool state and builds swaps | DAMM v2 SDK and Solana transactions |
+| Fee compounding | Encodes an optional pool-fee compounding mode into the launch config | DAMM v2 migration settings |
+| Fee collection | Exposes distinct curve-fee claims and leftover-token actions | DBC partner/creator claim instructions |
+
+The DBC program ID used by the app is `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` on both Devnet and Mainnet Beta. DAMM v2’s `cp_amm` program ID is `cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG`. The project uses Meteora’s DBC SDK, DAMM v2 SDK, and Meteora Lock SDK; see [package.json](package.json).
+
+## What the PAR curve actually guarantees
+
+PAR is deliberately more precise than “most of the supply sells near one price.” Its code constructs two weighted curve segments, caps the shelf at 10% above the opening price, and validates that **at least half of the tokens sold on the curve** fall on that shelf. That validation concerns the curve’s sold tokens—not half of the total token supply, and not a guarantee that any particular quantity will sell.
+
+For the shelf path, the graduation price must be above the shelf and no more than twice the opening price. Presets are calibrated for their documented supply/settings; a custom supply, price, or creator reserve can change the amount that migrates. The UI calculates and displays the result rather than promising a universal migrated percentage.
+
+The regular-climb preset uses a 20% migration-supply parameter. Custom climb settings below 20% produce a warning; they are not all hard-rejected. See the implementation in [src/lib/launch.ts](src/lib/launch.ts) and the DBC parameter builder in [src/lib/curve.ts](src/lib/curve.ts).
+
+## Fees, migration, and the creator reserve
+
+- **Curve fee:** configured at launch and collected in the quote token. It can be flat, fall linearly, or fall exponentially over the supported duration. The optional dynamic/volatility fee is another configuration choice.
+- **Fee shares:** the creator/platform split is encoded in DBC configuration and can use platform settings. Meteora’s protocol share is separate. Curve fee claims are separate from the migrated pool’s liquidity and pool fees.
+- **Migration fee:** the supported fixed DAMM v2 choices in the standard UI are 0.25%, 0.30%, 1%, 2%, 4%, and 6%. It is selected as part of the launch configuration, not after graduation.
+- **Compounding:** when enabled, the launch configuration selects the DAMM v2 pool fee and the portion of fees to compound, within the app’s validation range. This is not the same as claiming curve trading fees.
+- **Creator reserve:** when tokens are reserved, the DBC locker flow applies. This is distinct from the liquidity position created at graduation; the project does not describe locked liquidity as freely withdrawable.
+
+Exact fee shares, costs, and supported options can change with platform settings, SDK versions, and on-chain configuration. Review the values shown for the specific launch rather than relying on a README example.
+
+## The RWA record and title
+
+PAR’s RWA feature is a product workflow layered beside the token launch—not an assertion that a token represents legal ownership.
+
+| Artifact | What it is | What the app records |
+| --- | --- | --- |
+| **Master / record** | Metaplex Core record sent to the configured platform vault | Creator-authored object facts and promises, token/pool references, sale details, and hashes. Its metadata and attributes are locked; the record is permanently frozen against transfer/burn by the configured plugins. |
+| **Title** | A separately held Metaplex Core asset representing the one title a buyer can transfer | On the standard creator path, Edition 1 in a sealed collection with max supply one. The title is the NFT that can be listed and transferred. |
+| **Arweave files** | The NFT image and human-readable sheet | The creator signs the promise message with their wallet; the image and sheet are uploaded, and their SHA-256 hashes are committed to the Master attributes. |
+| **Sale page** | A public rendering of chain state and the record sheet | Shows the title, object description, sale state, proof references, and the Tensor purchase/listing flow. |
+
+When a coin is attached, it is payment for the title and may also carry the project’s cultural/meme identity. It is **not** a share of the object and does not pay dividends. A title may also be created without an attached coin, using an existing token as its payment currency.
+
+### Tensor and what is—and is not—enforced
+
+On the Mainnet creator-wallet path, the title sale uses Tensor’s marketplace program. The buyer pays the listing currency amount plus Tensor’s buyer-side fee; the listed amount is paid to the creator according to the marketplace transaction. The sale page only exposes its own list/buy controls when its checks and configured wait allow it.
+
+That page-level gate is not a global lock on Tensor: a creator may interact with Tensor separately. Likewise, a promised post-sale burn on the creator/Tensor path is a creator promise, not an automatic burn enforced by Tensor or PAR. The sheet and sale page say what is promised; they do not make PAR a custodian, insurer, appraiser, title registry, or guarantor of delivery. Buyers should verify the chain record and make their own assessment of the object, seller, claim, and applicable law.
+
+The separate escrow path is a **Devnet practice flow**, not a Mainnet sale option. Do not treat a Devnet title, escrow, or token as a real asset or a production transaction.
+
+## A safe reviewer walkthrough
+
+### Read-only review (no wallet signature required)
+
+1. Open [the app](https://www.meteora.surf) and inspect the launch desk and available pool/asset pages.
+2. Use the network toggle to distinguish Mainnet from Devnet; links can also specify `?c=mainnet` or `?c=devnet`.
+3. Open a pool page to inspect the DBC curve or the migrated DAMM v2 state, the configured prices/fees, and links to Solana Explorer and Meteora.
+4. Open an RWA title sale page to inspect its NFT image, public sheet, chain checks, and Tensor listing state.
+5. Review the code paths called out in [Architecture](#architecture), especially the config builder, quote gate, curve handoff, and Tensor sale component.
+
+The NIGHTMARES links above are reference addresses supplied with the project submission. Pool state, trading activity, and availability can change; confirm current status on-chain rather than treating an old snapshot as current traction.
+
+### Practice transactions (Devnet only)
+
+Use a separate test wallet with disposable Devnet funds. Creating a curve, minting a record/title, or trading is an on-chain action and requires wallet signatures. A filled Devnet curve may need explicit locker and pool-opening transactions because the practice flow has no migration keeper. Read each transaction review and its rent estimate before signing. No reviewer needs to enter a seed phrase or share a private key.
+
+### Mainnet caution
+
+Mainnet actions involve real SOL, token balances, and irreversible or difficult-to-reverse on-chain state. A README walkthrough is not an invitation to create or trade. Inspect an existing pool and its transactions first; do not sign a transaction unless you understand the exact wallet prompt and cost.
+
+## Architecture
+
+| Area | Main files | Responsibility |
+| --- | --- | --- |
+| Launch and curve math | [src/lib/launch.ts](src/lib/launch.ts), [src/lib/curve.ts](src/lib/curve.ts) | Validate launch settings, build shelf/climb parameters, set fee/migration options |
+| Launch UI and signing | [src/components/Desk.tsx](src/components/Desk.tsx), [src/lib/send.ts](src/lib/send.ts), [src/components/MainnetGate.tsx](src/components/MainnetGate.tsx) | Review, prepare, simulate, and submit wallet-signed transactions |
+| Quote eligibility | [src/lib/quote-gate.ts](src/lib/quote-gate.ts) | Inspect SPL/Token-2022 mints, transfer fees, extensions, and DBC badge requirements |
+| Pool lifecycle and trading | [src/components/PoolView.tsx](src/components/PoolView.tsx), [src/components/CurveHandoff.tsx](src/components/CurveHandoff.tsx), [src/lib/load-pool.ts](src/lib/load-pool.ts) | Read curve/pool state, trade, lock reserved supply, and migrate to DAMM v2 |
+| RWA creation and proofs | [src/components/AssetDesk.tsx](src/components/AssetDesk.tsx), [src/components/RecordCreate.tsx](src/components/RecordCreate.tsx), [src/lib/record.ts](src/lib/record.ts) | Sign claims, upload files, create the Master and Title, and commit proof hashes |
+| Tensor sale | [src/components/SaleTrade.tsx](src/components/SaleTrade.tsx), [src/lib/tensor-sale.ts](src/lib/tensor-sale.ts) | Build Tensor list, buy, and delist instructions |
+| Records and index | [src/app/api/records/route.ts](src/app/api/records/route.ts), [src/lib/store.ts](src/lib/store.ts), [supabase/migrations](supabase/migrations) | Validate/index public records and persist sheet copies |
+
+The app is a Next.js App Router project using TypeScript, React, Solana wallet-adapter, Web3.js, Metaplex Core, and Meteora TypeScript SDKs. The browser sends RPC requests through the app’s `/api/rpc` routes; keyed server RPC URLs are read on the server rather than shipped to the browser. Wallets supported in the UI are Phantom and Solflare.
+
+## Run locally
+
+Requirements: Node.js compatible with this Next.js project, npm, and a Solana wallet for signing any on-chain action.
 
 ```bash
-npm install
+git clone https://github.com/Sol-HQ/MET-PAR.git
+cd MET-PAR
+npm ci
 npm run dev
 ```
 
-Devnet is the default. A mainnet create shows the SOL rent and 0 of the quote token before the wallet opens. Devnet USDC comes from the Circle faucet, which sends about $20. Devnet SOL comes from the Solana faucet, so a 1 SOL practice curve can be filled and graduated.
+Open [http://localhost:3000](http://localhost:3000). The UI defaults to Devnet. For a local run without private RPC settings, server RPC code falls back to public Solana endpoints; rate limits and reliability are outside the app’s control. Never commit `.env.local`, RPC credentials, service-role keys, webhook secrets, or wallet material.
+
+### Optional server configuration
+
+| Variable | Needed for | Notes |
+| --- | --- | --- |
+| `DEVNET_RPC_URL` | Server-side Devnet reads/writes | Optional; defaults to the public Devnet endpoint. Keep credentials server-side. |
+| `MAINNET_RPC_URL` | Server-side Mainnet reads/writes | Optional; defaults to the public Mainnet endpoint or a derived Helius endpoint when configured. |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Full indexed record/pool store | Server only. The service-role key must never be exposed as a `NEXT_PUBLIC_*` variable. Apply the project’s SQL migrations before using the index. |
+| `BLOB_READ_WRITE_TOKEN` | Blob-backed copies/settings fallback | Optional alternative/fallback for selected persistent data paths. |
+| `RESEND_API_KEY`, `HANDOFF_FROM` | Deliver handoff emails | Optional; without mail configuration, email delivery is unavailable even if the app can record handoff state. |
+| `HELIUS_WEBHOOK_SECRET` | Authenticate the handoff webhook | Optional operational integration; do not expose it to the client. |
+| `CRON_SECRET` | Protect scheduled handoff/escrow routes | Optional operational integration; keep it private. |
+
+`.env.example` is a starter, not a production deployment recipe. Its `NEXT_PUBLIC_DEVNET_RPC_URL` and `NEXT_PUBLIC_MAINNET_RPC_URL` entries are legacy names; the current app reads the server-side variables in the table above. The exact features available locally depend on which server integrations are configured.
+
+## Tests and current verification limits
+
+The package currently has `dev`, `build`, and `start` scripts; it does not define a general test or lint script. The focused escrow clock check can be run with:
+
+```bash
+node scripts/escrow-clock.test.mjs
+```
+
+The script checks escrow clock parsing/decision helpers only. It is not an end-to-end wallet, DBC, DAMM v2, Tensor, or RWA test suite. Type-checking the current workspace (including utility scripts that import `.ts` extensions) can be run with:
+
+```bash
+npm exec tsc -- --noEmit --allowImportingTsExtensions
+```
+
+**Current build caveat:** `npm run build` presently fails during Next.js type checking because `scripts/_mock-nft.ts` and `scripts/_tx-size.ts` import source files with explicit `.ts` extensions while the project `tsconfig.json` does not enable `allowImportingTsExtensions`. The app source type-check command above passes; that does not make the production build pass. The global stylesheet also has an existing Autoprefixer compatibility warning. These should be resolved and the production build rerun before treating a build as release-verified.
+
+## Boundaries and risks
+
+- A bonding curve and an AMM are markets, not price guarantees. A shelf is a curve configuration and validation rule, not a promise of buyers, liquidity, or returns.
+- Preset examples are not universal outcomes. Supply, custom prices, creator reserves, quote decimals, platform settings, and current Meteora behavior affect the result.
+- Quote eligibility is checked against the mint and current DBC rules. A transfer-fee quote is rejected; some Token-2022 quote extensions require a Meteora-issued DBC badge. PAR cannot grant that badge.
+- Meteora keeper thresholds and quote eligibility are external, mutable policies. Confirm current requirements in the official docs before relying on automatic migration.
+- A creator-authored RWA description and its hash prove what was signed and stored; they do not independently prove physical existence, legal ownership, valuation, authenticity, or successful delivery.
+- The Mainnet Tensor path’s wait and burn remain creator/platform-level product behavior and promises; they are not universal on-chain enforcement across Tensor.
+- The project does not currently implement DLMM, a public config-preset marketplace, or an automated end-to-end test environment.
+- Any live pool, mint, listing, or volume can change. Verify its present status directly on-chain and in the app rather than treating an older submission example as current traction.
+
+## References
+
+### Project
+
+- [PAR application](https://www.meteora.surf)
+- [Meteora DBC program](https://github.com/MeteoraAg/dynamic-bonding-curve)
+- [Meteora DBC TypeScript SDK](https://github.com/MeteoraAg/dynamic-bonding-curve-sdk)
+- [Meteora DAMM v2 program](https://github.com/MeteoraAg/damm-v2)
+- [Meteora DAMM v2 TypeScript SDK](https://github.com/MeteoraAg/damm-v2-sdk)
+- [Meteora Lock SDK](https://www.npmjs.com/package/@meteora-ag/met-lock-sdk)
+
+### Official product and track references
+
+- [Superteam Earn: Best use of Meteora’s Dynamic Bonding Curve](https://superteam.fun/earn/listing/meteora-dbc)
+- [Meteora DBC overview](https://docs.meteora.ag/core-products/dbc/what-is-dbc)
+- [Meteora DBC developer guide](https://docs.meteora.ag/developer-guides/dbc)
+- [Meteora DAMM v2 overview](https://docs.meteora.ag/core-products/damm-v2/what-is-damm-v2)
+- [Meteora DAMM v2 developer guide](https://docs.meteora.ag/developer-guides/damm-v2)
+- [Meteora Invent launch scaffold](https://docs.meteora.ag/invent/scaffold/fun-launch)
+
+---
+
+<p align="center"><sub>PAR is software. It does not hold, insure, appraise, or guarantee any real-world item.</sub></p>
