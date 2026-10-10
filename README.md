@@ -10,7 +10,7 @@
 
 PAR is a Solana launch desk built around Meteora’s **Dynamic Bonding Curve (DBC)** and its graduation into **DAMM v2**. Its experiment is a curve with a shelf: instead of making every buyer chase a continuously rising launch price, the creator can set a named opening price, keep at least half of the tokens sold on the curve within a 10% price band, and then walk the remaining curve segment toward the configured graduation price.
 
-The same product can connect a coin to a separately documented real-world asset (RWA). The coin is payment and culture—not equity, not a fractional ownership token, and not a promise of proceeds. A one-of-one title NFT is the claim the creator describes. The creator’s signed record, its on-chain hashes, and its sale page make that distinction visible and inspectable.
+The same product can connect a coin to a separately documented real-world asset (RWA). The coin is payment and culture, not equity, not a fractional ownership token, and not a promise of proceeds. A one-of-one title NFT is the claim the creator describes. The creator’s signed record, its on-chain hashes, and its sale page make that distinction visible and inspectable.
 
 > **The idea in one line:** the coin can trade; the title is the claim; Meteora supplies the launch-to-liquidity path.
 
@@ -22,7 +22,7 @@ The same product can connect a coin to a separately documented real-world asset 
 | **Hackathon track** | [Best use of Meteora’s Dynamic Bonding Curve](https://superteam.fun/earn/listing/meteora-dbc) · Crypto World’s Fair |
 | **Core programs** | [Meteora DBC](https://explorer.solana.com/address/dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN) · [Meteora DAMM v2](https://explorer.solana.com/address/cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG) |
 | **Primary networks** | Solana Devnet for practice; Solana Mainnet Beta for real launches |
-| **Source access for judges** | This repository is private. Request read access from the project owner; the listing specifically names GitHub user [`dannxbt`](https://github.com/dannxbt). |
+| **Source access for judges** | This repository is private. Request read access from the project owner. |
 
 <details>
 <summary><strong>Contents</strong></summary>
@@ -44,7 +44,7 @@ The same product can connect a coin to a separately documented real-world asset 
 
 ## Why PAR fits the track
 
-Meteora’s [DBC](https://docs.meteora.ag/developer-guides/dbc) is the launch primitive here—not a decorative integration. PAR builds and signs DBC configuration, creates curve pools, reads and quotes their state, routes pre-graduation trades through the curve, and hands completed pools to Meteora **DAMM v2**. The configured graduation fee, fee schedule, quote asset, optional creator reserve, and optional DAMM v2 fee compounding are part of that launch configuration.
+Meteora’s [DBC](https://docs.meteora.ag/developer-guides/dbc) is the launch primitive here, not a decorative integration. PAR builds and signs DBC configuration, creates curve pools, reads and quotes their state, routes pre-graduation trades through the curve, and hands completed pools to Meteora **DAMM v2**. The configured graduation fee, fee schedule, quote asset, optional creator reserve, and optional DAMM v2 fee compounding are part of that launch configuration.
 
 The track asks for meaningful DBC/DAMM v2 use, novel curve or fee design, useful end-to-end launch experiences, and projects with real potential and traction. PAR responds with:
 
@@ -120,7 +120,7 @@ The DBC program ID used by the app is `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMa
 
 ## What the PAR curve actually guarantees
 
-PAR is deliberately more precise than “most of the supply sells near one price.” Its code constructs two weighted curve segments, caps the shelf at 10% above the opening price, and validates that **at least half of the tokens sold on the curve** fall on that shelf. That validation concerns the curve’s sold tokens—not half of the total token supply, and not a guarantee that any particular quantity will sell.
+PAR is deliberately more precise than “most of the supply sells near one price.” Its code constructs two weighted curve segments, caps the shelf at 10% above the opening price, and validates that **at least half of the tokens sold on the curve** fall on that shelf. That validation concerns the curve’s sold tokens, not half of the total token supply, and not a guarantee that any particular quantity will sell.
 
 For the shelf path, the graduation price must be above the shelf and no more than twice the opening price. Presets are calibrated for their documented supply/settings; a custom supply, price, or creator reserve can change the amount that migrates. The UI calculates and displays the result rather than promising a universal migrated percentage.
 
@@ -138,7 +138,7 @@ Exact fee shares, costs, and supported options can change with platform settings
 
 ## The RWA record and title
 
-PAR’s RWA feature is a product workflow layered beside the token launch—not an assertion that a token represents legal ownership.
+PAR’s RWA feature is a product workflow layered beside the token launch, not an assertion that a token represents legal ownership.
 
 | Artifact | What it is | What the app records |
 | --- | --- | --- |
