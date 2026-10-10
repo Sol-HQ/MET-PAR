@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { isAdminWallet } from "@/lib/admins";
 import type { ClusterName } from "@/lib/constants";
-import { handoffCloseMs, handoffEndsAt, handoffMessage, readBuyerCard, type BuyerCard, type HandoffPublic } from "@/lib/handoff-message";
+import { handoffCloseMs, handoffEndsAt, handoffMessage, PLATFORM_MAIL, readBuyerCard, type BuyerCard, type HandoffPublic } from "@/lib/handoff-message";
 import { bytesToBase64 } from "@/lib/picture";
 
-type DeskNote = { from: "seller" | "buyer"; body: string; at: string };
+type DeskNote = { from: "seller" | "buyer"; body: string; at: string; mail?: "pending" | "sent" | "wait" | "skip" };
 type Proof = { body: string; at: string };
 
 type Signed = HandoffPublic & {
@@ -22,6 +22,7 @@ type Signed = HandoffPublic & {
   proofs: { buyer: Proof | null; seller: Proof | null };
   otherSubscribed: boolean;
   notes: DeskNote[];
+  mailFrom: string | null;
   notice: "sent" | "saved" | "same" | "stopped" | "wait" | null;
 };
 
@@ -82,10 +83,10 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
   if (view.place !== "held" || !view.heldAt || !view.handoffDays || end === null) {
     return (
       <>
-        <p className="handoff-clock">{view.handoffDays ? unit(view.handoffDays, "day", "days") : "Handoff"}</p>
+        <p className="handoff-clock">{view.handoffDays ? `${unit(view.handoffDays, "day", "days")} (GFD)` : "Handoff"}</p>
         <p className="note">
           {view.handoffDays
-            ? "The sheet sets this many days. The clock starts when a buyer holds the title."
+            ? "Good faith delivery. By this day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. The clock starts when a buyer holds the title. The seller still owes the holder the object."
             : "The sheet names the handoff. The clock starts when a buyer holds the title."}
         </p>
       </>
@@ -96,14 +97,14 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
   return (
     <>
       <p className="handoff-clock" role="timer">
-        {left > 0 ? remain(left) : "The handoff days have passed"}
+        {left > 0 ? remain(left) : "The good faith date has passed"}
       </p>
       <p className="note">
         {left <= 0
-          ? "The seller's promise still stands: hand the object to the holder of the title."
+          ? "The good faith date has passed. Time with the carrier or customs does not count. The seller still owes the holder the object."
           : close
-            ? "The handoff days are close. The seller's promise is to finish handing over the object."
-            : `The sheet sets ${unit(view.handoffDays, "day", "days")}. The clock started when this wallet held the title.`}
+            ? "The good faith date is close. By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. The seller still owes the holder the object."
+            : `${unit(view.handoffDays, "day", "days")} (GFD). By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`}
       </p>
     </>
   );
@@ -173,7 +174,7 @@ export function HandoffDesk({
     setSigned(body);
     setView(body);
     setAgree(Boolean(body.email));
-    setLine(body.mine || "");
+    if (kind === "read" || kind === "reach") setLine(body.mine || "");
     const card = body.role === "holder" ? readBuyerCard(body.mine || "") : null;
     setEmail(card?.email || body.email || "");
     if (card) {
@@ -202,10 +203,10 @@ export function HandoffDesk({
     try {
       if (!agree && !signed?.email) throw new Error("Check the box to subscribe.");
       const body = await post("mail", agree ? `subscribe\n${email.trim()}` : "stop");
-      if (body.notice === "sent") setNote("PAR sent a confirmation from the PAR platform to that address.");
-      else if (body.notice === "same") setNote("That address is already subscribed.");
+      if (body.notice === "sent") setNote(`PAR sent a confirmation as ${body.mailFrom || "the PAR platform"}. A copy goes to the platform inbox.`);
+      else if (body.notice === "same") setNote("That address is already on file.");
       else if (body.notice === "stopped") setNote("Those PAR emails will stop.");
-      else setNote("Saved. The confirmation from the PAR platform sends when mail is connected.");
+      else setNote("The address is on file. No email was sent. This site has no mail service connected yet, so there is no From address.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The email did not save.");
     } finally {
@@ -291,10 +292,10 @@ export function HandoffDesk({
           </p>
           <ol className="handoff-road">
             <li>The seller connects the creator wallet, checks the box, and subscribes to sale email from the PAR platform. This can happen while the title is in that wallet, listed, or in escrow.</li>
-            <li>When a buyer holds the title, PAR emails the seller once. The clock starts then and counts down the days on the sheet.</li>
+            <li>When a buyer holds the title, PAR emails the seller once. The clock starts then and counts the good faith delivery days (GFD).</li>
             <li>The buyer leaves a name, a mailing address, and an email here, as soon as that wallet holds the title or a few minutes later, then waits to hear from the seller.</li>
-            <li>Each person can write a note on this page. PAR emails that note only to the other person. The name, mailing address, email, and notes stay with the two wallets, the PAR platform, and an admin.</li>
-            <li>When the handoff days run close, PAR emails the seller once, to remind them of the handoff and the promise on the sheet.</li>
+            <li>Each person can write a note on this page. PAR emails that note to the other person and copies the PAR platform. The buyer does not see the seller's subscription address. The name, mailing address, email, and notes stay with the two wallets, the PAR platform, and an admin. This page says whether each note was emailed.</li>
+            <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object to a shipper or into the holder's hands. The seller still owes the holder the object.</li>
           </ol>
         </>
       )}
@@ -354,8 +355,16 @@ export function HandoffDesk({
               <label>
                 Email for this sale
                 <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-                <span className="note">Private. The buyer does not see this address. Every message says it is from the PAR platform and that it is about your sale.</span>
+                <span className="note">Private. The buyer does not see this address. You can change it and subscribe again.</span>
               </label>
+              {signed.email ? (
+                <p className="note">
+                  On file: {signed.email}.{" "}
+                  {signed.mailFrom
+                    ? `Messages leave as ${signed.mailFrom}. A copy of each message also goes to ${PLATFORM_MAIL}.`
+                    : "No message has been sent. This site has no mail service connected yet, so there is no From address."}
+                </p>
+              ) : null}
               <button type="button" disabled={busy || (agree && !email.trim())} onClick={() => void saveMail()}>
                 {busy ? "Saving…" : agree ? "Subscribe to sale email" : "Stop PAR email"}
               </button>
@@ -390,8 +399,10 @@ export function HandoffDesk({
               )}
               {sellerProof ? (
                 <p>
-                  The seller wrote{signed.proofs.seller?.at ? ` ${when(signed.proofs.seller.at)}` : ""}: {sellerProof}
+                  Saved handoff line{signed.proofs.seller?.at ? ` ${when(signed.proofs.seller.at)}` : ""}: {sellerProof}
                 </p>
+              ) : sale ? (
+                <p className="note">No handoff line is saved yet. The box above keeps what you type until you press Save the handoff line.</p>
               ) : (
                 <p className="note">The seller has not left a line yet.</p>
               )}
@@ -409,6 +420,7 @@ export function HandoffDesk({
                           <span className="note">
                             {item.from === "seller" ? "Seller" : "Buyer"}
                             {item.at ? ` · ${when(item.at)}` : ""}
+                            {item.mail === "sent" ? " · Emailed" : item.mail === "wait" ? " · Not emailed yet" : item.mail ? " · Not emailed" : ""}
                           </span>
                           <p>{item.body}</p>
                         </li>

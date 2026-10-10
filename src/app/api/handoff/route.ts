@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { isAdminWallet } from "@/lib/admins";
 import { serverRpcUrl, type ClusterName } from "@/lib/constants";
 import { handoffMessage, type HandoffPublic } from "@/lib/handoff-message";
-import { acceptBuyerLeave, acceptNote, cleanReach, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
+import { acceptBuyerLeave, acceptNote, cleanReach, mailIdentity, noteHolder, saveSubscription, syncHeliusHook, verifyHandoffSignature } from "@/lib/handoff-server";
 import { readItemByTitle, readHandoffMail, readHandoffNoteBySignature, readHandoffReach, readHandoffThread, writeHandoffReach, clearHandoffReach } from "@/lib/store";
 import { ESCROW_PROGRAM, listingAddress, readTitle, tensorListAddress } from "@/lib/title";
 
@@ -141,7 +141,9 @@ export async function POST(request: Request) {
         from: row.wallet === item.creator ? "seller" : "buyer",
         body: row.body,
         at: row.created_at,
+        mail: row.mail,
       })),
+      mailFrom: mailIdentity(),
       notice,
     },
     { headers: { "cache-control": "no-store" } },

@@ -4,6 +4,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { serverRpcUrl, type ClusterName } from "./constants";
 import {
   HANDOFF_DAY_MS,
+  PLATFORM_MAIL,
   parAddress,
   parFrom,
   parLetter,
@@ -149,7 +150,14 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Sale mail goes only to the seller. Purchase mail goes only to the buyer. */
+/** The From line, once the mail service is connected. Null until then, so the page does not invent an address. */
+export function mailIdentity(): string | null {
+  const raw = process.env.HANDOFF_FROM;
+  if (!process.env.RESEND_API_KEY || !raw) return null;
+  return parFrom(raw);
+}
+
+/** Sale mail goes to the seller. Purchase mail goes to the buyer. The platform inbox is copied on both. */
 async function sendAbout(email: string, side: HandoffSide, name: string, what: string, detail: string[]): Promise<"sent" | "idle" | "retry"> {
   const key = process.env.RESEND_API_KEY;
   const fromRaw = process.env.HANDOFF_FROM;
@@ -158,8 +166,9 @@ async function sendAbout(email: string, side: HandoffSide, name: string, what: s
   const reply = parAddress(fromRaw);
   const subject = parSubject(side, name, what);
   if (!from || !reply || !subject.startsWith("PAR platform · ")) return "idle";
-  const lines = parLetter(side, name, detail, what !== "Email stopped");
+  const lines = parLetter(side, name, [...detail, "A copy of this message goes to the PAR platform."], what !== "Email stopped");
   const html = [`<p><strong>PAR platform</strong></p>`, ...lines.filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`)].join("");
+  const copy = PLATFORM_MAIL.toLowerCase() === email.toLowerCase() ? undefined : [PLATFORM_MAIL];
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -167,6 +176,7 @@ async function sendAbout(email: string, side: HandoffSide, name: string, what: s
       body: JSON.stringify({
         from,
         to: [email],
+        cc: copy,
         reply_to: reply,
         subject,
         text: lines.join("\n"),
@@ -198,9 +208,9 @@ async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, 
           "A buyer now holds the title.",
           `Sale page: ${page}`,
           days
-            ? `The sheet gives ${days} ${days === 1 ? "day" : "days"} for the handoff. The clock on that page counts them down.`
+            ? `The sheet sets ${days} ${days === 1 ? "day" : "days"} (GFD), a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
             : "The sheet names the handoff. The clock on the sale page follows it.",
-          "Your promise is to hand the object to the holder of the title.",
+          "You still owe the holder the object.",
           "Write on the sale page when you are ready. PAR sends each note only to the buyer.",
         ];
   const result = await sendAbout(email, "sale", name, kind === "home" ? "The title is back in your wallet" : "A buyer holds the title", detail);
@@ -379,16 +389,17 @@ async function remindSeller(cluster: ClusterName, item: IndexedTitle, owner: str
   const leftDays = Math.ceil(leftMs / HANDOFF_DAY_MS);
   const remain =
     leftMs <= 0
-      ? "The handoff days on the sheet have passed."
+      ? "The good faith date on the sheet has passed."
       : leftDays <= 1
-        ? "Less than a day remains on the handoff clock."
-        : `${leftDays} days remain on the handoff clock.`;
-  const result = await sendAbout(email, "sale", objectName(item.name), "The handoff days are close", [
-    "This is a reminder to finish the handoff.",
+        ? "Less than a day remains on the good faith clock."
+        : `${leftDays} days remain on the good faith clock.`;
+  const result = await sendAbout(email, "sale", objectName(item.name), "The good faith date is close", [
+    "This is a reminder of the good faith delivery date.",
     remain,
     days
-      ? `Your promise is to hand the object to the holder of the title within ${days} ${days === 1 ? "day" : "days"} of their claim.`
-      : "Your promise is to hand the object to the holder of the title.",
+      ? `Your ${days} ${days === 1 ? "day" : "days"} (GFD) are the best effort to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
+      : "The date on the sheet is the best effort to put the object in the mail, with a shipper, or in the holder's hands.",
+    "You still owe the holder the object.",
     `Sale page: ${saleUrl(item.title, cluster)}`,
     "Open that page, read the buyer's note, and answer on the page.",
   ]);
@@ -542,7 +553,7 @@ export async function syncHeliusHook(cluster: ClusterName): Promise<void> {
   if (!addresses.length) return;
   const body = {
     webhookURL: `${PUBLIC_ORIGIN}/api/helius/handoff?c=${cluster === "devnet" ? "devnet" : "mainnet"}`,
-    webhookType: "enhanced",
+    webhookType: cluster === "devnet" ? "enhancedDevnet" : "enhanced",
     accountAddresses: addresses,
     transactionTypes: ["ANY"],
     txnStatus: "success",
