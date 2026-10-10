@@ -283,11 +283,7 @@ export function bytesWithDurableNonce(transaction: Transaction, payer: PublicKey
   copy.feePayer = payer;
   if (!copy.recentBlockhash) copy.recentBlockhash = "11111111111111111111111111111111";
   copy.instructions.unshift(nonceAdvance(new PublicKey(new Uint8Array(32).fill(8)), payer));
-  try {
-    return copy.serialize({ requireAllSignatures: false, verifySignatures: false }).length;
-  } catch {
-    return null;
-  }
+  return transactionBytes(copy);
 }
 
 function storedNonce(payer: string): PublicKey | null {
