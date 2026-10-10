@@ -283,7 +283,7 @@ export async function saveSubscription(input: {
     }
     return "stopped";
   }
-  if (prior === parsed.email) return "same";
+  if (prior?.toLowerCase() === parsed.email) return "same";
   await writeHandoffMail(input.cluster, input.wallet, parsed.email);
   const detail =
     input.side === "sale"
@@ -389,7 +389,7 @@ export async function acceptBuyerLeave(input: {
   if (current && current.body !== cardText && Date.now() - Date.parse(current.updated_at) < NOTE_GAP_MS) return "soon";
   if (parsed.subscribe && parsed.email.toLowerCase() === PLATFORM_MAIL.toLowerCase()) return "platform";
   const prior = await readHandoffMail(input.cluster, input.wallet);
-  const sameMail = parsed.subscribe ? prior === parsed.email : !prior;
+  const sameMail = parsed.subscribe ? prior?.toLowerCase() === parsed.email : !prior;
   if (current?.body === cardText && !message && sameMail) return "same";
   const hold = await readHandoffHold(input.cluster, input.item.title, input.wallet);
   if (cardText) await writeHandoffReach(input.cluster, input.item.title, input.wallet, cardText);

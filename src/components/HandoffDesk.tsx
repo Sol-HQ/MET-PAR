@@ -38,6 +38,14 @@ type Signed = HandoffPublic & {
   notice: "sent" | "saved" | "same" | "stopped" | "wait" | null;
 };
 
+const ALREADY_SUBSCRIBED = "You've already subscribed with this email. If you'd like to change it, resubscribe.";
+
+function sameSubscription(onFile: string | null | undefined, typed: string): boolean {
+  const saved = (onFile || "").trim().toLowerCase();
+  const next = typed.trim().toLowerCase();
+  return Boolean(saved) && saved === next;
+}
+
 function letterState(status: Letter["status"]): string {
   if (status === "sent") return "Sent";
   if (status === "retry") return "Not sent yet";
@@ -220,9 +228,13 @@ export function HandoffDesk({
     setError("");
     try {
       if (!agree && !signed?.email) throw new Error("Check the box to subscribe.");
+      if (agree && sameSubscription(signed?.email, email)) {
+        setNote(ALREADY_SUBSCRIBED);
+        return;
+      }
       const body = await post("mail", agree ? `subscribe\n${email.trim()}` : "stop");
       if (body.notice === "sent") setNote(`PAR sent a confirmation as ${body.mailFrom || "the PAR platform"}. A copy goes to the platform inbox.`);
-      else if (body.notice === "same") setNote("That address is already on file.");
+      else if (body.notice === "same") setNote(ALREADY_SUBSCRIBED);
       else if (body.notice === "stopped") setNote("Those PAR emails will stop.");
       else setNote(`The address is on file. ${body.mailReady ? "The confirmation was not accepted by the mail service." : "The mail key is not on this site yet, so the letter is recorded and not delivered."}`);
     } catch (cause) {
@@ -441,10 +453,14 @@ export function HandoffDesk({
               <label>
                 Email for this sale
                 <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-                <span className="note">Private. Use your own email, then you can change it and subscribe again. The buyer does not see this address. Copies and replies go to {PLATFORM_MAIL}. Messages leave as PAR platform &lt;platform@meteora.surf&gt;.</span>
+                {sameSubscription(signed.email, email) ? (
+                  <span className="note">{ALREADY_SUBSCRIBED}</span>
+                ) : (
+                  <span className="note">Private. Use your own email. The buyer does not see this address. Copies and replies go to {PLATFORM_MAIL}. Messages leave as PAR platform &lt;platform@meteora.surf&gt;.</span>
+                )}
               </label>
               <button type="button" disabled={busy || (agree && !email.trim())} onClick={() => void saveMail()}>
-                {busy ? "Saving…" : agree ? "Subscribe to sale email" : "Stop PAR email"}
+                {busy ? "Saving…" : !agree ? "Stop PAR email" : sameSubscription(signed.email, email) ? "Subscribed" : signed.email ? "Resubscribe" : "Subscribe to sale email"}
               </button>
             </>
           ) : null}
