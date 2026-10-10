@@ -8,6 +8,7 @@ import { isAdminWallet } from "@/lib/admins";
 import { ChainBeatProvider, ChainHash, ChainSlot, ChainTime } from "@/components/ChainBeat";
 import { TxNotice } from "@/components/TxNotice";
 import { DBC_PROGRAM_ID } from "@/lib/constants";
+import { poolsPath } from "@/lib/title";
 import { useCluster } from "@/lib/cluster";
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -41,7 +42,7 @@ export function Shell({ children }: { children: ReactNode }) {
                   Mainnet
                 </button>
               </div>
-              <Link href="/pools" className="admin-link">
+              <Link href={poolsPath(cluster)} className="admin-link">
                 Pools
               </Link>
               <Link href="/faqs" className="admin-link">

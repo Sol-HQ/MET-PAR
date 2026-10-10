@@ -10,6 +10,7 @@ import { MainnetGate } from "@/components/MainnetGate";
 import { PoolBoard } from "@/components/PoolBoard";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
+import { poolsPath } from "@/lib/title";
 import { DEFAULT_FEE_DECAY_SECONDS, DEFAULT_MIGRATION_FEE_BPS, FEE_DECAY_CHOICES, HIDDEN_POOLS, MIGRATION_FEE_CHOICES, feeDecayLabel, migrationFeeLabel, quoteLabel, quoteMintAddress, type ClusterName, type QuoteKind } from "@/lib/constants";
 import {
   BILLION_SUPPLY,
@@ -1037,7 +1038,7 @@ export function Desk() {
           <Link href="/faqs">FAQs</Link> page.
         </p>
         <div className="asset-nav">
-          <Link href="/pools" className="asset-link">
+          <Link href={poolsPath(cluster)} className="asset-link">
             Pools
           </Link>
           <Link href="/asset" className="asset-link">
@@ -1984,7 +1985,7 @@ export function Desk() {
       </form>
 
       <p className="note">
-        Tokens and real-world assets you create show here. Every launch on this platform is on the <Link href="/pools">Pools</Link> page.
+        Tokens and real-world assets you create show here. Every launch on this network is on the <Link href={poolsPath(cluster)}>Pools</Link> page.
       </p>
       <PoolBoard watch={message} limit={24} mine />
 

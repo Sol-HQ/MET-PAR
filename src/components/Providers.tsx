@@ -25,11 +25,11 @@ export function Providers({ children }: { children: ReactNode }) {
     try {
       const named = new URLSearchParams(window.location.search).get("c");
       if (named === "mainnet") {
-        setClusterState("mainnet-beta");
+        setCluster("mainnet-beta");
         return;
       }
       if (named === "devnet") {
-        setClusterState("devnet");
+        setCluster("devnet");
         return;
       }
       const saved = localStorage.getItem("par-cluster");

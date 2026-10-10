@@ -40,6 +40,7 @@ import {
   SALE_PROGRAM_FEE_PERCENT,
   creatorSalePercent,
   poolPath,
+  poolsPath,
   salePath,
   saleUrl,
   saleVenueWords,
@@ -636,7 +637,7 @@ export function RecordCreate({
           quote: draftPlan.quoteSymbol,
           par: draftPlan.par,
           poolPrice: draftPlan.poolPrice,
-          handoffDays: draft.shipDays,
+          handoffDays: `${draft.shipDays} (GFD)`,
           declared: draft.declared,
           sheetSha256: "0".repeat(64),
           imageSha256: "0".repeat(64),
@@ -963,10 +964,10 @@ export function RecordCreate({
         decimals: String(plan.decimals),
         quote: plan.quoteSymbol,
         par: plan.par,
-        poolPrice: plan.poolPrice,
-        handoffDays: draft.shipDays,
-        declared: draft.declared,
-        sheetSha256,
+          poolPrice: plan.poolPrice,
+          handoffDays: `${draft.shipDays} (GFD)`,
+          declared: draft.declared,
+          sheetSha256,
         imageSha256,
         title: titleAddress,
         titleHeldBy: held,
@@ -1273,9 +1274,10 @@ export function RecordCreate({
       ) : null}
       {finished ? (
         <p className="note">
+          <Link href={poolsPath(cluster)}>Find it on the Pools page</Link>.{" "}
           {finished.pool !== "none" ? (
             <>
-              <Link href={poolPath(finished.pool, cluster)}>Open the pool page</Link>.{" "}
+              <Link href={poolPath(finished.pool, cluster)}>Open the coin page</Link>.{" "}
             </>
           ) : null}
           <Link href={salePath(finished.title, cluster)}>Open the sale page</Link>.{" "}

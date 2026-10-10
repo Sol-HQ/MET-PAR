@@ -16,7 +16,7 @@ import { FREE_UPLOAD_BYTES } from "@/lib/record";
 import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaDraftRaw, readRwaKeys, writeRwaDraftRaw, writeRwaKeys } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
-import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
+import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, poolsPath, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT } from "@/lib/title";
 
 /** The pool price sits 20% above par, inside the PAR rule of at most twice par. */
 const POOL_LIFT = 1.2;
@@ -402,7 +402,7 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
     }
   }
   if (step === "Redemption") {
-    if (wholeDays(draft.shipDays) === null) return "Delivery days are a whole number from 1 to 365.";
+    if (wholeDays(draft.shipDays) === null) return "Good faith delivery days are a whole number from 1 to 365.";
     if (!draft.shipping.trim()) return "Write how the object changes hands.";
     if (positive(draft.declared) === null) {
       return "The declared value is a number above zero. It is the most the holder pays if the object cannot be delivered.";
@@ -702,7 +702,7 @@ export function AssetDesk() {
       ["Pitch", draft.pitch.trim() || "None"],
       ["Work", draft.work],
       ["Claim", draft.claim],
-      ["Redemption", `The holder of the title claims it. Delivery takes ${draft.shipDays} days after the claim. ${draft.shipping} If a claim goes wrong: ${draft.terms}`],
+      ["Redemption", `The holder of the title claims it. ${draft.shipDays} days (GFD). ${draft.shipping} If a claim goes wrong: ${draft.terms}`],
       [
         "Title sale",
         rail === "escrow"
@@ -907,7 +907,7 @@ export function AssetDesk() {
           <Link href="/" className="asset-link">
             PAR
           </Link>
-          <Link href="/pools" className="asset-link">
+          <Link href={poolsPath(cluster)} className="asset-link">
             Pools
           </Link>
           <Link href="/faqs" className="asset-link">
@@ -1305,8 +1305,11 @@ export function AssetDesk() {
       {step === "Redemption" ? (
         <form>
           <label>
-            Days for the maker to hand it over after the title holder claims it
+            Good faith delivery days (GFD)
             <input value={draft.shipDays} onChange={(event) => patch({ shipDays: event.target.value })} inputMode="numeric" />
+            <span className="note">
+              {draft.shipDays.trim() || "These"} days (GFD) is a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. A package sent on the day before the date can still be in transit after the date. You still owe the holder the object.
+            </span>
           </label>
           <label>
             Handoff
@@ -1505,7 +1508,7 @@ export function AssetDesk() {
               <div>
                 <dt>Redemption</dt>
                 <dd>
-                  The title holder claims it. Handoff in {draft.shipDays} days. {draft.shipping}
+                  The title holder claims it. {draft.shipDays} days (GFD). By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. You still owe the holder the object. {draft.shipping}
                 </dd>
               </div>
               <div>

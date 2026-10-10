@@ -13,7 +13,7 @@ import { objectPairing, titleSentence, tokenPairing } from "@/lib/asset-on-pool"
 import { HIDDEN_POOLS, meteoraPoolUrl, type ClusterName } from "@/lib/constants";
 import { formatDollars, formatMoney } from "@/lib/format";
 import { loadPool } from "@/lib/load-pool";
-import { poolPath } from "@/lib/title";
+import { poolPath, poolsPath } from "@/lib/title";
 
 const STORAGE_KEY = "par.listings.v1";
 
@@ -308,7 +308,37 @@ export function PoolBoard({
   return (
     <section className="rows">
       {mine && !wallet ? (
-        <p className="note">Connect a wallet. The tokens and real-world assets that wallet created show here. Every launch on this platform is on the Pools page.</p>
+        <p className="note">Connect a wallet. The tokens and real-world assets that wallet created show here. Every launch on this network is on the <Link href={poolsPath(cluster)}>Pools</Link> page.</p>
+      ) : null}
+      {listAssets && !(mine && !wallet) ? (
+        <div>
+          <h2>Real-world assets</h2>
+          {assetNote ? <p className="note">{assetNote}</p> : null}
+          {assets && shownAssets.length === 0 && !assetNote ? (
+            <p className="note">
+              {mine ? "You have no real-world asset" : "No real-world asset is listed"} on {cluster === "devnet" ? "Devnet" : "Mainnet"}.{" "}
+              <Link href={poolsPath(cluster === "devnet" ? "mainnet-beta" : "devnet")}>
+                {cluster === "devnet" ? "Mainnet" : "Devnet"} is the other list.
+              </Link>
+            </p>
+          ) : null}
+          <div className="card-grid">
+            {shownAssets.map((asset) => (
+              <article key={asset.title} className="card">
+                <ObjectPicture src={asset.image} alt={asset.name} framed />
+                <Link href={asset.titleHref} className="card-link">
+                  <h3>{asset.name}</h3>
+                </Link>
+                <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin)}</p>
+                <p className="object-status">{titleSentence(asset.status)}</p>
+                <p>
+                  {asset.standing === "sold" && realPool(asset.pool) ? "The token can still be traded. " : null}
+                  <Link href={asset.titleHref}>Open the sales page</Link>
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
       ) : null}
       {mine && !wallet ? null : (
       <>
@@ -381,31 +411,6 @@ export function PoolBoard({
       </div>
       </>
       )}
-      {listAssets && !(mine && !wallet) ? (
-        <div>
-          <h2>Real-world assets</h2>
-          {assetNote ? <p className="note">{assetNote}</p> : null}
-          {assets && shownAssets.length === 0 && !assetNote ? (
-            <p className="note">{mine ? "You have no real-world asset." : "No real-world asset is on this network yet."}</p>
-          ) : null}
-          <div className="card-grid">
-            {shownAssets.map((asset) => (
-              <article key={asset.title} className="card">
-                <ObjectPicture src={asset.image} alt={asset.name} framed />
-                <Link href={asset.titleHref} className="card-link">
-                  <h3>{asset.name}</h3>
-                </Link>
-                <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin)}</p>
-                <p className="object-status">{titleSentence(asset.status)}</p>
-                <p>
-                  {asset.standing === "sold" && realPool(asset.pool) ? "The token can still be traded. " : null}
-                  <Link href={asset.titleHref}>Open the sales page</Link>
-                </p>
-              </article>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

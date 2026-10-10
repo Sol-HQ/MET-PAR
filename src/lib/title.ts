@@ -57,6 +57,11 @@ export function salePath(title: string, cluster: ClusterName): string {
   return `/t/${title}${cluster === "devnet" ? "?c=devnet" : ""}`;
 }
 
+/** The marketplace list. The query names the network so a fresh page does not open on the practice network. */
+export function poolsPath(cluster: ClusterName): string {
+  return `/pools?c=${cluster === "devnet" ? "devnet" : "mainnet"}`;
+}
+
 /** Practice pool links stay bare. A real-network link names the network so a fresh page loads that pool. */
 export function poolPath(pool: string, cluster: ClusterName): string {
   return `/pool/${pool}${cluster === "devnet" ? "" : "?c=mainnet"}`;
@@ -110,6 +115,17 @@ export function saleVenueWords(rail: TitleRail): string {
   return rail === "escrow" ? "PAR escrow program" : "Tensor marketplace program";
 }
 
+/** The day count, labeled. GFD is the good faith delivery date. */
+export function goodFaithMark(days: string | number): string {
+  const count = String(days).trim();
+  return `${count} ${count === "1" ? "day" : "days"} (GFD)`;
+}
+
+/** What the day count means. Shown to the seller before signing and to the buyer on the sale page. */
+export function goodFaithDelivery(days: string | number): string {
+  return `${goodFaithMark(days)} is a good faith delivery date. By that day the maker does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. The maker still owes the holder the object.`;
+}
+
 /** The creator signs these words with the wallet, and the signature goes into the sheet. */
 export function creatorPromises(input: {
   rail: TitleRail;
@@ -147,7 +163,7 @@ export function creatorPromises(input: {
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
         : "Tensor pays me the full price. PAR takes none of that sale. If I burn any of that price, the burn is my own promise.",
-    `I will hand the item to the holder of the title within ${input.handoffDays} days of their claim, as the handoff terms say.`,
+    `The ${goodFaithMark(input.handoffDays)} after the claim is a good faith delivery date. By that day I will do my best to put the item in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. I still owe the holder the item.`,
     escrow
       ? auction
         ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
