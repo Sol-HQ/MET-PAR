@@ -1,6 +1,7 @@
 import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import Link from "next/link";
+import type { Metadata } from "next";
 import { CLAIMED_STATUS, titleWasPurchased } from "@/lib/asset-on-pool";
 import { ObjectPicture } from "@/components/AssetOnPool";
 import { objectPictureUrl } from "@/lib/sheet-html";
@@ -10,13 +11,14 @@ import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
+import { ShareOnX } from "@/components/ShareOnX";
 import { explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
 import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
-import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,108 @@ type Sheet = {
 };
 
 type SaleKind = "paired" | "rwa" | "token";
+
+function socialImageUrl(value: string): string | undefined {
+  const trimmed = value.trim();
+  const normalized = trimmed.startsWith("ar://")
+    ? `https://arweave.net/${trimmed.slice(5)}`
+    : trimmed.startsWith("ipfs://")
+      ? `https://ipfs.io/ipfs/${trimmed.slice(7)}`
+      : trimmed;
+  try {
+    const url = new URL(normalized);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function socialDescription(value: string): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (!clean) return "A one-of-one title NFT for a real-world asset. View its sale page on PAR.";
+  return clean.length > 180 ? `${clean.slice(0, 177).trimEnd()}…` : clean;
+}
+
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ title: string }>;
+  searchParams: Promise<{ c?: string }>;
+}): Promise<Metadata> {
+  const [{ title: address }, query] = await Promise.all([params, searchParams]);
+  const cluster: ClusterName = query.c === "devnet" ? "devnet" : "mainnet-beta";
+  const canonical = saleUrl(address, cluster);
+  if (!ADDRESS.test(address) || REMOVED_TITLES.has(address)) {
+    return { title: "RWA title | PAR", alternates: { canonical } };
+  }
+
+  try {
+    const endpoint = rpcUrl(cluster);
+    const title = await readTitle(endpoint, address);
+    const recordAddress = title.attributes.record || "";
+    const record = ADDRESS.test(recordAddress) ? await readRecord(endpoint, recordAddress) : null;
+    let sheet: Sheet = {};
+    if (recordAddress) {
+      const stored = await readCopy(cluster, recordAddress).catch(() => null);
+      if (stored) {
+        try {
+          sheet = JSON.parse(stored) as Sheet;
+        } catch {
+          sheet = { description: stored };
+        }
+      } else if (record?.uri?.startsWith("https://")) {
+        sheet = (await fetch(record.uri, { cache: "no-store", signal: AbortSignal.timeout(5000) })
+          .then((response) => (response.ok ? response.json() : {}))
+          .catch(() => ({}))) as Sheet;
+      }
+    }
+
+    let image = typeof sheet.image === "string" ? sheet.image : "";
+    let description = sheet.record?.pitch || sheet.record?.object?.story || sheet.record?.claim?.text || sheet.claim || "";
+    if (title.uri.startsWith("https://")) {
+      const meta = (await fetch(title.uri, { cache: "no-store", signal: AbortSignal.timeout(5000) })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null)) as { image?: string; description?: string } | null;
+      if (typeof meta?.image === "string" && meta.image.trim()) image = meta.image;
+      if (!description && typeof meta?.description === "string") description = meta.description;
+    }
+    if (!image) image = objectPictureUrl(sheet);
+
+    const displayName = (sheet.record?.object?.name || sheet.name || title.name || "RWA title").trim();
+    const cardDescription = socialDescription(
+      description || `Title NFT for ${displayName}. The holder can claim this real-world asset. View the sale on PAR.`,
+    );
+    const cardImage = socialImageUrl(image);
+    return {
+      title: `${displayName} | PAR`,
+      description: cardDescription,
+      alternates: { canonical },
+      openGraph: {
+        type: "website",
+        siteName: "PAR",
+        title: displayName,
+        description: cardDescription,
+        url: canonical,
+        images: cardImage ? [{ url: cardImage, alt: `${displayName} title NFT` }] : undefined,
+      },
+      twitter: {
+        card: cardImage ? "summary_large_image" : "summary",
+        title: displayName,
+        description: cardDescription,
+        images: cardImage ? [cardImage] : undefined,
+      },
+    };
+  } catch {
+    return {
+      title: "RWA title | PAR",
+      description: "A one-of-one title NFT for a real-world asset. View its sale page on PAR.",
+      alternates: { canonical },
+      openGraph: { type: "website", siteName: "PAR", url: canonical },
+      twitter: { card: "summary" },
+    };
+  }
+}
 
 async function firstSeen(connection: Connection, address: string): Promise<{ signature: string; at: number | null } | null> {
   if (!ADDRESS.test(address)) return null;
@@ -268,6 +372,11 @@ export default async function SalePage({
   );
   const saleKind: SaleKind = noCoin ? "rwa" : hasObject ? "paired" : "token";
   const pageTitle = saleKind === "token" ? tokenName : namedObject || title.name || tokenName;
+  const shareDescription = [
+    namedObject ? `Title NFT for ${namedObject}.` : "Title NFT for a real-world asset.",
+    pitch || story || claimText || "The holder can claim this real-world asset.",
+    "View the sale on PAR.",
+  ].join(" ");
   const shownState = sold && saleKind === "token" ? "Claimed." : stateLine;
   const tokenLabel = symbol && symbol !== "the token" && symbol !== tokenName ? `${tokenName} (${symbol})` : tokenName;
   const burnLine =
@@ -352,7 +461,12 @@ export default async function SalePage({
 
   return (
     <section className="card record-create sale-page">
-      <p className="eyebrow">Sales page</p>
+      <div className="sale-share-row">
+        <p className="eyebrow">Sales page</p>
+        {saleKind !== "token" ? (
+          <ShareOnX name={pageTitle} description={shareDescription} url={saleUrl(address, cluster)} />
+        ) : null}
+      </div>
       <h2>{pageTitle}</h2>
       <p className="object-status">{shownState}</p>
       <p>

@@ -1554,6 +1554,24 @@ textarea {
   font-size: 1.15rem;
 }
 
+.sale-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sale-page .sale-share-actions a {
+  border: 1px solid var(--line);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.sale-page .sale-share-actions a:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
 @media (min-width: 860px) {
   .sale-listing {
     grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
