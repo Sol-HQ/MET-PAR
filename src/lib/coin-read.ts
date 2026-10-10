@@ -1,6 +1,6 @@
 import { getMint, getTokenMetadata, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { DBC_PROGRAM_ID } from "./constants";
+import { DBC_PROGRAM_ID, WSOL } from "./constants";
 import { loadPool } from "./load-pool";
 import { METEORA_TRADING_FEE_PERCENT } from "./platform";
 
@@ -126,14 +126,17 @@ export async function readPayToken(connection: Connection, mint: string): Promis
   const key = new PublicKey(trimmed);
   const account = await getMint(connection, key).catch(() => null);
   if (!account) throw new Error("That address is not a token on this network.");
-  let name = "Token";
-  let symbol = "TOKEN";
+  // Wrapped SOL has no name on the mint. The SOL button chooses this mint, so the review says SOL.
+  if (trimmed === WSOL) return { mint: key.toBase58(), name: "SOL", symbol: "SOL", decimals: account.decimals };
+  let name = "";
+  let symbol = "";
   try {
     const metadata = await getTokenMetadata(connection, key, "confirmed");
-    name = metadata?.name?.replaceAll("\0", "").trim() || name;
-    symbol = metadata?.symbol?.replaceAll("\0", "").trim() || symbol;
+    name = metadata?.name?.replaceAll("\0", "").trim() || "";
+    symbol = metadata?.symbol?.replaceAll("\0", "").trim() || "";
   } catch {
     // A token with no metadata still has a mint and decimals.
   }
+  if (!name || !symbol) throw new Error("That token has no name on chain. The review cannot name it.");
   return { mint: key.toBase58(), name, symbol, decimals: account.decimals };
 }
