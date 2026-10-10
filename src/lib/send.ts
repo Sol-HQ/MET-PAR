@@ -1,4 +1,14 @@
-import { PublicKey, SystemProgram, Transaction, VersionedTransaction, type Connection, type Keypair } from "@solana/web3.js";
+import {
+  ComputeBudgetProgram,
+  Keypair,
+  NONCE_ACCOUNT_LENGTH,
+  NonceAccount,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  VersionedTransaction,
+  type Connection,
+} from "@solana/web3.js";
 import { noteFreshBlockhash } from "./chain-beat";
 import { explorerTx, type ClusterName } from "./constants";
 import { formatLamports } from "./format";
@@ -260,11 +270,81 @@ function cloneTransaction(transaction: Transaction): Transaction {
   return copy;
 }
 
+const NONCE_STORE = "par.nonce.v1";
+const PRIORITY_MICRO_LAMPORTS = 100_000;
+
+function nonceAdvance(nonce: PublicKey, payer: PublicKey) {
+  return SystemProgram.nonceAdvance({ noncePubkey: nonce, authorizedPubkey: payer });
+}
+
+/** The packet size after a durable-nonce advance is added. The advance lets the signer read without the signature aging out. */
+export function bytesWithDurableNonce(transaction: Transaction, payer: PublicKey): number | null {
+  const copy = cloneTransaction(transaction);
+  copy.feePayer = payer;
+  if (!copy.recentBlockhash) copy.recentBlockhash = "11111111111111111111111111111111";
+  copy.instructions.unshift(nonceAdvance(new PublicKey(new Uint8Array(32).fill(8)), payer));
+  try {
+    return copy.serialize({ requireAllSignatures: false, verifySignatures: false }).length;
+  } catch {
+    return null;
+  }
+}
+
+function storedNonce(payer: string): PublicKey | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const map = JSON.parse(localStorage.getItem(NONCE_STORE) || "{}") as Record<string, string>;
+    return map[payer] ? new PublicKey(map[payer]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberNonce(payer: string, nonce: PublicKey) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const map = JSON.parse(localStorage.getItem(NONCE_STORE) || "{}") as Record<string, string>;
+    map[payer] = nonce.toBase58();
+    localStorage.setItem(NONCE_STORE, JSON.stringify(map));
+  } catch {
+    /* The nonce account still exists. The next visit creates another if this browser forgets it. */
+  }
+}
+
+async function readNonceValue(connection: Connection, nonce: PublicKey): Promise<string | null> {
+  const info = await connection.getAccountInfo(nonce, "confirmed");
+  if (!info) return null;
+  try {
+    return NonceAccount.fromAccountData(info.data).nonce;
+  } catch {
+    return null;
+  }
+}
+
+function expiryText(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : "";
+  return /block height exceeded|blockhash not found|transaction expired/i.test(message);
+}
+
+async function landedState(connection: Connection, signature: string): Promise<"ok" | "err" | "missing"> {
+  const status = await connection.getSignatureStatuses([signature], { searchTransactionHistory: true });
+  const row = status.value[0];
+  if (!row) return "missing";
+  if (row.err) return "err";
+  if (row.confirmationStatus === "processed" || row.confirmationStatus === "confirmed" || row.confirmationStatus === "finalized") {
+    return "ok";
+  }
+  return "missing";
+}
+
 /** The same signed bytes can be handed to the network more than once. Only one copy can land. */
 async function pushSigned(connection: Connection, raw: Uint8Array, tip: boolean): Promise<void> {
-  const sends: Promise<unknown>[] = [connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })];
-  if (tip) sends.push(relayJito(raw));
-  await Promise.all(sends.map((send) => send.catch(() => undefined)));
+  const rpc = connection
+    .sendRawTransaction(raw, { skipPreflight: true, maxRetries: 3 })
+    .then(() => true, () => false);
+  const jito = tip ? relayJito(raw).then(() => true, () => false) : Promise.resolve(false);
+  const [rpcOk, jitoOk] = await Promise.all([rpc, jito]);
+  if (!rpcOk && !jitoOk) throw new Error("The network did not take the transaction.");
 }
 
 async function relayJito(raw: Uint8Array): Promise<string> {
@@ -354,7 +434,7 @@ export async function finishSignature(
           await new Promise((resolve) => setTimeout(resolve, 2000));
           if (stop) return;
           if ("bundle" in resend) await relayBundle(resend.bundle).catch(() => undefined);
-          else await pushSigned(connection, resend.raw, resend.tip);
+          else await pushSigned(connection, resend.raw, resend.tip).catch(() => undefined);
         }
       })()
     : null;
@@ -371,6 +451,10 @@ export async function finishSignature(
     reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
+    if (expiryText(cause) && (await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
+      reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+      return;
+    }
     reportFailure(connection, cause, signature);
   } finally {
     stop = true;
@@ -393,35 +477,179 @@ export async function sendSignedRaw(
   return signature;
 }
 
+async function ensureNonceAccount(
+  connection: Connection,
+  payer: PublicKey,
+  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+): Promise<PublicKey | null> {
+  const saved = storedNonce(payer.toBase58());
+  if (saved && (await readNonceValue(connection, saved))) return saved;
+  reportTx({
+    kind: "ok",
+    text: "One short signature creates a durable account. After that, a signature can stay open while you read it. This is not the record.",
+  });
+  const nonceKey = Keypair.generate();
+  const lamports = await connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LENGTH);
+  const create = new Transaction().add(
+    SystemProgram.createNonceAccount({
+      fromPubkey: payer,
+      noncePubkey: nonceKey.publicKey,
+      authorizedPubkey: payer,
+      lamports,
+    }),
+  );
+  await sendAging(
+    connection,
+    await prepareTransaction(connection, payer, create, [nonceKey], { tip: false }),
+    signTransaction,
+    "A durable signature account is ready. Later signatures can stay open while you read them.",
+    null,
+  );
+  rememberNonce(payer.toBase58(), nonceKey.publicKey);
+  return nonceKey.publicKey;
+}
+
+function walletCopy(
+  prepared: PreparedTransaction,
+  blockhash: string,
+  lastValidBlockHeight: number,
+  payer: PublicKey,
+  nonce: { pubkey: PublicKey; value: string } | null,
+): { transaction: Transaction; expectedMessage: Uint8Array; durable: boolean } {
+  const ready = transactionForWallet(prepared, blockhash, lastValidBlockHeight);
+  const price = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_MICRO_LAMPORTS });
+  if (nonce) {
+    const stamped = cloneTransaction(ready.transaction);
+    stamped.feePayer = payer;
+    stamped.recentBlockhash = nonce.value;
+    stamped.lastValidBlockHeight = lastValidBlockHeight;
+    stamped.instructions.unshift(nonceAdvance(nonce.pubkey, payer));
+    const withFee = cloneTransaction(stamped);
+    withFee.instructions.splice(1, 0, price);
+    const chosen = (transactionBytes(withFee) ?? 9_999) <= TX_BYTES ? withFee : stamped;
+    if ((transactionBytes(chosen) ?? 9_999) <= TX_BYTES) {
+      chosen.recentBlockhash = nonce.value;
+      chosen.feePayer = payer;
+      chosen.lastValidBlockHeight = lastValidBlockHeight;
+      chosen.signatures = [];
+      const packed = Transaction.from(chosen.serialize({ requireAllSignatures: false, verifySignatures: false }));
+      packed.feePayer = payer;
+      packed.recentBlockhash = nonce.value;
+      packed.lastValidBlockHeight = lastValidBlockHeight;
+      return { transaction: packed, expectedMessage: Uint8Array.from(packed.serializeMessage()), durable: true };
+    }
+  }
+  const withFee = cloneTransaction(ready.transaction);
+  withFee.feePayer = payer;
+  withFee.recentBlockhash = blockhash;
+  withFee.lastValidBlockHeight = lastValidBlockHeight;
+  withFee.instructions.unshift(price);
+  if ((transactionBytes(withFee) ?? 9_999) <= TX_BYTES) {
+    withFee.signatures = [];
+    const packed = Transaction.from(withFee.serialize({ requireAllSignatures: false, verifySignatures: false }));
+    packed.feePayer = payer;
+    packed.recentBlockhash = blockhash;
+    packed.lastValidBlockHeight = lastValidBlockHeight;
+    return { transaction: packed, expectedMessage: Uint8Array.from(packed.serializeMessage()), durable: false };
+  }
+  return { transaction: ready.transaction, expectedMessage: ready.expectedMessage, durable: false };
+}
+
+/** Asks for the signature, sends it, and checks the chain over HTTP. A durable nonce does not age out while the wallet is open. */
+async function sendAging(
+  connection: Connection,
+  prepared: PreparedTransaction,
+  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  landed: string,
+  noncePubkey: PublicKey | null,
+): Promise<string> {
+  const payer = prepared.transaction.feePayer;
+  if (!payer) throw new Error("The transaction has no fee payer.");
+  let signature = "";
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const latest = await connection.getLatestBlockhash("processed");
+      noteFreshBlockhash(latest);
+      const nonceValue = noncePubkey ? await readNonceValue(connection, noncePubkey) : null;
+      const nonce = noncePubkey && nonceValue ? { pubkey: noncePubkey, value: nonceValue } : null;
+      const ready = walletCopy(prepared, latest.blockhash, latest.lastValidBlockHeight, payer, nonce);
+      const signed = await signTransaction(ready.transaction);
+      const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
+      signature = payerSignature(raw);
+      const tip = transactionCarriesJitoTip(raw);
+      await pushSigned(connection, raw, tip);
+      try {
+        await waitForLanded(connection, signature, latest.lastValidBlockHeight, ready.durable, () => pushSigned(connection, raw, tip));
+        reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+        return signature;
+      } catch (cause) {
+        if ((await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
+          reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+          return signature;
+        }
+        const message = cause instanceof Error ? cause.message : "";
+        if (/user rejected|rejected the request|user (cancelled|canceled)|approval denied/i.test(message)) throw cause;
+        if (!expiryText(cause) || ready.durable || attempt === 2) throw cause;
+        reportTx({
+          kind: "bad",
+          text: "That signature aged out while it was open. Approve the same transaction again. Nothing was charged.",
+        });
+        signature = "";
+      }
+    }
+    throw new Error("block height exceeded");
+  } catch (cause) {
+    if (cause instanceof ReportedTxError) throw cause;
+    if (signature && (await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
+      reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+      return signature;
+    }
+    reportFailure(connection, cause, signature || undefined);
+  }
+}
+
+async function waitForLanded(
+  connection: Connection,
+  signature: string,
+  lastValidBlockHeight: number,
+  durable: boolean,
+  resend: () => Promise<void>,
+): Promise<void> {
+  const started = Date.now();
+  const limit = durable ? 180_000 : 90_000;
+  while (Date.now() - started < limit) {
+    const state = await landedState(connection, signature);
+    if (state === "ok") return;
+    if (state === "err") {
+      const status = await connection.getSignatureStatuses([signature], { searchTransactionHistory: true });
+      const failure = new Error("The transaction landed and failed.");
+      Object.assign(failure, { err: status.value[0]?.err, signature, onChain: true });
+      throw failure;
+    }
+    if (!durable) {
+      const height = await connection.getBlockHeight("confirmed").catch(() => 0);
+      if (height > lastValidBlockHeight) {
+        if ((await landedState(connection, signature)) === "ok") return;
+        throw new Error("block height exceeded");
+      }
+    }
+    await resend().catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  if ((await landedState(connection, signature)) === "ok") return;
+  throw new Error(durable ? "The transaction was sent. It has not reached a block yet." : "block height exceeded");
+}
+
 export async function sendPrepared(
   connection: Connection,
   prepared: PreparedTransaction,
   signTransaction: (transaction: Transaction) => Promise<Transaction>,
   landed = "Transaction confirmed.",
 ): Promise<string> {
-  let signature = "";
-  try {
-    const latest = await connection.getLatestBlockhash("confirmed");
-    noteFreshBlockhash(latest);
-    const ready = transactionForWallet(prepared, latest.blockhash, latest.lastValidBlockHeight);
-    const signed = await signTransaction(ready.transaction);
-    const raw = lockSignedTransaction(signed, ready.expectedMessage, prepared.signers);
-    signature = payerSignature(raw);
-    const simulation = await connection.simulateTransaction(signed);
-    if (simulation.value.err) {
-      const errText = JSON.stringify(simulation.value.err);
-      const failure = new Error(/BlockhashNotFound|blockhash/i.test(errText) ? "blockhash not found" : "The transaction was not sent.");
-      Object.assign(failure, { logs: simulation.value.logs ?? [], err: simulation.value.err });
-      throw failure;
-    }
-    const tip = prepared.tipLamports > 0;
-    await pushSigned(connection, raw, tip);
-    await finishSignature(connection, signature, latest.blockhash, latest.lastValidBlockHeight, landed, { raw, tip });
-    return signature;
-  } catch (cause) {
-    if (cause instanceof ReportedTxError) throw cause;
-    reportFailure(connection, cause, signature || undefined);
-  }
+  const payer = prepared.transaction.feePayer;
+  if (!payer) throw new Error("The transaction has no fee payer.");
+  const noncePubkey = await ensureNonceAccount(connection, payer, signTransaction);
+  return sendAging(connection, prepared, signTransaction, landed, noncePubkey);
 }
 
 /**

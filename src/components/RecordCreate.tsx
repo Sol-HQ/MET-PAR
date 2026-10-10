@@ -22,7 +22,7 @@ import {
   recordInstruction,
   sha256Hex,
 } from "@/lib/record";
-import { JITO_TIP_LAMPORTS, landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
+import { JITO_TIP_LAMPORTS, bytesWithDurableNonce, landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
 import { readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
@@ -594,12 +594,14 @@ export function RecordCreate({
         let current = rows;
         for (;;) {
           const prepared = await prepareTransaction(connection, payerKey, build(current), [signer], { tip: false });
-          const bytes = transactionBytes(prepared.transaction);
-          if (bytes === null) throw new Error(`The ${label} could not be measured.`);
-          if (bytes <= 1232) return { prepared, bytes, omitted };
+          const raw = transactionBytes(prepared.transaction);
+          const durable = bytesWithDurableNonce(prepared.transaction, payerKey);
+          if (raw === null || durable === null) throw new Error(`The ${label} could not be measured.`);
+          if (durable <= 1232) return { prepared, bytes: durable, omitted };
           const drop = DROP_BEFORE_SHEET.find((key) => current.some((row) => row.key === key));
           if (!drop || LOCKED_ON_NFT.includes(drop)) {
-            throw new Error(`The ${label} is ${bytes} bytes. The limit is 1232. The proof lines stay on the NFT.`);
+            if (raw <= 1232) return { prepared, bytes: raw, omitted };
+            throw new Error(`The ${label} is ${raw} bytes. The limit is 1232. The proof lines stay on the NFT.`);
           }
           current = current.filter((row) => row.key !== drop);
           omitted.push(drop);
@@ -649,9 +651,13 @@ export function RecordCreate({
       );
       const recordPrepared = recordFit.prepared;
       const recordBytes = recordFit.bytes;
-      const simulated = await connection.simulateTransaction(recordPrepared.transaction, undefined, [keys.record.publicKey]);
-      if (simulated.value.err) throw new Error(`The record would fail: ${JSON.stringify(simulated.value.err)}`);
-      const recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
+      const recordOnChain = await connection.getAccountInfo(keys.record.publicKey, "confirmed");
+      let recordRent = recordOnChain?.lamports ?? 0;
+      if (!recordOnChain) {
+        const simulated = await connection.simulateTransaction(recordPrepared.transaction, undefined, [keys.record.publicKey]);
+        if (simulated.value.err) throw new Error(`The record would fail: ${JSON.stringify(simulated.value.err)}`);
+        recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
+      }
 
       const useEdition = draftPlan.rail !== "escrow";
       const titleFit = await fitNft(
@@ -703,7 +709,8 @@ export function RecordCreate({
         const collectionPrepared = await prepareTransaction(connection, payerKey, collectionTx, [keys.collection], {
           tip: false,
         });
-        const measuredCollection = transactionBytes(collectionPrepared.transaction);
+        const measuredCollection =
+          bytesWithDurableNonce(collectionPrepared.transaction, payerKey) ?? transactionBytes(collectionPrepared.transaction);
         if (measuredCollection === null) throw new Error("The master edition could not be measured.");
         collectionBytes = measuredCollection;
         if (collectionBytes > 1232) {
@@ -731,7 +738,7 @@ export function RecordCreate({
 
       const useRail = draftPlan.rail;
       const bundleLine =
-        "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Each one lands before the next signature opens. A fresh blockhash is taken for that signature. The three addresses stay in this browser tab, so a later try only signs whatever is still missing.";
+        "The master, the master edition, and the title do not fit in one 1232-byte packet, so they are three signatures. Each one lands before the next one opens. You can read the wallet prompt. When the packet has room, that signature stays valid while you read. When it does not, an aged signature is offered again, and a signature that already landed is not charged again.";
       draftPlan.lines = [
         `Network: ${cluster === "devnet" ? "practice network" : "Solana Mainnet"}`,
         `Order: you sign the promises, then the sheet picture, the NFT image, the readable sheet, and the record file go to Arweave, then the record${useEdition ? ", the master edition," : ""} and the title${useRail === "escrow" ? ", then the title goes into the escrow" : ""}.${draftPlan.noCoin ? "" : " The coin is not created here."}`,
