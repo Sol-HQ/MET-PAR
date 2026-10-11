@@ -1561,6 +1561,136 @@ textarea {
   gap: 0.75rem;
 }
 
+.sale-share-controls,
+.blink-share-pills {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.blink-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.blink-pill:hover,
+.blink-pill:focus-visible {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.blink-pill-primary {
+  border-color: var(--pine);
+  background: var(--pine);
+  color: var(--paper);
+}
+
+.blink-pill-primary:hover,
+.blink-pill-primary:focus-visible {
+  border-color: var(--pine);
+  color: var(--paper);
+  filter: brightness(1.08);
+}
+
+.blink-shell {
+  width: min(100% - 1.5rem, 46rem);
+  margin: clamp(1rem, 4vw, 3rem) auto;
+}
+
+.blink-purchase {
+  gap: 1rem;
+  padding: clamp(1rem, 4vw, 2rem);
+}
+
+.blink-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.blink-heading img {
+  flex: 0 0 3.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 0.9rem;
+}
+
+.blink-heading h1 {
+  margin: 0;
+  font-size: clamp(1.3rem, 5vw, 2rem);
+  line-height: 1.15;
+}
+
+.blink-heading .eyebrow,
+.blink-description,
+.blink-footnote {
+  margin: 0;
+}
+
+.blink-description {
+  max-width: 42rem;
+  line-height: 1.55;
+}
+
+.blink-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.blink-controls .blink-buy {
+  min-width: 9rem;
+}
+
+.blink-footnote,
+.blink-back {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.blink-back {
+  width: fit-content;
+}
+
+@media (max-width: 680px) {
+  .sale-share-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sale-share-controls,
+  .blink-share-pills {
+    justify-content: flex-start;
+  }
+
+  .blink-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .blink-controls > * {
+    width: 100%;
+  }
+}
+
 .sale-page .sale-share-actions a {
   border: 1px solid var(--line);
   color: var(--ink);

@@ -9,6 +9,7 @@ import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
 import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
+import { BlinkSharePills } from "@/components/BlinkSharePills";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
 import { ShareOnX } from "@/components/ShareOnX";
@@ -464,7 +465,10 @@ export default async function SalePage({
       <div className="sale-share-row">
         <p className="eyebrow">Sales page</p>
         {saleKind !== "token" ? (
-          <ShareOnX name={pageTitle} description={shareDescription} url={saleUrl(address, cluster)} />
+          <div className="sale-share-controls">
+            <BlinkSharePills title={address} cluster={cluster} shareUrl={saleUrl(address, cluster)} />
+            <ShareOnX name={pageTitle} description={shareDescription} url={saleUrl(address, cluster)} />
+          </div>
         ) : null}
       </div>
       <h2>{pageTitle}</h2>
