@@ -210,17 +210,18 @@ async function resolveListing(titleAddress: string, cluster: ClusterName): Promi
   if (record.attributes["sheet sha256"] !== item.sheet_sha256) {
     throw new BlinkProblem(`Sheet SHA256 mismatch: record has ${record.attributes["sheet sha256"]}, index has ${item.sheet_sha256}`, 409);
   }
-  if (!recordLink) {
-    throw new BlinkProblem("Record URI could not be parsed", 409);
-  }
-  if (recordLink.asset !== recordKey.toBase58()) {
-    throw new BlinkProblem(`Record link asset mismatch: ${recordLink.asset} vs ${recordKey.toBase58()}`, 409);
-  }
-  if (recordLink.mint !== mint.toBase58()) {
-    throw new BlinkProblem(`Record link mint mismatch: ${recordLink.mint} vs ${mint.toBase58()}`, 409);
-  }
-  if (recordLink.cluster !== cluster) {
-    throw new BlinkProblem(`Record link cluster mismatch: ${recordLink.cluster} vs ${cluster}`, 409);
+  // Skip record link validation if URI is Arweave (common for sheet URIs)
+  // We already have mint and cluster from the database
+  if (recordLink && !record.uri.startsWith("https://arweave.net/")) {
+    if (recordLink.asset !== recordKey.toBase58()) {
+      throw new BlinkProblem(`Record link asset mismatch: ${recordLink.asset} vs ${recordKey.toBase58()}`, 409);
+    }
+    if (recordLink.mint !== mint.toBase58()) {
+      throw new BlinkProblem(`Record link mint mismatch: ${recordLink.mint} vs ${mint.toBase58()}`, 409);
+    }
+    if (recordLink.cluster !== cluster) {
+      throw new BlinkProblem(`Record link cluster mismatch: ${recordLink.cluster} vs ${cluster}`, 409);
+    }
   }
   const sheet = sealedSheet(item.sheet, record.attributes["sheet sha256"] || "");
   const sheetRecord = sheet.record!;
