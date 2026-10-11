@@ -147,32 +147,97 @@ async function resolveListing(titleAddress: string, cluster: ClusterName): Promi
   const creator = publicKey(creatorAddress, "creator");
   const recordMint = record.attributes.mint || "";
   const mint = publicKey(recordMint, "payment token");
-  if (
-    record.owner !== RECORD_VAULT[cluster] ||
-    !record.nameLocked || !record.attributesLocked || !record.addBlocked || !record.frozenForever ||
-    !title.locked || !title.clean ||
-    !title.collection || !title.collectionSealed || title.edition !== 1 ||
-    item.record !== recordKey.toBase58() || item.creator !== creator.toBase58() ||
-    title.attributes.record !== recordKey.toBase58() || title.attributes.creator !== creator.toBase58() ||
-    title.attributes.mint !== mint.toBase58() || record.attributes.title !== titleKey.toBase58() ||
-    record.attributes["title held by"] !== "creator wallet" || title.attributes["held by"] !== "creator wallet" ||
-    record.attributes["sold through"] !== "Tensor marketplace program" ||
-    title.attributes["sold through"] !== "Tensor marketplace program" ||
-    record.attributes["sheet sha256"] !== item.sheet_sha256 ||
-    !recordLink || recordLink.asset !== recordKey.toBase58() || recordLink.mint !== mint.toBase58() || recordLink.cluster !== cluster
-  ) {
-    throw new BlinkProblem("The title, master record, and PAR index do not agree.", 409);
+  if (record.owner !== RECORD_VAULT[cluster]) {
+    throw new BlinkProblem(`Record owner mismatch: expected ${RECORD_VAULT[cluster]}, got ${record.owner}`, 409);
+  }
+  if (!record.nameLocked) {
+    throw new BlinkProblem("Record name is not locked", 409);
+  }
+  if (!record.attributesLocked) {
+    throw new BlinkProblem("Record attributes are not locked", 409);
+  }
+  if (!record.addBlocked) {
+    throw new BlinkProblem("Record does not have add blocked", 409);
+  }
+  if (!record.frozenForever) {
+    throw new BlinkProblem("Record is not frozen forever", 409);
+  }
+  if (!title.locked) {
+    throw new BlinkProblem("Title is not locked", 409);
+  }
+  if (!title.clean) {
+    throw new BlinkProblem("Title is not clean", 409);
+  }
+  if (!title.collection) {
+    throw new BlinkProblem("Title has no collection", 409);
+  }
+  if (!title.collectionSealed) {
+    throw new BlinkProblem("Title collection is not sealed", 409);
+  }
+  if (title.edition !== 1) {
+    throw new BlinkProblem(`Title edition is ${title.edition}, expected 1`, 409);
+  }
+  if (item.record !== recordKey.toBase58()) {
+    throw new BlinkProblem(`Index record mismatch: index has ${item.record}, on-chain has ${recordKey.toBase58()}`, 409);
+  }
+  if (item.creator !== creator.toBase58()) {
+    throw new BlinkProblem(`Index creator mismatch: index has ${item.creator}, on-chain has ${creator.toBase58()}`, 409);
+  }
+  if (title.attributes.record !== recordKey.toBase58()) {
+    throw new BlinkProblem(`Title record attribute mismatch: ${title.attributes.record} vs ${recordKey.toBase58()}`, 409);
+  }
+  if (title.attributes.creator !== creator.toBase58()) {
+    throw new BlinkProblem(`Title creator attribute mismatch: ${title.attributes.creator} vs ${creator.toBase58()}`, 409);
+  }
+  if (title.attributes.mint !== mint.toBase58()) {
+    throw new BlinkProblem(`Title mint attribute mismatch: ${title.attributes.mint} vs ${mint.toBase58()}`, 409);
+  }
+  if (record.attributes.title !== titleKey.toBase58()) {
+    throw new BlinkProblem(`Record title attribute mismatch: ${record.attributes.title} vs ${titleKey.toBase58()}`, 409);
+  }
+  if (record.attributes["title held by"] !== "creator wallet") {
+    throw new BlinkProblem(`Record 'title held by' is '${record.attributes["title held by"]}', expected 'creator wallet'`, 409);
+  }
+  if (title.attributes["held by"] !== "creator wallet") {
+    throw new BlinkProblem(`Title 'held by' is '${title.attributes["held by"]}', expected 'creator wallet'`, 409);
+  }
+  if (record.attributes["sold through"] !== "Tensor marketplace program") {
+    throw new BlinkProblem(`Record 'sold through' is '${record.attributes["sold through"]}', expected 'Tensor marketplace program'`, 409);
+  }
+  if (title.attributes["sold through"] !== "Tensor marketplace program") {
+    throw new BlinkProblem(`Title 'sold through' is '${title.attributes["sold through"]}', expected 'Tensor marketplace program'`, 409);
+  }
+  if (record.attributes["sheet sha256"] !== item.sheet_sha256) {
+    throw new BlinkProblem(`Sheet SHA256 mismatch: record has ${record.attributes["sheet sha256"]}, index has ${item.sheet_sha256}`, 409);
+  }
+  if (!recordLink) {
+    throw new BlinkProblem("Record URI could not be parsed", 409);
+  }
+  if (recordLink.asset !== recordKey.toBase58()) {
+    throw new BlinkProblem(`Record link asset mismatch: ${recordLink.asset} vs ${recordKey.toBase58()}`, 409);
+  }
+  if (recordLink.mint !== mint.toBase58()) {
+    throw new BlinkProblem(`Record link mint mismatch: ${recordLink.mint} vs ${mint.toBase58()}`, 409);
+  }
+  if (recordLink.cluster !== cluster) {
+    throw new BlinkProblem(`Record link cluster mismatch: ${recordLink.cluster} vs ${cluster}`, 409);
   }
   const sheet = sealedSheet(item.sheet, record.attributes["sheet sha256"] || "");
   const sheetRecord = sheet.record!;
-  if (
-    sheetRecord.creator !== creator.toBase58() ||
-    sheetRecord.token?.mint !== mint.toBase58() ||
-    sheetRecord.title?.address !== titleKey.toBase58() ||
-    sheetRecord.title?.sale?.payIn !== mint.toBase58() ||
-    record.attributes["full sheet"] !== title.attributes["full sheet"]
-  ) {
-    throw new BlinkProblem("The signed sheet does not agree with the on-chain title and payment token.", 409);
+  if (sheetRecord.creator !== creator.toBase58()) {
+    throw new BlinkProblem(`Sheet creator mismatch: ${sheetRecord.creator} vs ${creator.toBase58()}`, 409);
+  }
+  if (sheetRecord.token?.mint !== mint.toBase58()) {
+    throw new BlinkProblem(`Sheet token mint mismatch: ${sheetRecord.token?.mint} vs ${mint.toBase58()}`, 409);
+  }
+  if (sheetRecord.title?.address !== titleKey.toBase58()) {
+    throw new BlinkProblem(`Sheet title address mismatch: ${sheetRecord.title?.address} vs ${titleKey.toBase58()}`, 409);
+  }
+  if (sheetRecord.title?.sale?.payIn !== mint.toBase58()) {
+    throw new BlinkProblem(`Sheet sale payIn mismatch: ${sheetRecord.title?.sale?.payIn} vs ${mint.toBase58()}`, 409);
+  }
+  if (record.attributes["full sheet"] !== title.attributes["full sheet"]) {
+    throw new BlinkProblem("Full sheet hash mismatch between record and title", 409);
   }
 
   const listingAddress = tensorListAddress(titleKey);
