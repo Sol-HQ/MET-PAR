@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ClusterName } from "@/lib/constants";
 
-export function BlinkSharePills({ title, cluster, shareUrl }: { title: string; cluster: ClusterName; shareUrl: string }) {
+export function BlinkSharePills({ title, cluster, shareUrl, actionUrl }: { title: string; cluster: ClusterName; shareUrl: string; actionUrl: string }) {
   const [copied, setCopied] = useState(false);
   const blinkPage = `/blink/${encodeURIComponent(title)}${cluster === "devnet" ? "?c=devnet" : ""}`;
-  const blinkUrl = `solana-action:${shareUrl}`;
+  const blinkUrl = `solana-action:${actionUrl}`;
 
   async function copy() {
     try {

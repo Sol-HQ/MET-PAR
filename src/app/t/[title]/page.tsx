@@ -16,7 +16,7 @@ import { ShareOnX } from "@/components/ShareOnX";
 import { explorerAccount, explorerTx, rpcUrl, type ClusterName } from "@/lib/constants";
 import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
-import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
+import { PUBLIC_ORIGIN, RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
 import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
@@ -466,7 +466,12 @@ export default async function SalePage({
         <p className="eyebrow">Sales page</p>
         {saleKind !== "token" ? (
           <div className="sale-share-controls">
-            <BlinkSharePills title={address} cluster={cluster} shareUrl={saleUrl(address, cluster)} />
+            <BlinkSharePills
+              title={address}
+              cluster={cluster}
+              shareUrl={saleUrl(address, cluster)}
+              actionUrl={`${PUBLIC_ORIGIN}/api/actions/title/${encodeURIComponent(address)}${cluster === "devnet" ? "?c=devnet" : ""}`}
+            />
             <ShareOnX name={pageTitle} description={shareDescription} url={saleUrl(address, cluster)} />
           </div>
         ) : null}
