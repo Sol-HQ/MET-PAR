@@ -1,3 +1,4 @@
+import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { rpcUrl, type ClusterName } from "./constants";
 import { curveSale } from "./load-pool";
@@ -78,11 +79,21 @@ function storyLines(sheet: Sheet): string[] {
   return lines.map((line) => line.trim()).filter(Boolean);
 }
 
-function tokenAmount(amount: bigint): string {
-  const scale = BigInt(1000000);
+function tokenAmount(amount: bigint, decimals: number): string {
+  const scale = BigInt(10) ** BigInt(decimals);
   const whole = amount / scale;
-  const fraction = (amount % scale).toString().padStart(6, "0").replace(/0+$/, "");
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
   return `${whole.toString()}${fraction ? `.${fraction}` : ""}`;
+}
+
+async function paymentDecimals(connection: Connection, attributes: Record<string, string>): Promise<number> {
+  const recorded = Number.parseInt(attributes.decimals || "", 10);
+  if (Number.isInteger(recorded) && recorded >= 0 && recorded <= 9) return recorded;
+  try {
+    return (await getMint(connection, new PublicKey(attributes.mint), "confirmed")).decimals;
+  } catch {
+    return 6;
+  }
 }
 
 function when(seconds: number): string {
@@ -203,11 +214,17 @@ function standingOf(
   listingAddress: string | null,
   listing: Listing | null,
   tensorAmount: bigint | null,
+  priceSymbol: string,
+  priceDecimals: number,
   coin: "attached" | "none",
   graduated: boolean | null,
   saleOpen: boolean,
 ): { standing: AssetStanding; status: string } {
-  const pay = coin === "none" ? "the payment token" : "this token";
+  const pay = coin === "none" ? priceSymbol || "the payment token" : "this token";
+  const price = (amount: bigint) =>
+    coin === "none"
+      ? `${tokenAmount(amount, priceDecimals)} ${pay}`
+      : `${tokenAmount(amount, priceDecimals)} of ${pay}`;
   const leftEscrow = Boolean(rail === "escrow" && listingAddress && owner && owner !== listingAddress);
   const leftCreator = Boolean(rail === "creator" && owner && creator && owner !== creator && tensorAmount === null);
   const purchased = titleWasPurchased({ coin, graduated, saleOpen, leftSeller: leftEscrow || leftCreator });
@@ -238,7 +255,7 @@ function standingOf(
     return { standing: "waiting", status: `The coin has graduated. The sale has not opened. ${holder}` };
   }
   if (rail === "creator" && tensorAmount !== null) {
-    return { standing: "for-sale", status: `For sale on Tensor for ${tokenAmount(tensorAmount)} of ${pay}.` };
+    return { standing: "for-sale", status: `For sale on Tensor for ${price(tensorAmount)}.` };
   }
   if (rail === "creator") {
     return { standing: "held", status: "The creator holds the title. It is not listed." };
@@ -256,7 +273,7 @@ function standingOf(
   if (listing.sale === "auction") {
     return { standing: "for-sale", status: "In auction." };
   }
-  return { standing: "for-sale", status: `For sale for ${tokenAmount(listing.price)} of ${pay}.` };
+  return { standing: "for-sale", status: `For sale for ${price(listing.price)}.` };
 }
 
 async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset | null> {
@@ -302,6 +319,7 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
   const finishedAt = sale?.finishedAt ?? 0;
   const waitSeconds = Number.isFinite(delay) ? (opens.includes("second") ? delay : delay * 86_400) : 0;
   const saleOpen = Boolean(sale?.graduated) && finishedAt > 0 && waitSeconds > 0 && Math.floor(Date.now() / 1000) >= finishedAt + waitSeconds;
+  const decimals = await paymentDecimals(connection, row.attributes);
   const result = standingOf(
     status.rail,
     status.owner,
@@ -309,6 +327,8 @@ async function describe(cluster: ClusterName, row: Indexed): Promise<PoolAsset |
     status.listing,
     listing,
     status.tensor ? status.tensor.amount : null,
+    row.attributes.symbol || "",
+    decimals,
     coin,
     sale ? sale.graduated : coin === "attached" ? null : true,
     coin === "none" ? true : saleOpen,

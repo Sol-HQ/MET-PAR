@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import nacl from "tweetnacl";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { serverRpcUrl, type ClusterName } from "./constants";
@@ -21,6 +21,7 @@ import { PUBLIC_ORIGIN } from "./record";
 import {
   deleteHandoffHold,
   deleteHandoffMail,
+  claimHandoffSaleMail,
   hasIndex,
   insertHandoffHold,
   insertHandoffNote,
@@ -164,7 +165,7 @@ export function mailReady(): boolean {
   return Boolean(process.env.RESEND_API_KEY && mailIdentity());
 }
 
-type LetterLog = { cluster: ClusterName; title: string; kind: string };
+type LetterLog = { cluster: ClusterName; title: string; kind: string; idempotencyKey?: string };
 
 /** Sale mail goes to the seller. Purchase mail goes to the buyer. The platform inbox is copied on both. */
 async function sendAbout(
@@ -191,7 +192,11 @@ async function sendAbout(
     try {
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
-        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        headers: {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+          ...(log.idempotencyKey ? { "Idempotency-Key": log.idempotencyKey } : {}),
+        },
         body: JSON.stringify({
           from,
           to: [email],
@@ -254,6 +259,7 @@ async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, 
     cluster,
     title: item.title,
     kind,
+    idempotencyKey: `par-${createHash("sha256").update(`${cluster}:${item.title}:${owner}:${kind}`).digest("hex")}`,
   });
   if (result === "sent") await markHandoffMail(cluster, item.title, owner, "sent");
   return result;
@@ -530,6 +536,29 @@ function published(place: HandoffPlace, days: number | null, hold: HoldRow | nul
   return { indexed: true, place, handoffDays: days, heldAt, daysLeft: left };
 }
 
+async function sendClaimedSaleNotice(
+  cluster: ClusterName,
+  item: IndexedTitle,
+  owner: string,
+  kind: "held" | "home",
+): Promise<boolean> {
+  let claimed = false;
+  try {
+    claimed = await claimHandoffSaleMail(cluster, item.title, owner);
+  } catch {
+    return true;
+  }
+  if (!claimed) return false;
+  try {
+    const result = await tryMail(cluster, item, owner, kind);
+    if (result === "retry") await markHandoffMail(cluster, item.title, owner, "pending");
+    return result === "retry";
+  } catch {
+    await markHandoffMail(cluster, item.title, owner, "pending").catch(() => undefined);
+    return true;
+  }
+}
+
 /** Reads the owner from the chain and records a new holder once. Mail is one notice per holder. */
 export async function noteHolder(cluster: ClusterName, title: string): Promise<{ view: HandoffPublic; retry: boolean } | null> {
   if (!hasIndex() || !ADDRESS.test(title)) return null;
@@ -557,7 +586,9 @@ export async function noteHolder(cluster: ClusterName, title: string): Promise<{
       await markHandoffMail(cluster, title, owner, "pending");
       hold = await readHandoffHold(cluster, title, owner);
     }
-    if (hold?.mail === "pending") retry = (await tryMail(cluster, item, owner, "home")) === "retry";
+    if (hold?.mail === "pending" || hold?.mail === "sending") {
+      retry = await sendClaimedSaleNotice(cluster, item, owner, "home");
+    }
     await closeQuiet(cluster, title, owner, false, true);
     return { view: published(place, days, await readHandoffHold(cluster, title, owner)), retry };
   }
@@ -574,7 +605,9 @@ export async function noteHolder(cluster: ClusterName, title: string): Promise<{
     await markHandoffMail(cluster, title, owner, "pending");
     hold = await readHandoffHold(cluster, title, owner);
   }
-  if (hold?.mail === "pending") retry = (await tryMail(cluster, item, owner, "held")) === "retry";
+  if (hold?.mail === "pending" || hold?.mail === "sending") {
+    retry = await sendClaimedSaleNotice(cluster, item, owner, "held");
+  }
   hold = (await readHandoffHold(cluster, title, owner)) ?? hold;
   if (hold?.nudge === "skip" && !reminderDue(hold.held_at, days)) {
     await markHandoffNudge(cluster, title, owner, "open");
@@ -606,14 +639,20 @@ export async function remindOpenHolds(cluster: ClusterName): Promise<{ checked: 
 }
 
 /** One Helius webhook per network. Its address list is the indexed titles, refreshed at most every ten minutes. */
-export async function syncHeliusHook(cluster: ClusterName): Promise<void> {
+export async function syncHeliusHook(cluster: ClusterName, forceMembershipCheck = false): Promise<void> {
   const key = heliusKey(cluster);
   const secret = process.env.HELIUS_WEBHOOK_SECRET;
   if (!key || !secret || !hasIndex()) return;
   const existing = await readHeliusHook(cluster);
-  if (existing && Date.now() - Date.parse(existing.updated_at) < HOOK_REFRESH_MS) return;
+  if (existing && !forceMembershipCheck && Date.now() - Date.parse(existing.updated_at) < HOOK_REFRESH_MS) return;
   const addresses = (await listTitleAddresses(cluster)).filter((title) => ADDRESS.test(title));
   if (!addresses.length) return;
+  const addressesSha256 = createHash("sha256").update([...addresses].sort().join("\n")).digest("hex");
+  if (
+    existing &&
+    existing.addresses_sha256 === addressesSha256 &&
+    Date.now() - Date.parse(existing.updated_at) < HOOK_REFRESH_MS
+  ) return;
   const body = {
     webhookURL: `${PUBLIC_ORIGIN}/api/helius/handoff?c=${cluster === "devnet" ? "devnet" : "mainnet"}`,
     webhookType: cluster === "devnet" ? "enhancedDevnet" : "enhanced",
@@ -632,7 +671,7 @@ export async function syncHeliusHook(cluster: ClusterName): Promise<void> {
   if (existing) {
     const put = await putExisting(existing.hook_id);
     if (put.ok) {
-      await writeHeliusHook(cluster, existing.hook_id);
+      await writeHeliusHook(cluster, existing.hook_id, addressesSha256);
       return;
     }
     if (put.status !== 404) return;
@@ -645,7 +684,7 @@ export async function syncHeliusHook(cluster: ClusterName): Promise<void> {
   if (!created.ok) return;
   const payload = (await created.json()) as { webhookID?: string; webhookId?: string };
   const hookId = payload.webhookID || payload.webhookId;
-  if (hookId) await writeHeliusHook(cluster, hookId);
+  if (hookId) await writeHeliusHook(cluster, hookId, addressesSha256);
 }
 
 export function accountsInPayload(value: unknown): string[] {

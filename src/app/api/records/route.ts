@@ -156,6 +156,6 @@ export async function POST(request: Request) {
     },
     signatures,
   );
-  await syncHeliusHook(cluster).catch(() => undefined);
+  await syncHeliusHook(cluster, true).catch(() => undefined);
   return Response.json({ saved: true });
 }

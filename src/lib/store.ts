@@ -15,6 +15,18 @@ export function hasIndex(): boolean {
   return supabase() !== null;
 }
 
+/** The database stores only an HMAC digest of the caller bucket, never its raw address. */
+export async function allowBlinkRequest(keyHash: string, limit: number, windowSeconds: number): Promise<boolean> {
+  if (!/^[a-f0-9]{64}$/.test(keyHash)) throw new Error("The Blink rate-limit key is invalid.");
+  const response = await rest("rpc/allow_blink_request", {
+    method: "POST",
+    body: JSON.stringify({ p_key_hash: keyHash, p_limit: limit, p_window_seconds: windowSeconds }),
+  });
+  const allowed = (await response.json()) as unknown;
+  if (typeof allowed !== "boolean") throw new Error("The Blink rate-limit response is invalid.");
+  return allowed;
+}
+
 async function rest(path: string, init: RequestInit & { prefer?: string } = {}): Promise<Response> {
   const db = supabase();
   if (!db) throw new Error("The PAR index is not configured.");
@@ -238,6 +250,7 @@ export type IndexedTitle = {
   title: string;
   creator: string;
   name: string;
+  sheet_sha256?: string;
   sheet: string;
 };
 
@@ -252,7 +265,7 @@ export async function readItemsByTitles(cluster: ClusterName, titles: string[]):
 
 export async function readItemByTitle(cluster: ClusterName, title: string): Promise<IndexedTitle | null> {
   const response = await rest(
-    `items?select=cluster,record,title,creator,name,sheet&cluster=eq.${encodeURIComponent(cluster)}&title=eq.${encodeURIComponent(title)}&limit=1`,
+    `items?select=cluster,record,title,creator,name,sheet_sha256,sheet&cluster=eq.${encodeURIComponent(cluster)}&title=eq.${encodeURIComponent(title)}&limit=1`,
   );
   const rows = (await response.json()) as IndexedTitle[];
   return rows[0] ?? null;
@@ -315,7 +328,7 @@ export type HoldRow = {
   owner: string;
   signature: string | null;
   held_at: string | null;
-  mail: "pending" | "sent" | "skip" | "wait";
+  mail: "pending" | "sending" | "sent" | "skip" | "wait";
   nudge: "open" | "sent" | "wait" | "skip";
   intro: "open" | "sent";
 };
@@ -367,8 +380,18 @@ export async function insertHandoffHold(row: {
 export async function markHandoffMail(cluster: ClusterName, title: string, owner: string, mail: "pending" | "sent" | "skip" | "wait"): Promise<void> {
   await rest(
     `handoff_hold?cluster=eq.${encodeURIComponent(cluster)}&title=eq.${encodeURIComponent(title)}&owner=eq.${encodeURIComponent(owner)}`,
-    { method: "PATCH", body: JSON.stringify({ mail }) },
+    { method: "PATCH", body: JSON.stringify({ mail, mail_claimed_at: null }) },
   );
+}
+
+export async function claimHandoffSaleMail(cluster: ClusterName, title: string, owner: string): Promise<boolean> {
+  const response = await rest("rpc/claim_handoff_sale_mail", {
+    method: "POST",
+    body: JSON.stringify({ p_cluster: cluster, p_title: title, p_owner: owner }),
+  });
+  const claimed = (await response.json()) as unknown;
+  if (typeof claimed !== "boolean") throw new Error("The handoff mail claim response is invalid.");
+  return claimed;
 }
 
 export async function markHandoffNudge(cluster: ClusterName, title: string, owner: string, nudge: "open" | "sent" | "wait" | "skip"): Promise<void> {
@@ -496,18 +519,18 @@ export async function readHandoffSubscription(
   return rows[0] ?? null;
 }
 
-export async function readHeliusHook(cluster: ClusterName): Promise<{ hook_id: string; updated_at: string } | null> {
+export async function readHeliusHook(cluster: ClusterName): Promise<{ hook_id: string; updated_at: string; addresses_sha256: string } | null> {
   const response = await rest(
-    `helius_hooks?select=hook_id,updated_at&cluster=eq.${encodeURIComponent(cluster)}&limit=1`,
+    `helius_hooks?select=hook_id,updated_at,addresses_sha256&cluster=eq.${encodeURIComponent(cluster)}&limit=1`,
   );
-  const rows = (await response.json()) as { hook_id: string; updated_at: string }[];
+  const rows = (await response.json()) as { hook_id: string; updated_at: string; addresses_sha256: string }[];
   return rows[0] ?? null;
 }
 
-export async function writeHeliusHook(cluster: ClusterName, hookId: string): Promise<void> {
+export async function writeHeliusHook(cluster: ClusterName, hookId: string, addressesSha256: string): Promise<void> {
   await rest("helius_hooks?on_conflict=cluster", {
     method: "POST",
     prefer: "resolution=merge-duplicates,return=minimal",
-    body: JSON.stringify({ cluster, hook_id: hookId, updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ cluster, hook_id: hookId, addresses_sha256: addressesSha256, updated_at: new Date().toISOString() }),
   });
 }

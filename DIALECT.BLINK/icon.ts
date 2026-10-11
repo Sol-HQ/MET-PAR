@@ -1,0 +1,1 @@
+export const PAR_BLINK_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#111827"/><path d="M62 194V62h67c43 0 67 22 67 61s-24 61-67 61H99v10H62zm37-47h30c20 0 30-8 30-24s-10-24-30-24H99v48z" fill="#f5f1e8"/></svg>`;
