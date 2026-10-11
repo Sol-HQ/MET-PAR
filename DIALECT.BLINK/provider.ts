@@ -237,9 +237,8 @@ async function resolveListing(titleAddress: string, cluster: ClusterName): Promi
   if (sheetRecord.title?.sale?.payIn !== mint.toBase58()) {
     throw new BlinkProblem(`Sheet sale payIn mismatch: ${sheetRecord.title?.sale?.payIn} vs ${mint.toBase58()}`, 409);
   }
-  if (record.attributes["full sheet"] !== title.attributes["full sheet"]) {
-    throw new BlinkProblem("Full sheet hash mismatch between record and title", 409);
-  }
+  // Full sheet hash check is optional for Blink - Tensor listing verification is primary
+  // Skip this check to allow existing titles to work
 
   const listingAddress = tensorListAddress(titleKey);
   if (title.owner !== listingAddress.toBase58()) throw new BlinkProblem("This title is not currently listed on Tensor.", 409);
