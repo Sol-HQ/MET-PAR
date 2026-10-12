@@ -167,7 +167,7 @@ export function creatorPromises(input: {
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
         : "Tensor pays me the full price. PAR takes none of that sale. If I burn any of that price, the burn is my own promise.",
-    `The ${goodFaithMark(input.handoffDays)} after the claim is a good faith delivery date. By that day I will do my best to put the item in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, I am not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.`,
+    `The ${goodFaithMark(input.handoffDays)} after the claim is a good faith delivery date. By that day I will do my best to put the item in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, I am not liable for shipping issues.`,
     escrow
       ? auction
         ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`

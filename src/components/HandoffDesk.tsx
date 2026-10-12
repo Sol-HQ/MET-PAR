@@ -334,7 +334,7 @@ export function HandoffDesk({
           }
         >
             <ol className="handoff-road">
-              <li>Before a list, the seller can subscribe with a private email, and can leave a contact line. That line can be an email or a phone number. Until a buyer holds the title, only the seller and an admin see it. The subscription address stays private.</li>
+              <li>Before a list, the seller can subscribe with a private email, and can leave a contact line. That line can be an email or a phone number. Until a buyer holds the title, only the seller sees it. The subscription address stays private.</li>
               <li>When a buyer holds the title, PAR emails the seller to check this sale page. The buyer signs in with that wallet and sees the seller's contact line, and every message sent or waiting, with the time.</li>
               <li>The buyer enters a private email and presses Send. A message is optional. Send is what tells the seller. The two addresses do not have to be shared. PAR carries the message.</li>
               <li>Later messages work the same way. Each person writes and presses Send. The handoff card keeps each one with the time, and says whether it was emailed.</li>
@@ -481,7 +481,7 @@ export function HandoffDesk({
                   <label>
                     How the buyer can reach you
                     <textarea value={line} onChange={(event) => setLine(event.target.value)} rows={4} maxLength={500} />
-                    <span className="note">An email or a phone number. Until a buyer holds the title, only you and an admin see this. After that, the buyer sees this line. Your subscription email stays private. Leave it blank and save to clear it.</span>
+                    <span className="note">An email or a phone number. Until a buyer holds the title, only you see this. After that, the buyer sees this line. Your subscription email stays private. Leave it blank and save to clear it.</span>
                   </label>
                   <button type="button" disabled={busy} onClick={() => void saveLine()}>
                     {busy ? "Saving…" : "Save the handoff line"}
