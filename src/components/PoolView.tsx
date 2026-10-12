@@ -306,7 +306,7 @@ export function PoolView({ address }: { address: string }) {
           next.quoteVault,
           ...(nextMarket ? [nextMarket.baseVault, nextMarket.quoteVault] : []),
         ]).catch(() => ({ rows: [] as HolderRow[], capped: false })),
-        loadTrades(connection, next, nextMarket ? { baseVault: nextMarket.baseVault, quoteVault: nextMarket.quoteVault } : undefined).catch(() => [] as TradeRow[]),
+        loadTrades(connection, next).catch(() => [] as TradeRow[]),
       ]);
       const reserved = next.vestingCliffUnlock.add(next.vestingPerPeriod.mul(new BN(next.vestingPeriods)));
       const nextClaim =
@@ -1663,13 +1663,7 @@ export function PoolView({ address }: { address: string }) {
 
           <section className="ledger" aria-label="Buys and sells">
             <h2>Buys and sells</h2>
-            {trades.length === 0 ? (
-              <p className="note">
-                {snapshot.isMigrated && snapshot.dammPool
-                  ? "No trades on the trading pool yet."
-                  : "No buys or sells on the curve yet."}
-              </p>
-            ) : null}
+            {trades.length === 0 ? <p className="note">No buys or sells yet.</p> : null}
             <ol>
               {trades.map((trade) => (
                 <li key={trade.signature}>
