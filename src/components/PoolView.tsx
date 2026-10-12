@@ -306,7 +306,7 @@ export function PoolView({ address }: { address: string }) {
           next.quoteVault,
           ...(nextMarket ? [nextMarket.baseVault, nextMarket.quoteVault] : []),
         ]).catch(() => ({ rows: [] as HolderRow[], capped: false })),
-        loadTrades(connection, next).catch(() => [] as TradeRow[]),
+        loadTrades(connection, next, nextMarket ? { baseVault: nextMarket.baseVault, quoteVault: nextMarket.quoteVault } : undefined).catch(() => [] as TradeRow[]),
       ]);
       const reserved = next.vestingCliffUnlock.add(next.vestingPerPeriod.mul(new BN(next.vestingPeriods)));
       const nextClaim =

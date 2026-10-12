@@ -123,8 +123,16 @@ function abs(value: bigint): bigint {
 }
 
 /** Buys and sells on the curve and, after it fills, on the trading pool. */
-export async function loadTrades(connection: Connection, snapshot: PoolSnapshot): Promise<TradeRow[]> {
-  const addresses = [snapshot.address, snapshot.dammPool].filter((address): address is string => Boolean(address));
+export async function loadTrades(
+  connection: Connection,
+  snapshot: PoolSnapshot,
+  tradingPoolVaults?: { baseVault: string; quoteVault: string },
+): Promise<TradeRow[]> {
+  // Query vault addresses to catch all trades - curve vaults before migration, trading pool vaults after
+  const addresses = [snapshot.baseVault, snapshot.quoteVault];
+  if (tradingPoolVaults) {
+    addresses.push(tradingPoolVaults.baseVault, tradingPoolVaults.quoteVault);
+  }
   const groups = await Promise.all(
     addresses.map((address) => connection.getSignaturesForAddress(new PublicKey(address), { limit: PAGE })),
   );
