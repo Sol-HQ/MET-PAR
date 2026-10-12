@@ -123,10 +123,19 @@ function abs(value: bigint): bigint {
 }
 
 /** Buys and sells on the curve and, after it fills, on the trading pool. */
-export async function loadTrades(connection: Connection, snapshot: PoolSnapshot): Promise<TradeRow[]> {
-  const addresses = [snapshot.address, snapshot.dammPool].filter((address): address is string => Boolean(address));
+export async function loadTrades(
+  connection: Connection,
+  snapshot: PoolSnapshot,
+  tradingPoolVaults?: { baseVault: string; quoteVault: string },
+): Promise<TradeRow[]> {
+  // Query vault addresses instead of pool addresses to catch all DEX trades (Jupiter, Raydium, etc.)
+  const addresses = [snapshot.baseVault, snapshot.quoteVault];
+  if (tradingPoolVaults) {
+    addresses.push(tradingPoolVaults.baseVault, tradingPoolVaults.quoteVault);
+  }
+  const filtered = addresses.filter((address): address is string => Boolean(address));
   const groups = await Promise.all(
-    addresses.map((address) => connection.getSignaturesForAddress(new PublicKey(address), { limit: PAGE })),
+    filtered.map((address) => connection.getSignaturesForAddress(new PublicKey(address), { limit: PAGE })),
   );
   const seen = new Set<string>();
   const signatures = groups
