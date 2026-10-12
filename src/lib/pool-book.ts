@@ -128,11 +128,12 @@ export async function loadTrades(
   snapshot: PoolSnapshot,
   tradingPoolVaults?: { baseVault: string; quoteVault: string },
 ): Promise<TradeRow[]> {
-  // Query vault addresses to catch all trades - curve vaults before migration, trading pool vaults after
-  const addresses = [snapshot.baseVault, snapshot.quoteVault];
+  // Query multiple addresses to catch all trades: pool address and vault addresses
+  const addresses = [snapshot.address, snapshot.baseVault, snapshot.quoteVault];
   if (tradingPoolVaults) {
     addresses.push(tradingPoolVaults.baseVault, tradingPoolVaults.quoteVault);
   }
+  console.log('[loadTrades] Querying addresses:', addresses);
   const groups = await Promise.all(
     addresses.map((address) => connection.getSignaturesForAddress(new PublicKey(address), { limit: PAGE })),
   );
@@ -142,14 +143,17 @@ export async function loadTrades(
     .filter((row) => !row.err && seen.has(row.signature) === false && seen.add(row.signature))
     .slice(0, PAGE)
     .map((row) => row.signature);
+  console.log('[loadTrades] Found signatures:', signatures.length);
   if (signatures.length === 0) return [];
   const parsed = await connection.getParsedTransactions(signatures, { maxSupportedTransactionVersion: 0 });
+  console.log('[loadTrades] Parsed transactions:', parsed.length);
   const trades: TradeRow[] = [];
   for (const tx of parsed) {
     if (!tx) continue;
     const trade = tradeFrom(tx, snapshot);
     if (trade) trades.push(trade);
   }
+  console.log('[loadTrades] Extracted trades:', trades.length);
   trades.sort((a, b) => b.time - a.time);
   return trades;
 }
