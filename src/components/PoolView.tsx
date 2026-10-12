@@ -298,10 +298,8 @@ export function PoolView({ address }: { address: string }) {
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setError("");
     try {
-      console.log('[PoolView refresh] Loading pool data for:', address);
       const next = await loadPool(connection, address);
       const nextMarket = next.dammPool ? await loadDammMarket(connection, next).catch(() => null) : null;
-      console.log('[PoolView refresh] Pool loaded, isMigrated:', next.isMigrated, 'dammPool:', next.dammPool);
       const [nextHolders, nextTrades] = await Promise.all([
         loadHolders(connection, next.baseMint, next.baseDecimals, [
           next.baseVault,
@@ -310,7 +308,6 @@ export function PoolView({ address }: { address: string }) {
         ]).catch(() => ({ rows: [] as HolderRow[], capped: false })),
         loadTrades(connection, next, nextMarket ? { baseVault: nextMarket.baseVault, quoteVault: nextMarket.quoteVault } : undefined).catch(() => [] as TradeRow[]),
       ]);
-      console.log('[PoolView refresh] Trades loaded:', nextTrades.length);
       const reserved = next.vestingCliffUnlock.add(next.vestingPerPeriod.mul(new BN(next.vestingPeriods)));
       const nextClaim =
         reserved.isZero() || next.migrationProgress < 2
@@ -323,7 +320,6 @@ export function PoolView({ address }: { address: string }) {
       setTrades(nextTrades);
       setCreatorClaim(nextClaim);
     } catch (cause) {
-      console.error('[PoolView refresh] Error:', cause);
       if (quiet) return;
       setSnapshot(null);
       setMarket(null);
