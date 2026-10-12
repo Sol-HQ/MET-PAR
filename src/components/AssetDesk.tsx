@@ -1137,7 +1137,7 @@ export function AssetDesk() {
             Redemption is the next step. That box is the good faith delivery days (GFD), how the object is handed over, and what you do if a claim goes wrong.
           </p>
           <p className="note">
-            Review create shows the sentence you sign. It includes the good faith date. Once the object is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.
+            Review create shows the sentence you sign. It includes the good faith date. Once the object is in the mail and in transit, you are not liable for shipping issues.
           </p>
           <p className="note">
             {withCoin && rail === "escrow"
@@ -1314,7 +1314,7 @@ export function AssetDesk() {
             Good faith delivery days (GFD)
             <input value={draft.shipDays} onChange={(event) => patch({ shipDays: event.target.value })} inputMode="numeric" />
             <span className="note">
-              {draft.shipDays.trim() || "These"} days (GFD) is a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. A package sent on the day before the date can still be in transit after the date. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not. {SHIP_ADVICE}
+              {draft.shipDays.trim() || "These"} days (GFD) is a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. A package sent on the day before the date can still be in transit after the date. Once it is in the mail and in transit, you are not liable for shipping issues. {SHIP_ADVICE}
             </span>
           </label>
           <label>
@@ -1517,7 +1517,7 @@ export function AssetDesk() {
               <div>
                 <dt>Redemption</dt>
                 <dd>
-                  The title holder claims it. {draft.shipDays} days (GFD). By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not. {draft.shipping}
+                  The title holder claims it. {draft.shipDays} days (GFD). By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, you are not liable for shipping issues. {draft.shipping}
                 </dd>
               </div>
               <div>

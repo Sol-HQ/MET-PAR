@@ -123,12 +123,12 @@ export function goodFaithMark(days: string | number): string {
 
 /** What the day count means. Shown to the seller before signing and to the buyer on the sale page. */
 export function goodFaithDelivery(days: string | number): string {
-  return `${goodFaithMark(days)} is a good faith delivery date. By that day the maker does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once the object is in the mail and in transit, the maker is not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not. Sending it is still good faith.`;
+  return `${goodFaithMark(days)} is a good faith delivery date. By that day the maker does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once the object is in the mail and in transit, the maker is not liable for shipping issues. Sending it is still good faith.`;
 }
 
 /** Tracking and insurance. Instructions on the create page, the sale page, and the handoff emails. */
 export const SHIP_ADVICE =
-  "PAR strongly recommends tracking on every shipment. For an object over $100, PAR strongly recommends insurance as well as tracking. If you will insure it, write on the claim that there will be insurance when it is sent. After the buyer holds the title, put the tracking number, and the insurance if you bought it, in a note on the sale page. That note is what the email carries, on a Tensor sale and on an escrow sale.";
+  "PAR strongly recommends tracking on every shipment. For an object over $100, PAR strongly recommends insurance as well as tracking. If you will insure it, write on the claim that there will be insurance when it is sent. After the buyer holds the title, put the tracking number, and the insurance if you bought it, in a note on the sale page. That note is what the email carries, on a Tensor sale and on an escrow sale. Once shipped, the seller is not liable for shipping issues.";
 
 /** The creator signs these words with the wallet, and the signature goes into the sheet. */
 export function creatorPromises(input: {

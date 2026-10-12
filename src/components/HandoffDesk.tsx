@@ -113,7 +113,7 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
         <p className="handoff-clock">{view.handoffDays ? `${unit(view.handoffDays, "day", "days")} (GFD)` : "Handoff"}</p>
         <p className="note">
           {view.handoffDays
-            ? "Good faith delivery. By this day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not. The clock starts when a buyer holds the title."
+            ? "Good faith delivery. By this day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, the seller is not liable for shipping issues. The clock starts when a buyer holds the title."
             : "The sheet names the handoff. The clock starts when a buyer holds the title."}
         </p>
       </>
@@ -128,10 +128,10 @@ function HandoffClock({ view }: { view: HandoffPublic }) {
       </p>
       <p className="note">
         {left <= 0
-          ? "The good faith date has passed. Once the object is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not."
+          ? "The good faith date has passed. Once it is in the mail and in transit, the seller is not liable for shipping issues."
           : close
-            ? "The good faith date is close. By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Once it is in transit, the seller is not liable for a mistake in the mail."
-            : `${unit(view.handoffDays, "day", "days")} (GFD). By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in transit, the seller is not liable for a mistake in the mail.`}
+            ? "The good faith date is close. By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Once it is in transit, the seller is not liable for shipping issues."
+            : `${unit(view.handoffDays, "day", "days")} (GFD). By that day the seller does their best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in transit, the seller is not liable for shipping issues.`}
       </p>
     </>
   );
@@ -338,7 +338,7 @@ export function HandoffDesk({
               <li>When a buyer holds the title, PAR emails the seller to check this sale page. The buyer signs in with that wallet and sees the seller's contact line, and every message sent or waiting, with the time.</li>
               <li>The buyer enters a private email and presses Send. A message is optional. Send is what tells the seller. The two addresses do not have to be shared. PAR carries the message.</li>
               <li>Later messages work the same way. Each person writes and presses Send. The handoff card keeps each one with the time, and says whether it was emailed.</li>
-              <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not.</li>
+              <li>When the good faith date runs close, PAR emails the seller once. Those days are the best effort to get the object into the mail or into the holder's hands. Once it is in the mail and in transit, the seller is not liable for shipping issues.</li>
             </ol>
         </Fold>
       )}
@@ -540,7 +540,7 @@ export function HandoffDesk({
                         <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} maxLength={500} />
                         <span className="note">
                           {sale
-                            ? "When you ship, write the tracking number here, and the insurance if you bought it. PAR emails this note to the buyer. PAR strongly recommends tracking on every shipment, and insurance as well when the object is over $100. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not."
+                            ? "When you ship, write the tracking number here, and the insurance if you bought it. PAR emails this note to the buyer. PAR strongly recommends tracking on every shipment, and insurance as well when the object is over $100. Once it is in the mail and in transit, you are not liable for shipping issues."
                             : "PAR emails this note. The other wallet sees it here after signing in. It stays off the NFT and off the public page."}
                         </span>
                       </label>

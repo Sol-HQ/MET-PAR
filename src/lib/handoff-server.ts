@@ -251,7 +251,7 @@ async function tryMail(cluster: ClusterName, item: IndexedTitle, owner: string, 
           days
             ? `The sheet sets ${days} ${days === 1 ? "day" : "days"} (GFD), a good faith delivery date. By that day you do your best to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
             : "The sheet names the handoff. The clock on the sale page follows it.",
-          "Once the object is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+          "Once it is in the mail and in transit, you are not liable for shipping issues.",
           SHIP_ADVICE,
           "Write on the sale page when you are ready. PAR sends each note only to the buyer.",
         ];
@@ -454,7 +454,7 @@ async function remindSeller(cluster: ClusterName, item: IndexedTitle, owner: str
     days
       ? `Your ${days} ${days === 1 ? "day" : "days"} (GFD) are the best effort to put the object in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count.`
       : "The date on the sheet is the best effort to put the object in the mail, with a shipper, or in the holder's hands.",
-    "Once it is in the mail and in transit, you are not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+    "Once it is in the mail and in transit, you are not liable for shipping issues.",
     SHIP_ADVICE,
     `Sale page: ${saleUrl(item.title, cluster)}`,
     "Open that page, read the buyer's note, and answer on the page.",
@@ -517,7 +517,7 @@ async function deliverNotes(cluster: ClusterName, item: IndexedTitle, owner: str
         ? [
             "The seller wrote this on the sale page:",
             note.body,
-            "Once the object is in the mail and in transit, the seller is not liable for a mistake in the mail, a delivery to the wrong address, or a holder who received it and says they did not.",
+            "Once it is in the mail and in transit, the seller is not liable for shipping issues.",
             "Answer on the sale page. PAR sends your answer only to the seller.",
             `Sale page: ${saleUrl(item.title, cluster)}`,
           ]
