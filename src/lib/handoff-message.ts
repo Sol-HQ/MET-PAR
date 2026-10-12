@@ -10,7 +10,7 @@ export type HandoffPublic = {
 
 export type HandoffSide = "sale" | "purchase";
 
-/** A copy of every handoff email goes here. The buyer does not see the seller's subscription address. */
+/** Platform email for handoff copies. The buyer does not see the seller's subscription address. */
 export const PLATFORM_MAIL = "metpar02@gmail.com";
 
 export const HANDOFF_DAY_MS = 86_400_000;

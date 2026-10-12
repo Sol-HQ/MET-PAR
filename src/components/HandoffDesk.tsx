@@ -234,7 +234,7 @@ export function HandoffDesk({
         return;
       }
       const body = await post("mail", agree ? `subscribe\n${email.trim()}` : "stop");
-      if (body.notice === "sent") setNote(`PAR sent a confirmation as ${body.mailFrom || "the PAR platform"}. A copy goes to the platform inbox.`);
+      if (body.notice === "sent") setNote(`PAR sent a confirmation as ${body.mailFrom || "PAR"}.`);
       else if (body.notice === "same") setNote(ALREADY_SUBSCRIBED);
       else if (body.notice === "stopped") setNote("Those PAR emails will stop.");
       else setNote(`The address is on file. ${body.mailReady ? "The confirmation was not accepted by the mail service." : "The mail key is not on this site yet, so the letter is recorded and not delivered."}`);
@@ -263,7 +263,7 @@ export function HandoffDesk({
       );
       setFirstMessage("");
       if (body.notice === "same") setNote("That is already on the handoff card.");
-      else if (sentText) setNote("Sent. It is on the handoff card with the time. The seller receives it by email through the PAR platform.");
+      else if (sentText) setNote("Sent. It is on the handoff card with the time. The seller receives it by email.");
       else setNote("Your email is on file. The seller does not see it. Write a message and press Send when you want the seller to receive it.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The contact did not save.");
@@ -291,9 +291,9 @@ export function HandoffDesk({
     try {
       const body = await post("note", message);
       setMessage("");
-      if (body.notice === "sent") setNote("PAR emailed that note from the PAR platform.");
-      else if (body.notice === "wait") setNote("Saved. PAR emails it from the PAR platform once the other person subscribes.");
-      else setNote("Saved. PAR emails that note from the PAR platform.");
+      if (body.notice === "sent") setNote("PAR emailed that note.");
+      else if (body.notice === "wait") setNote("Saved. PAR emails it once the other person subscribes.");
+      else setNote("Saved. PAR emails that note.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The note did not send.");
     } finally {
@@ -316,7 +316,7 @@ export function HandoffDesk({
           <h2>How to be reached</h2>
           <p>{shown ? clockLine(shown) : "Reading the title."}</p>
           {shown ? <HandoffClock view={shown} /> : null}
-          <p className="note">Confirm sale email from the PAR platform while the title is still yours. The sale page counts the handoff days after a buyer holds the title.</p>
+          <p className="note">Confirm sale email while the title is still yours. The sale page counts the handoff days after a buyer holds the title.</p>
         </>
       ) : (
         <Fold
@@ -353,7 +353,7 @@ export function HandoffDesk({
           <label>
             Your email
             <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" maxLength={120} />
-            <span className="note">Private. The seller does not see this address. PAR uses it to send you replies. {PLATFORM_MAIL} is the platform copy, so use your own.</span>
+            <span className="note">Private. The seller does not see this address. PAR uses it to send you replies.</span>
           </label>
           <label>
             Name
@@ -393,17 +393,16 @@ export function HandoffDesk({
             <div className="record-promises">
               <p className="eyebrow">Handoff card</p>
               <p>
-                Copies and replies go to {PLATFORM_MAIL}. The buyer does not see your subscription address. The buyer sees this card after that wallet holds the title.
+                The buyer does not see your subscription address. The buyer sees this card after that wallet holds the title.
               </p>
               <p>
                 On file: {signed.role === "admin" ? signed.sellerMail || "no seller address yet" : signed.email}
                 {signed.role !== "admin" && signed.mailAt ? ` since ${when(signed.mailAt)}` : ""}.{" "}
                 {(signed.role === "admin" ? signed.sellerMail : signed.email)?.toLowerCase() === PLATFORM_MAIL
-                  ? "This inbox is also the platform inbox, so each message arrives once."
+                  ? "This inbox is the PAR inbox."
                   : `A copy of each message also goes to ${PLATFORM_MAIL}.`}
               </p>
               <p>
-                Messages leave as {signed.mailFrom || `PAR platform <${PLATFORM_MAIL}>`}.{" "}
                 {signed.mailReady
                   ? "Mail is connected."
                   : "The mail key is not on this site yet, so a letter is recorded here and is not delivered."}
@@ -435,7 +434,7 @@ export function HandoffDesk({
           {signed.role === "holder" && signed.place === "held" ? (
             <div className="record-promises">
               <p className="eyebrow">Handoff card</p>
-              <p>Copies and replies go to {PLATFORM_MAIL}. Purchase messages leave from the PAR platform.</p>
+              <p>Copies and replies go to {PLATFORM_MAIL}.</p>
               {sellerProof ? <p>The seller wrote: {sellerProof}</p> : <p className="note">The seller has not left a line yet.</p>}
               <h3>Letters</h3>
               {signed.letters?.length ? (
@@ -459,7 +458,7 @@ export function HandoffDesk({
             <>
               <label className="agree">
                 <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
-                <span>I want email from the PAR platform about this sale.</span>
+                <span>I want email about this sale.</span>
               </label>
               <label>
                 Email for this sale
@@ -467,7 +466,7 @@ export function HandoffDesk({
                 {sameSubscription(signed.email, email) ? (
                   <span className="note">{ALREADY_SUBSCRIBED}</span>
                 ) : (
-                  <span className="note">Private. Use your own email. The buyer does not see this address. Copies and replies go to {PLATFORM_MAIL}. Messages leave as PAR platform &lt;platform@meteora.surf&gt;.</span>
+                  <span className="note">Private. Use your own email. The buyer does not see this address.</span>
                 )}
               </label>
               <button type="button" disabled={busy || (agree && !email.trim())} onClick={() => void saveMail()}>
@@ -490,7 +489,7 @@ export function HandoffDesk({
                 </>
               ) : null}
               <h3>Between the two wallets</h3>
-              <p className="note">Only the seller wallet, the buyer wallet, the PAR platform, and an admin can see these.</p>
+              <p className="note">Only the seller wallet, the buyer wallet, and an admin can see these.</p>
               {buyerProof && signed.proofs.buyer ? (
                 <ContactProof card={buyerProof} at={signed.proofs.buyer.at} who="The buyer" />
               ) : signed.proofs.buyer ? (
@@ -542,7 +541,7 @@ export function HandoffDesk({
                         <span className="note">
                           {sale
                             ? "When you ship, write the tracking number here, and the insurance if you bought it. PAR emails this note to the buyer. PAR strongly recommends tracking on every shipment, and insurance as well when the object is over $100. Once it is in the mail and in transit, you are not liable for a mistake in the mail, a wrong delivery, or a holder who received it and says they did not."
-                            : "PAR emails this note from the PAR platform. The other wallet sees it here after signing in. It stays off the NFT and off the public page."}
+                            : "PAR emails this note. The other wallet sees it here after signing in. It stays off the NFT and off the public page."}
                         </span>
                       </label>
                       <button type="button" disabled={busy || !message.trim()} onClick={() => void sendNote()}>

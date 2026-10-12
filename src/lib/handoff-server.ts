@@ -294,12 +294,12 @@ export async function saveSubscription(input: {
   const detail =
     input.side === "sale"
       ? [
-          "You asked the PAR platform to email this address about your sale.",
+          "You asked for email about your sale.",
           "PAR writes when a buyer holds the title, when the handoff days run close, and when the buyer leaves a note on the sale page.",
           `Sale page: ${page}`,
         ]
       : [
-          "You asked the PAR platform to email this address about your purchase.",
+          "You asked for email about your purchase.",
           "Notes the seller writes on the sale page come to this address.",
           `Sale page: ${page}`,
         ];
@@ -478,7 +478,7 @@ async function introduceBuyer(cluster: ClusterName, item: IndexedTitle, owner: s
     : message
       ? ["The buyer wrote on the sale page:", message, `Check the sale page: ${saleUrl(item.title, cluster)}`]
       : [
-          "The buyer subscribed to purchase email from the PAR platform.",
+          "The buyer subscribed to purchase email.",
           "You can write a note on the sale page. PAR sends it only to the buyer.",
           `Sale page: ${saleUrl(item.title, cluster)}`,
         ];
