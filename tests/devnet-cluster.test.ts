@@ -407,3 +407,22 @@ test("the escrow watcher refuses a non-devnet RPC and builds the same settle as 
     fromApp.keys.map((row) => row.pubkey.toBase58()),
   );
 });
+
+test("a creator-wallet title held by the escrow listing account reads as an escrow sale, not a purchase", async () => {
+  const { sellingRail, listingAddress, ESCROW_PROGRAM } = await import("../src/lib/title");
+  const { titleWasPurchased } = await import("../src/lib/asset-on-pool");
+  const title = Keypair.generate().publicKey;
+  const escrow = listingAddress(title, new PublicKey(ESCROW_PROGRAM.devnet)).toBase58();
+  const creator = Keypair.generate().publicKey.toBase58();
+  const buyer = Keypair.generate().publicKey.toBase58();
+  assert.equal(sellingRail("creator", escrow, escrow), "escrow", "deposited later: the escrow sells it");
+  assert.equal(sellingRail("creator", creator, escrow), "creator", "still in the creator wallet");
+  assert.equal(sellingRail("creator", buyer, escrow), "creator", "bought: a buyer holds it");
+  assert.equal(sellingRail("creator", escrow, null), "creator", "mainnet has no escrow program");
+  assert.equal(sellingRail("escrow", escrow, escrow), "escrow");
+  assert.equal(sellingRail(null, escrow, escrow), null, "a disagreeing record stays unread");
+  // In the escrow the seller has not left; with a buyer holding it, a no-coin title is purchased.
+  const left = (rail: string, owner: string) => (rail === "escrow" ? owner !== escrow : owner !== creator);
+  assert.equal(titleWasPurchased({ coin: "none", graduated: true, saleOpen: true, leftSeller: left(sellingRail("creator", escrow, escrow)!, escrow) }), false);
+  assert.equal(titleWasPurchased({ coin: "none", graduated: true, saleOpen: true, leftSeller: left(sellingRail("creator", buyer, escrow)!, buyer) }), true);
+});

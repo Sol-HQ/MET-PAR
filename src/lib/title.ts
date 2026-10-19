@@ -853,6 +853,11 @@ export type TitleStatus = {
   ok: boolean;
 };
 
+/** Who is selling the title now. A creator-wallet title that the escrow listing account owns is an escrow sale. */
+export function sellingRail(minted: TitleRail | null, owner: string, escrowAccount: string | null): TitleRail | null {
+  return minted === "creator" && Boolean(owner) && Boolean(escrowAccount) && owner === escrowAccount ? "escrow" : minted;
+}
+
 /** Everything a buyer can confirm about the title from the record's own attributes and the chain. */
 export async function titleStatus(
   endpoint: string,
@@ -862,10 +867,15 @@ export async function titleStatus(
   const address = record.attributes.title;
   if (!address) return null;
   const read = await readTitle(endpoint, address);
-  const rail = agreedHolder(record.attributes["title held by"], read.attributes["held by"]);
+  const minted = agreedHolder(record.attributes["title held by"], read.attributes["held by"]);
   const creator = agreedCreator(record.attributes.creator, read.attributes.creator);
   const program = ESCROW_PROGRAM[cluster];
-  const listing = rail === "escrow" && program ? listingAddress(new PublicKey(address), new PublicKey(program)).toBase58() : null;
+  const escrowAccount = program ? listingAddress(new PublicKey(address), new PublicKey(program)).toBase58() : null;
+  // A title minted to the creator wallet can be put in the escrow later (the open-sale deposit). The minted line still
+  // says "creator wallet", so the escrow is read from the title's owner: when the escrow listing account owns it, the
+  // escrow is selling it. Without this, the page took "not in the creator wallet, not on Tensor" as a finished sale.
+  const rail = sellingRail(minted, read.exists ? read.owner : "", escrowAccount);
+  const listing = rail === "escrow" ? escrowAccount : null;
   const tensor =
     rail === "creator" && read.exists && read.owner === tensorListAddress(new PublicKey(address)).toBase58()
       ? await readTensorListing(new Connection(endpoint, "confirmed"), new PublicKey(address)).catch(() => null)
