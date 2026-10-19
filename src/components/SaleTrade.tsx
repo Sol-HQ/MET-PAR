@@ -222,6 +222,7 @@ export function SaleTrade({
           ? [`${formatTokenAmount(plan.wrap, listingPay.decimals)} SOL is wrapped into your wrapped-SOL account first, in the same transaction. Tensor is paid from that account.`]
           : []),
         ...(plan.wrappedSol && !plan.existed ? ["The wrapped-SOL account opened for this buy is closed after it, so its rent comes back."] : []),
+        "If the creator or Tensor's fee vault has no account for this token yet, Tensor opens it inside the buy and your wallet pays its rent (about 0.003 SOL in a mainnet test). That rent is not in the account rent line below.",
         "The title moves to your wallet.",
       ],
       transaction,
