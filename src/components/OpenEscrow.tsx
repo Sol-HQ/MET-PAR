@@ -11,7 +11,7 @@ import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
-import { ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction } from "@/lib/title";
+import { ESCROW_COMING, ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction, escrowOffered } from "@/lib/title";
 
 type Row = { wallet: string; amount: string };
 
@@ -25,15 +25,13 @@ export function NoCoinChoice({
   escrow,
   tensor,
   pageCluster,
-  escrowBlocked = "",
 }: {
   escrow: ReactNode;
   tensor: ReactNode;
   pageCluster: ClusterName;
-  /** Why this title cannot go into the escrow program at all. Empty when it can. */
-  escrowBlocked?: string;
 }) {
-  const escrowOpen = pageCluster === "devnet" && !escrowBlocked;
+  // The escrow is a devnet-only path. On mainnet the button stays visible, cannot be pressed, and says why.
+  const escrowOpen = escrowOffered(pageCluster);
   const [path, setPath] = useState<"escrow" | "tensor" | null>(null);
   return (
     <>
@@ -47,11 +45,11 @@ export function NoCoinChoice({
           onClick={() => setPath("escrow")}
         >
           Escrow
-          {escrowOpen ? null : <span className="soon-stamp">{escrowBlocked && pageCluster === "devnet" ? "Not for this title" : "Coming soon"}</span>}
+          {escrowOpen ? null : <span className="soon-stamp">Coming soon</span>}
         </button>
         <button type="button" aria-pressed={path === "tensor"} onClick={() => setPath("tensor")}>Tensor</button>
       </div>
-      {escrowBlocked && pageCluster === "devnet" ? <p className="note">{escrowBlocked}</p> : null}
+      {escrowOpen ? null : <p className="note">{ESCROW_COMING}</p>}
       {path === null ? (
         <p className="note">
           {escrowOpen
@@ -59,7 +57,7 @@ export function NoCoinChoice({
             : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
         </p>
       ) : null}
-      {path === "escrow" ? escrow : null}
+      {path === "escrow" && escrowOpen ? escrow : null}
       {path === "tensor" ? tensor : null}
     </>
   );
@@ -69,10 +67,13 @@ export function OpenEscrow({
   pageCluster,
   title,
   record,
+  collection = null,
 }: {
   pageCluster: ClusterName;
   title: string;
   record: string;
+  /** The title's sealed collection. Core moves the title only with it. */
+  collection?: string | null;
 }) {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useClusterWallet();
@@ -123,6 +124,7 @@ export function OpenEscrow({
           title: new PublicKey(title),
           record: new PublicKey(record),
           mint: new PublicKey(pay.mint),
+          collection: collection ? new PublicKey(collection) : null,
           price: ready.raw,
           delayDays: ready.delayDays,
           burnPercent: ready.burnPercent,
@@ -141,7 +143,7 @@ export function OpenEscrow({
     }
   }
 
-  if (pageCluster !== "devnet" || !program) {
+  if (!escrowOffered(pageCluster) || !program) {
     return <p className="note">The escrow path is not a mainnet option yet. Coming soon.</p>;
   }
   if (cluster !== pageCluster) {
@@ -262,6 +264,9 @@ function terms(
   }
   if (!/^\d+$/.test(wait) || Number(wait) > 365) {
     return { ...empty, error: "Type the wait. Zero opens the sale now. The highest is 365." };
+  }
+  if (pay.mint === WSOL && Number(burn) > 0) {
+    return { ...empty, error: "SOL cannot be burned by the token program. A sale priced in SOL has a burn of 0." };
   }
   const raw = parseTokenAmount(price, pay.decimals);
   if (!raw) {

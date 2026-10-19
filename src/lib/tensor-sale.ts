@@ -2,6 +2,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
   createSyncNativeInstruction,
   getAccount,
   getAssociatedTokenAddressSync,
@@ -87,7 +88,11 @@ export function listOnTensorInstruction(input: {
   });
 }
 
-/** Buys a Tensor listing. The creator receives the list price. The buyer pays the Tensor fee on top. */
+/**
+ * Buys a Tensor listing. The creator receives the list price. The buyer pays the Tensor fee on top.
+ * `mint` is the listing's own currency (its list_state), and `tokenProgram` the program that owns that mint: Tensor's
+ * buy_core_spl takes SPL Token and Token-2022 currencies (token_interface), and its token accounts follow that program.
+ */
 export function buyOnTensorInstruction(input: {
   title: PublicKey;
   mint: PublicKey;
@@ -95,12 +100,14 @@ export function buyOnTensorInstruction(input: {
   buyer: PublicKey;
   price: bigint;
   collection?: PublicKey | null;
+  tokenProgram?: PublicKey;
 }): TransactionInstruction {
+  const tokenProgram = input.tokenProgram ?? TOKEN_PROGRAM_ID;
   const listState = tensorListAddress(input.title);
   const feeVault = feeVaultAddress(listState);
-  const sellerTokens = getAssociatedTokenAddressSync(input.mint, input.seller);
-  const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer);
-  const feeTokens = getAssociatedTokenAddressSync(input.mint, feeVault, true);
+  const sellerTokens = getAssociatedTokenAddressSync(input.mint, input.seller, false, tokenProgram);
+  const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer, false, tokenProgram);
+  const feeTokens = getAssociatedTokenAddressSync(input.mint, feeVault, true, tokenProgram);
   const data = Buffer.alloc(16);
   data.set(BUY_CORE_SPL, 0);
   data.writeBigUInt64LE(buyerTotal(input.price), 8);
@@ -124,7 +131,7 @@ export function buyOnTensorInstruction(input: {
       absent(),
       absent(),
       { pubkey: input.seller, isSigner: false, isWritable: true },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: tokenProgram, isSigner: false, isWritable: false },
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: core, isSigner: false, isWritable: false },
       { pubkey: marketplace, isSigner: false, isWritable: false },
@@ -147,25 +154,34 @@ export function buyOnTensorTransaction(input: {
   price: bigint;
   collection?: PublicKey | null;
   wrappedSolShortfall?: bigint;
+  tokenProgram?: PublicKey;
+  /** Close the buyer's wrapped-SOL account after the buy. Only for an account this buy opened. */
+  closeWrappedAfter?: boolean;
 }): Transaction {
   if (input.price <= BigInt(0)) throw new Error("Listing price must be positive.");
+  const tokenProgram = input.tokenProgram ?? TOKEN_PROGRAM_ID;
   const total = buyerTotal(input.price);
   const wrap = input.wrappedSolShortfall ?? BigInt(0);
   const isWrappedSol = input.mint.toBase58() === WSOL;
   if (wrap < BigInt(0) || (wrap > BigInt(0) && !isWrappedSol) || wrap > total) {
     throw new Error("Wrapped-SOL funding amount is invalid.");
   }
-  const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer);
+  if (input.closeWrappedAfter && !isWrappedSol) throw new Error("Only a wrapped-SOL account is closed after a buy.");
+  const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer, false, tokenProgram);
   const transaction = new Transaction().add(
-    createAssociatedTokenAccountIdempotentInstruction(input.buyer, buyerTokens, input.buyer, input.mint),
+    createAssociatedTokenAccountIdempotentInstruction(input.buyer, buyerTokens, input.buyer, input.mint, tokenProgram),
   );
   if (wrap > BigInt(0)) {
     transaction.add(
       SystemProgram.transfer({ fromPubkey: input.buyer, toPubkey: buyerTokens, lamports: wrap }),
-      createSyncNativeInstruction(buyerTokens),
+      createSyncNativeInstruction(buyerTokens, tokenProgram),
     );
   }
-  return transaction.add(buyOnTensorInstruction(input));
+  transaction.add(buyOnTensorInstruction({ ...input, tokenProgram }));
+  if (input.closeWrappedAfter) {
+    transaction.add(createCloseAccountInstruction(buyerTokens, input.buyer, input.buyer, [], tokenProgram));
+  }
+  return transaction;
 }
 
 /**

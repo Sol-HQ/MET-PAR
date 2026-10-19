@@ -16,7 +16,7 @@ import {
   type SignTransaction,
 } from "../src/lib/send";
 import { clusterSignAllTransactions, clusterSignTransaction, turboSignTransaction } from "../src/lib/cluster-wallet";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { buyOnTensorTransaction, wrappedSolShortfall } from "../src/lib/tensor-sale";
 import { POST as jitoPost } from "../src/app/api/jito/route";
 import { POST as payRoutePost } from "../src/app/api/pay-route/route";
@@ -292,12 +292,115 @@ test("mainnet-only server routes refuse a request that names devnet", async () =
   assert.equal(pay.status, 400);
 });
 
-test("escrow is refused up front for a title minted into a collection (the program's TitleChangeable)", async () => {
-  const { escrowBlockedReason, escrowDepositAllowed } = await import("../src/lib/title");
-  assert.match(escrowBlockedReason({ exists: true, collection: "7WCvRVVEFaa2fPsdCe1HgYw1yT5diUnuuxHcL5s3yxvc" }), /TitleChangeable/);
-  assert.equal(escrowBlockedReason({ exists: true, collection: null }), "");
-  // The devnet deposit gate is unchanged: only the two PAR test wallets.
+test("escrow is offered only on devnet and only to the two PAR test wallets; mainnet never", async () => {
+  const { escrowDepositAllowed, escrowOffered, ESCROW_PROGRAM } = await import("../src/lib/title");
   assert.equal(escrowDepositAllowed("devnet", "RPS3j1r791zUDTwDwv3E1TRAK1H5qVYi1aHLd3gnBmY"), false);
   assert.equal(escrowDepositAllowed("devnet", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), true);
   assert.equal(escrowDepositAllowed("mainnet-beta", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), false);
+  assert.equal(escrowOffered("mainnet-beta"), false);
+  assert.equal(ESCROW_PROGRAM["mainnet-beta"], "");
+});
+
+test("escrow builders pass the title's collection and refuse a SOL burn", async () => {
+  const { escrowBuyInstruction, escrowDepositInstruction, escrowDepositOpenInstruction, ESCROW_PROGRAM, coreCollectionOf } = await import("../src/lib/title");
+  const program = new PublicKey(ESCROW_PROGRAM.devnet);
+  const key = () => Keypair.generate().publicKey;
+  const collection = key();
+  const open = escrowDepositOpenInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), collection, price: BigInt(1), delayDays: 0, burnPercent: 0 });
+  assert.equal(open.keys.at(-1)?.pubkey.toBase58(), collection.toBase58());
+  assert.throws(() => escrowDepositOpenInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), price: BigInt(1), delayDays: 0, burnPercent: 25 }), /SOL cannot be burned/);
+  const coin = key();
+  const paired = escrowDepositInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), coin, pool: key(), collection, price: BigInt(1), delayDays: 1, burnPercent: 0 });
+  assert.equal(paired.keys[8].pubkey.toBase58(), coin.toBase58(), "the coin follows the system program");
+  assert.equal(paired.keys[9].pubkey.toBase58(), collection.toBase58());
+  // A no-coin sale always carries its payout account, even with no named wallets.
+  const buy = escrowBuyInstruction({ program, buyer: key(), creator: key(), title: key(), mint: new PublicKey(WSOL), tokenProgram: TOKEN_PROGRAM_ID, price: BigInt(1), openSale: true, collection });
+  assert.equal(buy.keys.length, 13 + 2);
+  const coinBuy = escrowBuyInstruction({ program, buyer: key(), creator: key(), title: key(), mint: coin, tokenProgram: TOKEN_PROGRAM_ID, price: BigInt(1), openSale: false });
+  assert.equal(coinBuy.keys.length, 13);
+  const asset = new Uint8Array(66);
+  asset[33] = 2;
+  asset.set(collection.toBytes(), 34);
+  assert.equal(coreCollectionOf(asset)?.toBase58(), collection.toBase58());
+  asset[33] = 0;
+  assert.equal(coreCollectionOf(asset), null);
+});
+
+test("price-token payment: WSOL found only by its exact mint, shortfall wrapped, other tokens never wrapped", async () => {
+  const { planFromBalance, paymentInstructions } = await import("../src/lib/token-pay");
+  const owner = Keypair.generate().publicKey;
+  const wsol = new PublicKey(WSOL);
+  const fromZero = planFromBalance({ mint: wsol, tokenProgram: TOKEN_PROGRAM_ID, owner, existed: false, held: BigInt(0), need: BigInt(306_000_000) });
+  assert.equal(fromZero.wrap, BigInt(306_000_000));
+  const ixs = paymentInstructions(fromZero, owner);
+  assert.deepEqual(ixs.before.map((ix) => ix.programId.toBase58()), ["ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", SystemProgram.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58()]);
+  assert.equal(ixs.after.length, 1, "a wrapped-SOL account opened for this payment is closed after it");
+  const partial = planFromBalance({ mint: wsol, tokenProgram: TOKEN_PROGRAM_ID, owner, existed: true, held: BigInt(100), need: BigInt(250) });
+  assert.equal(partial.wrap, BigInt(150));
+  assert.equal(paymentInstructions(partial, owner).after.length, 0, "an account the buyer already had stays open");
+  const plenty = planFromBalance({ mint: wsol, tokenProgram: TOKEN_PROGRAM_ID, owner, existed: true, held: BigInt(1000), need: BigInt(250) });
+  assert.equal(plenty.wrap, BigInt(0));
+  const poor = planFromBalance({ mint: wsol, tokenProgram: TOKEN_PROGRAM_ID, owner, existed: false, held: BigInt(0), need: BigInt(250), lamports: BigInt(100) });
+  assert.equal(poor.short, BigInt(150));
+  const usdc = planFromBalance({ mint: Keypair.generate().publicKey, tokenProgram: TOKEN_PROGRAM_ID, owner, existed: true, held: BigInt(10), need: BigInt(250) });
+  assert.equal(usdc.wrap, BigInt(0));
+  assert.equal(usdc.short, BigInt(240));
+  assert.equal(paymentInstructions(usdc, owner).before.length, 1);
+  const t22 = planFromBalance({ mint: Keypair.generate().publicKey, tokenProgram: TOKEN_2022_PROGRAM_ID, owner, existed: false, held: BigInt(0), need: BigInt(1) });
+  assert.equal(paymentInstructions(t22, owner).before[0].keys[5].pubkey.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58(), "the account is opened with Token-2022");
+});
+
+test("Tensor buy uses the listing currency's own token program and closes a wrapped-SOL account it opened", () => {
+  const base = { title: Keypair.generate().publicKey, seller: Keypair.generate().publicKey, buyer: Keypair.generate().publicKey, price: BigInt(1_000_000) };
+  const mint = Keypair.generate().publicKey;
+  const tx = buyOnTensorTransaction({ ...base, mint, tokenProgram: TOKEN_2022_PROGRAM_ID });
+  const buy = tx.instructions.at(-1)!;
+  assert.equal(buy.keys[16].pubkey.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58());
+  assert.equal(buy.keys[10].pubkey.toBase58(), getAssociatedTokenAddressSync(mint, base.buyer, false, TOKEN_2022_PROGRAM_ID).toBase58());
+  const wsol = buyOnTensorTransaction({ ...base, mint: new PublicKey(WSOL), wrappedSolShortfall: BigInt(1_020_000), closeWrappedAfter: true });
+  assert.equal(wsol.instructions.at(-1)!.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58());
+  assert.throws(() => buyOnTensorTransaction({ ...base, mint, closeWrappedAfter: true }));
+});
+
+test("Metaplex token metadata names a classic SPL token (USDC, a PAR coin)", async () => {
+  const { parseTokenMetadataName } = await import("../src/lib/coin-read");
+  const name = Buffer.from("PAR Back");
+  const symbol = Buffer.from("PRBK");
+  const data = Buffer.alloc(65 + 4 + 32 + 4 + 10);
+  data[0] = 4;
+  data.writeUInt32LE(32, 65);
+  name.copy(data, 69);
+  data.writeUInt32LE(10, 101);
+  symbol.copy(data, 105);
+  assert.deepEqual(parseTokenMetadataName(data), { name: "PAR Back", symbol: "PRBK" });
+  data[0] = 1;
+  assert.equal(parseTokenMetadataName(data), null);
+});
+
+test("the escrow watcher refuses a non-devnet RPC and builds the same settle as the app", async () => {
+  const watch = (await import("../scripts/escrow-watch.mjs")) as unknown as {
+    requireDevnet: (connection: { getGenesisHash: () => Promise<string> }) => Promise<void>;
+    settleInstruction: (payer: PublicKey, listing: Record<string, unknown>) => { keys: { pubkey: PublicKey }[] };
+  };
+  await assert.rejects(watch.requireDevnet({ getGenesisHash: async () => "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" }), /only on devnet/);
+  await watch.requireDevnet({ getGenesisHash: async () => "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" });
+  const { escrowSettleInstruction, ESCROW_PROGRAM, payoutAddress } = await import("../src/lib/title");
+  const key = () => Keypair.generate().publicKey;
+  const [payer, creator, winner, title, mint, collection] = [key(), key(), key(), key(), new PublicKey(WSOL), key()];
+  const program = new PublicKey(ESCROW_PROGRAM.devnet);
+  const fromWatcher = watch.settleInstruction(payer, {
+    asset: title.toBuffer(),
+    mint: mint.toBase58(),
+    creator: creator.toBase58(),
+    highBidder: winner.toBase58(),
+    tokenProgram: TOKEN_PROGRAM_ID,
+    payout: payoutAddress(title, program),
+    payees: [],
+    collection,
+  });
+  const fromApp = escrowSettleInstruction({ program, payer, creator, winner, title, mint, tokenProgram: TOKEN_PROGRAM_ID, openSale: true, collection });
+  assert.deepEqual(
+    fromWatcher.keys.map((row) => row.pubkey.toBase58()),
+    fromApp.keys.map((row) => row.pubkey.toBase58()),
+  );
 });

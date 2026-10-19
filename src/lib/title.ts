@@ -5,7 +5,7 @@ import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, PublicKey, SystemProgram, TransactionInstruction, type Keypair } from "@solana/web3.js";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "./admins";
-import type { ClusterName } from "./constants";
+import { WSOL, type ClusterName } from "./constants";
 import { CORE_PROGRAM_ID, PUBLIC_ORIGIN, type RecordAttribute } from "./record";
 
 export const TITLE_KIND = "PAR title v1";
@@ -79,20 +79,6 @@ export function escrowOffered(cluster: ClusterName): boolean {
 /** A deposit is allowed only on the practice network, and only from a platform wallet. */
 export function escrowDepositAllowed(cluster: ClusterName, wallet: string | null | undefined): boolean {
   return escrowOffered(cluster) && isAdminWallet(wallet);
-}
-
-/**
- * Why a title cannot be deposited into the escrow program, or "" when it can. The program's check_title
- * (escrow/programs/par-escrow/src/lib.rs:678) needs update authority None. A creator-path title is minted as edition 1 of
- * a sealed collection (RecordCreate useEdition, titleInstructions), so its update authority is that collection and the
- * program refuses it with TitleChangeable (6008).
- */
-export function escrowBlockedReason(title: { exists: boolean; collection: string | null }): string {
-  if (!title.exists) return "The title could not be read.";
-  if (title.collection) {
-    return "This title was minted as edition 1 of a sealed collection for the creator-wallet and Tensor path. The escrow program only takes a title with no update authority, so it refuses this one (TitleChangeable). Sell it through Tensor.";
-  }
-  return "";
 }
 
 /** Shown wherever both paths are named. The escrow button is visible and does not click. */
@@ -294,10 +280,12 @@ export function editionCollectionInstructions(input: {
  *
  * With `collection` (made by `editionCollectionInstructions`): the title is minted into it as Edition 1, then the
  * collection is handed to `sealedAuthority` in the same transaction. Core does not enforce edition numbers; the sealed
- * collection, with exactly one asset ever minted into it, is what keeps the title the only one.
+ * collection, with exactly one asset ever minted into it, is what keeps the title the only one. Every new title takes
+ * this path, with or without a coin, for Tensor and for the escrow program alike (its check_title accepts it).
  *
- * Without `collection` (the escrow path, whose program takes no collection account): a standalone Core asset whose
- * update authority is set to None. ImmutableMetadata is left off: it would block setting the update authority to None.
+ * Without `collection`: a standalone Core asset whose update authority is set to None. Only older escrow titles were
+ * made this way; the escrow program still accepts them. ImmutableMetadata is left off: it would block setting the
+ * update authority to None.
  */
 export function titleInstructions(input: {
   endpoint: string;
@@ -362,6 +350,29 @@ const MARK_GRADUATED = Uint8Array.from([125, 72, 57, 129, 59, 15, 247, 251]);
 const BUY = Uint8Array.from([102, 6, 61, 18, 1, 218, 235, 234]);
 const BID = Uint8Array.from([199, 56, 85, 38, 146, 243, 37, 158]);
 const SET_PRICE = Uint8Array.from([16, 19, 182, 8, 149, 83, 72, 181]);
+const SETTLE = Uint8Array.from([175, 42, 185, 87, 144, 131, 102, 212]);
+const RECLAIM = Uint8Array.from([44, 177, 236, 249, 145, 109, 163, 186]);
+
+/** A listing priced in wrapped SOL is detected by this exact mint address and nothing else. */
+export function isWrappedSol(mint: PublicKey | string | null | undefined): boolean {
+  return Boolean(mint) && (typeof mint === "string" ? mint : mint!.toBase58()) === WSOL;
+}
+
+/**
+ * A title in a collection (every title the app mints now: edition 1 of its own sealed collection) is moved by Core only
+ * with its collection account. The escrow program takes it from the remaining accounts, after any payout accounts.
+ */
+function collectionKey(collection: PublicKey | string | null | undefined) {
+  if (!collection) return [];
+  const key = typeof collection === "string" ? new PublicKey(collection) : collection;
+  return [{ pubkey: key, isSigner: false, isWritable: true }];
+}
+
+/** The collection a Core asset belongs to, read from its update authority (BaseAssetV1: key, owner, authority). */
+export function coreCollectionOf(data: Uint8Array | null | undefined): PublicKey | null {
+  if (!data || data.length < 66 || data[33] !== 2) return null;
+  return new PublicKey(data.subarray(34, 66));
+}
 
 function requirePracticeProgram(program: PublicKey) {
   if (!ESCROW_PROGRAM.devnet || program.toBase58() !== ESCROW_PROGRAM.devnet) {
@@ -373,14 +384,20 @@ export function listingAddress(title: PublicKey, program: PublicKey): PublicKey 
   return PublicKey.findProgramAddressSync([new TextEncoder().encode("listing"), title.toBuffer()], program)[0];
 }
 
-/** Moves the title into the escrow. Price is in the token's smallest unit. `burnPercent` is a whole percent from 0 to 98. */
+/**
+ * Moves the title into the escrow. Price is in the smallest unit of `mint`, the price token, which can be the coin, wrapped
+ * SOL, USDC, or any ordinary SPL token. `coin` is the title's coin; the program checks it is the pool's base mint.
+ * `burnPercent` is a whole percent from 0 to 98, and 0 when the price is in SOL (the token program cannot burn it).
+ */
 export function escrowDepositInstruction(input: {
   program: PublicKey;
   creator: PublicKey;
   title: PublicKey;
   record: PublicKey;
   mint: PublicKey;
+  coin: PublicKey;
   pool: PublicKey;
+  collection?: PublicKey | null;
   price: bigint;
   delayDays: number;
   burnPercent: number;
@@ -389,6 +406,9 @@ export function escrowDepositInstruction(input: {
   requirePracticeProgram(input.program);
   if (!Number.isInteger(input.burnPercent) || input.burnPercent < 0 || input.burnPercent > 98) {
     throw new Error("The burn has to be a whole percent from 0 to 98.");
+  }
+  if (input.burnPercent > 0 && isWrappedSol(input.mint)) {
+    throw new Error("SOL cannot be burned. A sale priced in SOL has a burn of 0.");
   }
   const data = new Uint8Array(21);
   data.set(DEPOSIT, 0);
@@ -409,6 +429,8 @@ export function escrowDepositInstruction(input: {
       { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: input.coin, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
@@ -422,6 +444,7 @@ export function escrowDepositOpenInstruction(input: {
   title: PublicKey;
   record: PublicKey;
   mint: PublicKey;
+  collection?: PublicKey | null;
   price: bigint;
   delayDays: number;
   burnPercent: number;
@@ -429,6 +452,9 @@ export function escrowDepositOpenInstruction(input: {
   payouts?: SalePayout[];
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
+  if (input.burnPercent > 0 && isWrappedSol(input.mint)) {
+    throw new Error("SOL cannot be burned. A sale priced in SOL has a burn of 0.");
+  }
   if (!Number.isInteger(input.delayDays) || input.delayDays < 0 || input.delayDays > 365) {
     throw new Error("The wait is a whole number from 0 to 365 days. Zero opens the sale now.");
   }
@@ -472,6 +498,7 @@ export function escrowDepositOpenInstruction(input: {
       { pubkey: payoutAddress(title, input.program), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
@@ -522,7 +549,10 @@ export function escrowBuyInstruction(input: {
   mint: PublicKey;
   tokenProgram: PublicKey;
   price: bigint;
+  /** True when the listing has no pool (a no-coin sale). The program then always reads the payout account. */
+  openSale: boolean;
   payees?: PublicKey[];
+  collection?: PublicKey | null;
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
   const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
@@ -545,12 +575,85 @@ export function escrowBuyInstruction(input: {
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ...(payees.length
+      ...(input.openSale || payees.length
         ? [
             { pubkey: payoutAddress(input.title, input.program), isSigner: false, isWritable: false },
             ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
           ]
         : []),
+      ...collectionKey(input.collection),
+    ],
+  });
+}
+
+/** Finishes an auction whose clock has ended. Anyone can send it; the watcher does. */
+export function escrowSettleInstruction(input: {
+  program: PublicKey;
+  payer: PublicKey;
+  creator: PublicKey;
+  winner: PublicKey;
+  title: PublicKey;
+  mint: PublicKey;
+  tokenProgram: PublicKey;
+  /** True when the listing has no pool (a no-coin sale). */
+  openSale: boolean;
+  payees?: PublicKey[];
+  collection?: PublicKey | null;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
+  const listing = listingAddress(input.title, input.program);
+  const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(input.mint, owner, true, input.tokenProgram);
+  const payees = input.payees ?? [];
+  return new TransactionInstruction({
+    programId: input.program,
+    data: Buffer.from(SETTLE),
+    keys: [
+      { pubkey: input.payer, isSigner: true, isWritable: true },
+      { pubkey: input.creator, isSigner: false, isWritable: true },
+      { pubkey: listing, isSigner: false, isWritable: true },
+      { pubkey: input.title, isSigner: false, isWritable: true },
+      { pubkey: input.winner, isSigner: false, isWritable: true },
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: ata(listing), isSigner: false, isWritable: true },
+      { pubkey: ata(input.creator), isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: false },
+      { pubkey: ata(treasury), isSigner: false, isWritable: true },
+      { pubkey: input.tokenProgram, isSigner: false, isWritable: false },
+      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...(input.openSale || payees.length
+        ? [
+            { pubkey: payoutAddress(input.title, input.program), isSigner: false, isWritable: false },
+            ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
+          ]
+        : []),
+      ...collectionKey(input.collection),
+    ],
+  });
+}
+
+/** The creator takes an unsold title back after the program's wait. `pool` is the listing's pool, or any key without one. */
+export function escrowReclaimInstruction(input: {
+  program: PublicKey;
+  creator: PublicKey;
+  title: PublicKey;
+  pool: PublicKey;
+  collection?: PublicKey | null;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  return new TransactionInstruction({
+    programId: input.program,
+    data: Buffer.from(RECLAIM),
+    keys: [
+      { pubkey: input.creator, isSigner: true, isWritable: true },
+      { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
+      { pubkey: input.title, isSigner: false, isWritable: true },
+      { pubkey: input.pool, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
@@ -732,7 +835,9 @@ export async function titleStatus(
       ok: holderOk,
     },
   ];
-  if (tensor) checks.push({ label: "The Tensor price is in this token", ok: tensor.currency === record.attributes.mint });
+  // The creator can price a listing in the title's own token or in any other (SOL, USDC, any SPL token). The listing
+  // stores that token, and the page reads its symbol and decimals from it, so the check is that a token is named.
+  if (tensor) checks.push({ label: "The Tensor listing names its price token", ok: Boolean(tensor.currency) });
   if (read.collection) {
     checks.push({
       label: "The title is edition 1 of a sealed collection of one",

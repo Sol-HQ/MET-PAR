@@ -7,6 +7,7 @@ import { ObjectPicture } from "@/components/AssetOnPool";
 import { objectPictureUrl } from "@/lib/sheet-html";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
+import { readPayToken, type PayFacts } from "@/lib/coin-read";
 import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
@@ -18,7 +19,7 @@ import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
-import { creatorSalePercent, ESCROW_PROGRAM, escrowBlockedReason, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 export const dynamic = "force-dynamic";
 
@@ -254,7 +255,9 @@ export default async function SalePage({
     openSale && ESCROW_PROGRAM[cluster]
       ? await readPayouts(connection, new PublicKey(ESCROW_PROGRAM[cluster]), new PublicKey(address)).catch(() => [])
       : [];
-  const openDecimals = openSale && listing ? (await getMint(connection, new PublicKey(listing.mint), "confirmed").catch(() => null))?.decimals : undefined;
+  // The escrow listing's price token is stored on the listing. It can be the coin, SOL, USDC, or any SPL token, so its
+  // symbol and decimals are read from that mint on this network, never from the record.
+  const listingPay: PayFacts | null = listing ? await readPayToken(connection, listing.mint).catch(() => null) : null;
   const opensAt = listing && listing.graduatedAt > 0 ? listing.graduatedAt + listing.delaySeconds : 0;
   const curveOpensAt = finishedAt > 0 ? finishedAt + delay * 86_400 : 0;
   const leftEscrow = status?.rail === "escrow" && title.exists && Boolean(status.listing) && status.owner !== status.listing;
@@ -432,9 +435,11 @@ export default async function SalePage({
     status?.rail === "escrow"
       ? "The sale of the title (NFT) runs through the PAR escrow on this page."
       : "The creator lists the title (NFT) through Tensor on this page.";
-  const listedHere = Boolean(status?.tensor && status.tensor.currency === record?.attributes.mint);
-  const listPrice = listedHere && status?.tensor ? formatTokenAmount(status.tensor.amount, decimals) : "";
-  const payPrice = listedHere && status?.tensor ? formatTokenAmount(buyerTotal(status.tensor.amount), decimals) : "";
+  // A Tensor listing stores its own currency. It is read from that mint, whatever the record's token is.
+  const tensorPay: PayFacts | null = status?.tensor?.currency ? await readPayToken(connection, status.tensor.currency).catch(() => null) : null;
+  const listedHere = Boolean(status?.tensor && tensorPay);
+  const listPrice = listedHere && status?.tensor && tensorPay ? `${formatTokenAmount(status.tensor.amount, tensorPay.decimals)} ${tensorPay.symbol}` : "";
+  const payPrice = listedHere && status?.tensor && tensorPay ? `${formatTokenAmount(buyerTotal(status.tensor.amount), tensorPay.decimals)} ${tensorPay.symbol}` : "";
   const tensorSale =
     status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) && !decimalsKnown ? (
       <p className="error">The price token&apos;s decimals could not be read from the chain. Refresh before listing or buying.</p>
@@ -502,7 +507,7 @@ export default async function SalePage({
             <p>Edition 1 · Metaplex Core</p>
             {listPrice ? (
               <p>
-                Listed for {listPrice} {symbol}. A buyer pays {payPrice} {symbol}.
+                Listed for {listPrice}. A buyer pays {payPrice}.
               </p>
             ) : (
               <p>{shownState}</p>
@@ -647,12 +652,15 @@ export default async function SalePage({
           </p>
         </>
       ) : null}
-      {inEscrow && listing && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
+      {inEscrow && listing && !listingPay && !sold ? (
+        <p className="error">The escrow listing&apos;s price token could not be read from the chain. Refresh before buying.</p>
+      ) : null}
+      {inEscrow && listing && listingPay && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
         <>
           <h2>{forSaleNow ? (auction ? "In auction" : "Available for purchase") : "Purchase"}</h2>
           <p className="note">
             {forSaleNow
-              ? `This title (NFT) is available for purchase from the PAR escrow, paid in ${symbol}.`
+              ? `This title (NFT) is available for purchase from the PAR escrow, paid in ${listingPay.symbol}.`
               : `The PAR escrow holds this title (NFT). Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
           </p>
           <EscrowTrade
@@ -662,7 +670,7 @@ export default async function SalePage({
             mint={listing.mint}
             creator={listing.creator}
             pool={listing.pool}
-            symbol={symbol}
+            symbol={listingPay.symbol}
             price={listing.price.toString()}
             burnPercent={listing.burnPercent}
             sale={listing.sale}
@@ -672,8 +680,9 @@ export default async function SalePage({
             previousBidder={listing.highBidder}
             endsAt={listing.endsAt}
             curveFull={snapshot?.isMigrated === true}
-            decimals={openDecimals ?? decimals}
+            decimals={listingPay.decimals}
             payees={payees.map((row) => ({ wallet: row.wallet, amount: row.amount.toString() }))}
+            collection={title.collection}
           />
         </>
       ) : null}
@@ -685,8 +694,7 @@ export default async function SalePage({
           <h2>How this title sells</h2>
           <NoCoinChoice
             pageCluster={cluster}
-            escrowBlocked={escrowBlockedReason(title)}
-            escrow={<OpenEscrow pageCluster={cluster} title={address} record={recordAddress} />}
+            escrow={<OpenEscrow pageCluster={cluster} title={address} record={recordAddress} collection={title.collection} />}
             tensor={
               <SaleTrade
                 pageCluster={cluster}
@@ -733,8 +741,7 @@ export default async function SalePage({
       </p>
       {status?.tensor ? (
         <p className="note">
-          Listed on Tensor for {formatTokenAmount(status.tensor.amount, decimals)}{" "}
-          {status.tensor.currency === record?.attributes.mint ? symbol : "another currency"}. Tensor adds about{" "}
+          Listed on Tensor for {tensorPay ? `${formatTokenAmount(status.tensor.amount, tensorPay.decimals)} ${tensorPay.symbol}` : "a price in a token this page could not read"}. Tensor adds about{" "}
           {TENSOR_TAKER_FEE_PERCENT}% on the buyer&apos;s side.
         </p>
       ) : null}

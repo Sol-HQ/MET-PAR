@@ -676,7 +676,9 @@ export function RecordCreate({
         recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
       }
 
-      const useEdition = draftPlan.rail !== "escrow";
+      // Every RWA title is edition 1 of its own sealed collection, with or without a coin and on either rail. The escrow
+      // program's check_title accepts a sealed collection, so the escrow rail no longer needs a standalone title.
+      const useEdition = true;
       const titleFit = await fitNft(
         "title",
         titleAttributes({
@@ -1017,7 +1019,8 @@ export function RecordCreate({
         delayDays: Number(draft.saleDays),
       });
 
-      const useEdition = plan.rail !== "escrow";
+      // Same as the plan: every title is minted into its sealed collection.
+      const useEdition = true;
       const recordExists = Boolean(await connection.getAccountInfo(keys.record.publicKey, "confirmed"));
       const collectionExists = useEdition
         ? Boolean(await connection.getAccountInfo(keys.collection.publicKey, "confirmed"))
@@ -1124,8 +1127,12 @@ export function RecordCreate({
             creator: payer,
             title: keys.title.publicKey,
             record: keys.record.publicKey,
+            // Priced in the title's coin, the token the Claim step names. The program also takes SOL, USDC, or any
+            // ordinary SPL token here; `coin` is what it checks against the pool.
             mint: new PublicKey(mint),
+            coin: new PublicKey(mint),
             pool: new PublicKey(pool),
+            collection: keys.collection.publicKey,
             price: typedPrice,
             delayDays: Number(draft.saleDays),
             burnPercent: burnOf(draft),
