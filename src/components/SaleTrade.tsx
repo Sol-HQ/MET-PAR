@@ -36,6 +36,8 @@ export function SaleTrade({
   holdsTitle,
   listing,
   decimals = 6,
+  fixedPay = null,
+  payAtListing = false,
   noCoin = false,
   collection = null,
 }: {
@@ -51,6 +53,10 @@ export function SaleTrade({
   holdsTitle: boolean;
   listing: Listing | null;
   decimals?: number;
+  /** The token the title says on chain it is paid in, when that is not its own token. Read from the mint by the page. */
+  fixedPay?: PayFacts | null;
+  /** The title says the creator names the price token when listing (PAID_AT_LISTING). Only then is there a choice. */
+  payAtListing?: boolean;
   noCoin?: boolean;
   collection?: string | null;
 }) {
@@ -63,24 +69,30 @@ export function SaleTrade({
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const [gate, setGate] = useState<{ title: string; lines: string[]; prepared: PreparedTransaction; landed: string } | null>(null);
-  // The title's own token: the coin, or the token a no-coin title names. It is the default, not the only choice.
-  const ownPay: PayFacts = { mint, name: symbol, symbol, decimals };
+  // The token the title says on chain it is paid in. Every older title says "this token only": its own token, so
+  // for those titles this component lists and sells exactly as before. A title can instead name another mint, or let
+  // the creator name the token at listing (then its own token is only the default).
+  const titlePay: PayFacts = (!payAtListing && fixedPay) || { mint, name: symbol, symbol, decimals };
   // The token this listing will be priced in. Read on this network (decimals, symbol, token program) before listing.
-  const [listPay, setListPay] = useState<PayFacts>(ownPay);
+  const [listPay, setListPay] = useState<PayFacts>(titlePay);
   const [otherMint, setOtherMint] = useState("");
   const [payNote, setPayNote] = useState("");
-  // The token the live listing is priced in, read from Tensor's list state, never assumed.
-  const [listingPay, setListingPay] = useState<PayFacts | null>(null);
-  const [listingPayError, setListingPayError] = useState("");
   const currency = listing?.currency ?? null;
+  // Only a listing in a token the title allows is offered. Older titles: the listing's currency is the title's token.
+  const allowed = Boolean(currency) && (payAtListing || currency === titlePay.mint);
+  // The token the live listing is priced in, from Tensor's list state. The title's own token is already known;
+  // any other allowed currency is read from its mint.
+  const [readListingPay, setReadListingPay] = useState<PayFacts | null>(null);
+  const [listingPayError, setListingPayError] = useState("");
+  const listingPay = currency && currency === titlePay.mint ? titlePay : allowed ? readListingPay : null;
   useEffect(() => {
     let live = true;
-    setListingPay(null);
+    setReadListingPay(null);
     setListingPayError("");
-    if (!currency) return;
+    if (!currency || !allowed || currency === titlePay.mint) return;
     readPayToken(connection, currency)
       .then((read) => {
-        if (live) setListingPay(read);
+        if (live) setReadListingPay(read);
       })
       .catch((cause: unknown) => {
         if (live) setListingPayError(cause instanceof Error ? cause.message : "The listing's token could not be read.");
@@ -88,20 +100,25 @@ export function SaleTrade({
     return () => {
       live = false;
     };
-  }, [connection, currency]);
+  }, [connection, currency, allowed, titlePay.mint]);
 
   const opensAt = finishedAt > 0 ? finishedAt + delayDays * 86_400 : 0;
   const open = noCoin || (graduated && opensAt > 0 && Math.floor(Date.now() / 1000) >= opensAt);
   const wallet = publicKey?.toBase58() ?? "";
   const isCreator = wallet === creator;
   const collectionKey = collection ? new PublicKey(collection) : null;
-  const canBuy = Boolean(listing) && Boolean(listingPay) && listing?.seller === creator && open;
+  const canBuy = Boolean(listing) && allowed && Boolean(listingPay) && listing?.seller === creator && open;
   const shown = (amount: bigint, pay: PayFacts) => `${formatTokenAmount(amount, pay.decimals)} ${pay.symbol}`;
 
   async function choosePay(next: string) {
     setPayNote("Reading the token…");
     try {
       const read = await readPayToken(connection, next);
+      // The token program cannot burn wrapped SOL, so a promised burn cannot be kept on a SOL price.
+      if (burn > 0 && read.mint === WSOL) {
+        setPayNote(`This title promises a ${burn}% burn of the price. SOL cannot be burned by the token program, so pick another token.`);
+        return;
+      }
       setListPay(read);
       setPayNote(`${read.name} (${read.symbol}), ${read.decimals} decimals, read on this network.`);
     } catch (cause) {
@@ -152,16 +169,19 @@ export function SaleTrade({
   }
 
   function list() {
-    const amount = parseTokenAmount(price, listPay.decimals);
+    // Only a title that lets the creator name the token at listing can list in anything but the title's token.
+    const pay = payAtListing ? listPay : titlePay;
+    const own = pay.mint === mint;
+    const amount = parseTokenAmount(price, pay.decimals);
     if (!amount || !publicKey) {
-      setError(`Enter the price in ${listPay.symbol}. It uses ${listPay.decimals} decimals.`);
+      setError(own ? "Enter the price in the token." : `Enter the price in ${pay.symbol}. It uses ${pay.decimals} decimals.`);
       return;
     }
     const transaction = new Transaction().add(
       listOnTensorInstruction({
         title: new PublicKey(title),
         creator: publicKey,
-        mint: new PublicKey(listPay.mint),
+        mint: new PublicKey(pay.mint),
         price: amount,
         collection: collectionKey,
       }),
@@ -169,8 +189,8 @@ export function SaleTrade({
     confirm(
       "List this title",
       [
-        `Price: ${shown(amount, listPay)}, paid to your wallet in ${listPay.symbol}.`,
-        `Price token: ${listPay.mint}.`,
+        `Price: ${shown(amount, pay)}, paid to your wallet.`,
+        ...(own ? [] : [`It is paid in ${pay.name} (${pay.symbol}), token address ${pay.mint}.`]),
         `The buyer pays about ${TENSOR_TAKER_FEE_PERCENT}% more. That fee goes to Tensor.`,
         noCoin
           ? "PAR takes none of this sale."
@@ -217,7 +237,7 @@ export function SaleTrade({
       "Buy this title",
       [
         `You pay ${shown(total, listingPay)}.`,
-        `${shown(amount, listingPay)} goes to the creator. ${shown(total - amount, listingPay)} is Tensor's ${TENSOR_TAKER_FEE_PERCENT}% fee.`,
+        `${shown(amount, listingPay)} goes to the creator. The rest is Tensor's fee.`,
         ...(plan.wrap > BigInt(0)
           ? [`${formatTokenAmount(plan.wrap, listingPay.decimals)} SOL is wrapped into your wrapped-SOL account first, in the same transaction. Tensor is paid from that account.`]
           : []),
@@ -249,8 +269,8 @@ export function SaleTrade({
           Listed for {shown(BigInt(listing.amount), listingPay)}. A buyer pays {shown(buyerTotal(BigInt(listing.amount)), listingPay)}. Tensor keeps the extra{" "}
           {TENSOR_TAKER_FEE_PERCENT}%.{listingPay.mint !== mint ? ` This listing is priced in ${listingPay.symbol}, not ${symbol}.` : ""}
         </p>
-      ) : listing && !currency ? (
-        <p className="error">This listing is priced in native SOL by a tool other than this page. Buy it on Tensor.</p>
+      ) : listing && !allowed ? (
+        <p className="error">This listing is not priced in {payAtListing ? "a token this page can read" : titlePay.symbol}.</p>
       ) : listing ? (
         <p className={listingPayError ? "error" : "note"}>{listingPayError || "Reading the listing's token…"}</p>
       ) : (
@@ -262,12 +282,13 @@ export function SaleTrade({
             : wait}
         </p>
       )}
-      {holdsTitle && isCreator && open && !listing ? (
+      {holdsTitle && isCreator && open && payAtListing ? (
         <>
+          <p className="note">This title lets you name the token when you list. {symbol} is the default.</p>
           <div className="segmented" role="group" aria-label="Price token">
-            <button type="button" aria-pressed={listPay.mint === mint} onClick={() => { setListPay(ownPay); setPayNote(""); }}>{symbol}</button>
-            {mint !== WSOL ? <button type="button" aria-pressed={listPay.mint === WSOL} onClick={() => void choosePay(WSOL)}>SOL</button> : null}
-            {mint !== quoteMintAddress(pageCluster, "usdc").toBase58() ? (
+            <button type="button" aria-pressed={listPay.mint === titlePay.mint} onClick={() => { setListPay(titlePay); setPayNote(""); }}>{titlePay.symbol}</button>
+            {titlePay.mint !== WSOL && burn === 0 ? <button type="button" aria-pressed={listPay.mint === WSOL} onClick={() => void choosePay(WSOL)}>SOL</button> : null}
+            {titlePay.mint !== quoteMintAddress(pageCluster, "usdc").toBase58() ? (
               <button type="button" aria-pressed={listPay.mint === quoteMintAddress(pageCluster, "usdc").toBase58()} onClick={() => void choosePay(quoteMintAddress(pageCluster, "usdc").toBase58())}>USDC</button>
             ) : null}
           </div>
@@ -282,12 +303,17 @@ export function SaleTrade({
             <input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" />
           </label>
         </>
+      ) : holdsTitle && isCreator && open ? (
+        <label>
+          Price in {titlePay.symbol}
+          <input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" />
+        </label>
       ) : null}
       <div className="asset-nav">
         {noCoin && holdsTitle && isCreator && open ? (
           <p className="note">No coin is attached. You can list this title, and you can delist it. Delist returns the title to your wallet. You can list it again.</p>
         ) : null}
-        {holdsTitle && isCreator && open && !listing ? (
+        {holdsTitle && isCreator && open ? (
           <button type="button" className="solid" disabled={busy} onClick={list}>
             {busy ? "Listing…" : "List on this page"}
           </button>

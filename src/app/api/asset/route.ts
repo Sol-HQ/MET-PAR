@@ -9,12 +9,7 @@ const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const named = url.searchParams.get("cluster");
-  // Callers (PoolBoard, AssetOnPool) always name the network. Anything else is refused, never read as mainnet.
-  if (named !== "devnet" && named !== "mainnet-beta") {
-    return Response.json({ assets: [], error: "Name the network: devnet or mainnet-beta." }, { status: 400 });
-  }
-  const cluster: ClusterName = named;
+  const cluster: ClusterName = url.searchParams.get("cluster") === "devnet" ? "devnet" : "mainnet-beta";
   const pool = url.searchParams.get("pool") || "";
   if (pool && !ADDRESS.test(pool)) return Response.json({ assets: [] });
   try {

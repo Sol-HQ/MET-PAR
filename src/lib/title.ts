@@ -142,11 +142,18 @@ export function creatorPromises(input: {
   /** False when this title has no coin. The price token is named in paySymbol. */
   attached?: boolean;
   paySymbol?: string;
+  /** Coin-paired only: the price token's symbol when the title is not sold for the coin. Unset: the coin, as before. */
+  priceSymbol?: string;
+  /** Coin-paired Tensor path only: the creator names the price token at listing. */
+  payAtListing?: boolean;
 }): string[] {
   const escrow = input.rail === "escrow";
   const auction = escrow && input.sale === "auction";
   const attached = input.attached !== false;
   const pay = input.paySymbol || "this token";
+  // Unset for a title sold for its own coin, so those promises read word for word as before.
+  const other = attached && !escrow && input.payAtListing ? "listing" : attached && input.priceSymbol ? input.priceSymbol : "";
+  const escrowToken = other && other !== "listing" ? other : "this token";
   const waitUnit = input.shortClock ? "seconds" : "days";
   const bidClock = input.shortClock ? "72-second" : `${AUCTION_HOURS}-hour`;
   const extend = input.shortClock ? "1 second" : `${AUCTION_EXTEND_HOURS} hour`;
@@ -157,10 +164,10 @@ export function creatorPromises(input: {
     "The title is the one claim to the item. Whoever holds the title can claim the item from me.",
     escrow
       ? auction
-        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. PAR platform finishes it when the clock ends.`
-        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
+        ? `The title is auctioned only through the PAR escrow program, only for ${escrowToken}. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. PAR platform finishes it when the clock ends.`
+        : `The title is sold only through the PAR escrow program, only for ${escrowToken}, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
       : attached
-        ? `I will list the title through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
+        ? `I will list the title through Tensor's marketplace program, ${other === "listing" ? `priced in ${pay} or in another token I name when I list it` : `priced only in ${other || pay}`}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
         : `I will list this title on its PAR sale page through Tensor's marketplace program, at one price in ${pay}. A buyer pays that price.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
@@ -173,7 +180,9 @@ export function creatorPromises(input: {
         ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
         : `The title waits in the PAR escrow program until it is sold. If it never sells, it returns to me ${reclaim} after the sale could open.`
       : "Until the sale, the title stays in my wallet or in my Tensor listing. I will not sell, move, lend, or burn it any other way. Doing so breaks my word.",
-    attached
+    attached && other
+      ? `The token is a meme. The title is paid for in ${other === "listing" ? "the token named in the listing" : other}. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing.`
+      : attached
       ? "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing."
       : `The buyer pays for this title in ${pay}. That payment buys the title.`,
     "If I break these promises, I alone am responsible. PAR is software. It does not hold, insure, or guarantee the item. The NFT on the chain is the proof. PAR keeps a copy of the proofs.",
@@ -209,7 +218,46 @@ export type TitleFacts = {
   sheet?: string;
   /** False when the title has no coin and the mint is only the price token. */
   noCoin?: boolean;
+  /**
+   * Coin-paired titles only: the token the title is sold for when it is not the coin (SOL, USDC, or any mint). Left
+   * out, or equal to `mint`, the title says "this token only", byte for byte what every earlier title says.
+   */
+  priceMint?: string | null;
+  /** Tensor path only: the creator names the price token when listing. Written on the title as PAID_AT_LISTING. */
+  payAtListing?: boolean;
 };
+
+/** What every title minted before the price-token choice says, and what a title priced in its own token still says. */
+export const PAID_IN_OWN = "this token only";
+/** A Tensor-path title whose creator names the price token at listing time. */
+export const PAID_AT_LISTING = "the token named at listing";
+const MINT_TEXT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** The "paid in" line written on a new title. */
+export function paidInWords(mint: string, priceMint?: string | null, payAtListing = false): string {
+  if (payAtListing) return PAID_AT_LISTING;
+  return priceMint && priceMint !== mint ? priceMint : PAID_IN_OWN;
+}
+
+/** Which tokens a title may be listed and bought in, from its own "paid in" line. The title's line is the promise. */
+export type PriceRule = { kind: "fixed"; mint: string } | { kind: "listing" };
+
+/**
+ * Reads the title's "paid in" line. "this token only" (every older title) and any other words mean the title's own
+ * token (`ownMint`, the record's mint). A mint address means that token. PAID_AT_LISTING means the creator's pick.
+ */
+export function titlePriceRule(paidIn: string | undefined, ownMint: string): PriceRule | null {
+  const words = (paidIn ?? "").trim();
+  if (words === PAID_AT_LISTING) return { kind: "listing" };
+  if (MINT_TEXT.test(words)) return { kind: "fixed", mint: words };
+  return MINT_TEXT.test(ownMint) ? { kind: "fixed", mint: ownMint } : null;
+}
+
+/** True when a listing in `currency` keeps the title's promise. */
+export function priceRuleAllows(rule: PriceRule | null, currency: string | null | undefined): boolean {
+  if (!rule || !currency) return false;
+  return rule.kind === "listing" || rule.mint === currency;
+}
 
 export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
   const escrow = facts.rail === "escrow";
@@ -226,7 +274,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
     { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
-    { key: "paid in", value: "this token only" },
+    { key: "paid in", value: paidInWords(facts.mint, facts.priceMint, facts.payAtListing) },
     { key: "burned", value: facts.noCoin ? "the creator's own promise, if the creator burns any of the price" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
     { key: "sale", value: facts.noCoin ? "tensor" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
@@ -835,9 +883,16 @@ export async function titleStatus(
       ok: holderOk,
     },
   ];
-  // The creator can price a listing in the title's own token or in any other (SOL, USDC, any SPL token). The listing
-  // stores that token, and the page reads its symbol and decimals from it, so the check is that a token is named.
-  if (tensor) checks.push({ label: "The Tensor listing names its price token", ok: Boolean(tensor.currency) });
+  // The title's "paid in" line is the promise. Older titles (and titles priced in their own token) say "this token
+  // only": the check is then exactly the one it always was, the listing's currency against the record's token.
+  const priceRule = titlePriceRule(read.attributes["paid in"], record.attributes.mint || "");
+  if (tensor) {
+    checks.push(
+      priceRule?.kind === "listing"
+        ? { label: "The Tensor listing names its price token", ok: Boolean(tensor.currency) }
+        : { label: "The Tensor price is in this token", ok: priceRuleAllows(priceRule, tensor.currency) },
+    );
+  }
   if (read.collection) {
     checks.push({
       label: "The title is edition 1 of a sealed collection of one",

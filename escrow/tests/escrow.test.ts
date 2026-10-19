@@ -20,7 +20,19 @@ import {
   createMintToInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { create, mplCore, updateCollection } from "@metaplex-foundation/mpl-core";
+import {
+  addCollectionPluginV1,
+  addPluginV1,
+  burnV1,
+  create,
+  createPlugin,
+  deserializeAssetV1,
+  deserializeCollectionV1,
+  mplCore,
+  transferV1,
+  updateCollection,
+  updateV2,
+} from "@metaplex-foundation/mpl-core";
 import { createNoopSigner, createSignerFromKeypair, publicKey as umiKey, signerIdentity } from "@metaplex-foundation/umi";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi-web3js-adapters";
@@ -43,6 +55,7 @@ import {
 } from "../../src/lib/title";
 import { paymentInstructions, planFromBalance, openTokenAccount } from "../../src/lib/token-pay";
 import { WSOL } from "../../src/lib/constants";
+import { recordInstruction } from "../../src/lib/record";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PROGRAM = new PublicKey(ESCROW_PROGRAM.devnet);
@@ -572,6 +585,175 @@ describe("par-escrow, coin-paired RWA in its sealed collection (same title check
     const { title, collection } = sealedTitle(svm, creator);
     const ix = escrowDepositInstruction({ program: PROGRAM, creator: creator.publicKey, title, record: record(svm, creator), mint: coin, coin: other, pool: pool(svm, coin, false), collection, price: BigInt(1), delayDays: 1, burnPercent: 0 });
     expectError(send(svm, creator, [ix]), "WrongPool", "deposit with a coin that is not the pool's");
+  });
+});
+
+/** Core instructions built with `who` as the authority (and payer), signed by `who` in LiteSVM. */
+function asAuthority(who: PublicKey) {
+  const { umi, signer } = umiFor(who);
+  const k = (key: PublicKey) => umiKey(key.toBase58());
+  const ix = (builder: { getInstructions: () => Parameters<typeof toWeb3JsInstruction>[0][] }) => builder.getInstructions().map(toWeb3JsInstruction);
+  return {
+    rename: (asset: PublicKey, collection?: PublicKey) =>
+      ix(updateV2(umi, { asset: k(asset), collection: collection ? k(collection) : undefined, payer: signer, authority: signer, newName: "Changed" })),
+    transfer: (asset: PublicKey, to: PublicKey, collection?: PublicKey) =>
+      ix(transferV1(umi, { asset: k(asset), collection: collection ? k(collection) : undefined, payer: signer, authority: signer, newOwner: k(to) })),
+    burn: (asset: PublicKey, collection?: PublicKey) =>
+      ix(burnV1(umi, { asset: k(asset), collection: collection ? k(collection) : undefined, payer: signer, authority: signer })),
+    freeze: (asset: PublicKey, collection?: PublicKey) =>
+      ix(addPluginV1(umi, { asset: k(asset), collection: collection ? k(collection) : undefined, payer: signer, authority: signer, plugin: createPlugin({ type: "FreezeDelegate", data: { frozen: true } }) })),
+    renameCollection: (collection: PublicKey) => ix(updateCollection(umi, { collection: k(collection), payer: signer, authority: signer, name: "Changed" })),
+    takeCollection: (collection: PublicKey) =>
+      ix(updateCollection(umi, { collection: k(collection), payer: signer, authority: signer, newUpdateAuthority: signer.publicKey })),
+    collectionPlugin: (collection: PublicKey) =>
+      ix(addCollectionPluginV1(umi, { collection: k(collection), payer: signer, authority: signer, plugin: createPlugin({ type: "UpdateDelegate" }) })),
+    mintInto: (collection: PublicKey, asset: Keypair) =>
+      ix(
+        create(umi, {
+          asset: createSignerFromKeypair(umi, fromWeb3JsKeypair(asset)),
+          collection: { publicKey: k(collection) },
+          name: "Second title",
+          uri: "https://example.com/2.json",
+          owner: signer.publicKey,
+          payer: signer,
+          authority: signer,
+        }),
+      ),
+  };
+}
+
+function rpcAccount(svm: Svm, key: PublicKey) {
+  const account = svm.getAccount(key);
+  assert.ok(account, `${key.toBase58()} missing`);
+  return {
+    publicKey: umiKey(key.toBase58()),
+    data: Uint8Array.from(account.data),
+    executable: false,
+    owner: umiKey(account.owner.toBase58()),
+    lamports: { basisPoints: BigInt(account.lamports), identifier: "SOL" as const, decimals: 9 as const },
+  };
+}
+
+function expectRefused(result: ReturnType<typeof send>, what: string) {
+  assert.equal(result.ok, false, `${what} should have been refused by Metaplex Core`);
+}
+
+describe("mint model: the vault-held master (record), the sealed collection (master edition), and the edition (title)", () => {
+  test("built by the app's own RecordCreate builders, then every authority is tried", () => {
+    const svm = boot();
+    const creator = wallet(svm);
+    // Stand-in for the vault pMUdWH9U…tmfei. It is a real signing wallet (on the curve), so the test gives it a key.
+    const vault = wallet(svm, 5);
+    const recordKey = Keypair.generate();
+    expectOk(
+      send(
+        svm,
+        creator,
+        recordInstruction({ endpoint: ENDPOINT, asset: recordKey, payer: creator.publicKey, vault: vault.publicKey, name: "Record", uri: "https://example.com/r.json", attributes: [{ key: "record", value: "PAR asset record v1" }] }),
+        [recordKey],
+      ),
+      "record (master) to the vault",
+    );
+    const { title, collection } = sealedTitle(svm, creator);
+
+    // What is on chain.
+    const rec = deserializeAssetV1(rpcAccount(svm, recordKey.publicKey));
+    assert.equal(rec.owner, vault.publicKey.toBase58());
+    assert.deepEqual(rec.updateAuthority, { type: "Address", address: vault.publicKey.toBase58() });
+    assert.equal(rec.permanentFreezeDelegate?.frozen, true);
+    assert.equal(rec.permanentFreezeDelegate?.authority.type, "None");
+    assert.equal(rec.immutableMetadata?.authority.type, "None");
+    assert.equal(rec.addBlocker?.authority.type, "None");
+    const col = deserializeCollectionV1(rpcAccount(svm, collection));
+    assert.equal(col.updateAuthority, sealedAuthority(collection).toBase58());
+    assert.equal(PublicKey.isOnCurve(sealedAuthority(collection).toBytes()), false, "the seal is off the curve: no key exists");
+    assert.equal(col.numMinted, 1);
+    assert.equal(col.currentSize, 1);
+    assert.equal(col.masterEdition?.maxSupply, 1);
+    assert.equal(col.masterEdition?.authority.type, "None");
+    const ttl = deserializeAssetV1(rpcAccount(svm, title));
+    assert.equal(ttl.owner, creator.publicKey.toBase58());
+    assert.deepEqual(ttl.updateAuthority, { type: "Collection", address: collection.toBase58() });
+    assert.equal(ttl.edition?.number, 1);
+    assert.equal(ttl.edition?.authority.type, "None");
+    assert.equal(ttl.freezeDelegate ?? ttl.transferDelegate ?? ttl.burnDelegate ?? ttl.updateDelegate, undefined, "no delegate on the title");
+    // The record is not in the collection and names no authority over it.
+    assert.equal(coreCollectionOf(Buffer.from(svm.getAccount(recordKey.publicKey)!.data)), null);
+
+    // The vault cannot change, move, or burn its own record.
+    const v = asAuthority(vault.publicKey);
+    expectRefused(send(svm, vault, v.rename(recordKey.publicKey)), "vault renames the record");
+    expectRefused(send(svm, vault, v.transfer(recordKey.publicKey, vault.publicKey)), "vault moves the record");
+    expectRefused(send(svm, vault, v.burn(recordKey.publicKey)), "vault burns the record");
+    // The vault has no authority over the title or its collection.
+    expectRefused(send(svm, vault, v.rename(title, collection)), "vault renames the title");
+    expectRefused(send(svm, vault, v.transfer(title, vault.publicKey, collection)), "vault moves the title");
+    expectRefused(send(svm, vault, v.burn(title, collection)), "vault burns the title");
+    expectRefused(send(svm, vault, v.freeze(title, collection)), "vault freezes the title");
+    expectRefused(send(svm, vault, v.renameCollection(collection)), "vault renames the collection");
+    expectRefused(send(svm, vault, v.takeCollection(collection)), "vault takes the collection");
+
+    // The creator, as former collection authority, can no longer change the title or the collection, or mint a second.
+    const c = asAuthority(creator.publicKey);
+    expectRefused(send(svm, creator, c.rename(title, collection)), "creator renames the title");
+    expectRefused(send(svm, creator, c.renameCollection(collection)), "creator renames the collection");
+    expectRefused(send(svm, creator, c.takeCollection(collection)), "creator takes the collection back");
+    expectRefused(send(svm, creator, c.collectionPlugin(collection)), "creator adds an update delegate to the collection");
+    const second = Keypair.generate();
+    expectRefused(send(svm, creator, c.mintInto(collection, second), [second]), "creator mints a second title into the collection");
+    assert.equal(deserializeCollectionV1(rpcAccount(svm, collection)).numMinted, 1);
+
+    // The title goes into the escrow. There the owner is the listing PDA, so neither the vault nor the creator can
+    // move, burn, freeze, or change it.
+    const rec2 = recordKey.publicKey;
+    expectOk(send(svm, creator, [openDeposit({ creator, title, record: rec2, mint: NATIVE, price: SOL, collection })]), "deposit");
+    const listing = listingAddress(title, PROGRAM).toBase58();
+    assert.equal(coreOwner(svm, title), listing);
+    for (const [who, key] of [[c, creator], [v, vault]] as const) {
+      expectRefused(send(svm, key, who.transfer(title, key.publicKey, collection)), "move the title out of escrow");
+      expectRefused(send(svm, key, who.burn(title, collection)), "burn the title in escrow");
+      expectRefused(send(svm, key, who.freeze(title, collection)), "freeze the title in escrow");
+      expectRefused(send(svm, key, who.rename(title, collection)), "rename the title in escrow");
+    }
+    // A buyer gets exactly that title.
+    const buyer = wallet(svm);
+    const buy = buyInstructions(svm, { buyer, creator: creator.publicKey, title, mint: NATIVE, price: SOL, collection });
+    expectOk(send(svm, buyer, buy.instructions), "buy");
+    assert.equal(coreOwner(svm, title), buyer.publicKey.toBase58());
+    assert.equal(deserializeAssetV1(rpcAccount(svm, title)).name, "Title");
+  });
+
+  test("controls: the same builders succeed when the signer does hold the authority", () => {
+    const svm = boot();
+    const creator = wallet(svm);
+    const c = asAuthority(creator.publicKey);
+    // A title whose update authority is still the creator's wallet can be renamed by it.
+    const loose = mutableTitle(svm, creator);
+    expectOk(send(svm, creator, c.rename(loose)), "rename with the real update authority");
+    // The owner of a sealed title can move it and burn it while it holds it (ordinary ownership).
+    const other = wallet(svm);
+    const one = sealedTitle(svm, creator);
+    expectOk(send(svm, creator, c.transfer(one.title, other.publicKey, one.collection)), "owner moves its title");
+    assert.equal(coreOwner(svm, one.title), other.publicKey.toBase58());
+    const two = sealedTitle(svm, creator);
+    expectOk(send(svm, creator, c.burn(two.title, two.collection)), "owner burns its title");
+    // An unsealed collection can still be renamed by its authority: the seal is what stops it.
+    const collection = Keypair.generate();
+    expectOk(
+      send(svm, creator, editionCollectionInstructions({ endpoint: ENDPOINT, collection, creator: creator.publicKey, name: "C", uri: "https://example.com/c.json" }), [collection]),
+      "unsealed collection",
+    );
+    expectOk(send(svm, creator, c.renameCollection(collection.publicKey)), "rename an unsealed collection");
+  });
+
+  test("an owner can add a freeze delegate to its own title before a deposit; the escrow then refuses it", () => {
+    const svm = boot();
+    const creator = wallet(svm);
+    const { title, collection } = sealedTitle(svm, creator);
+    const c = asAuthority(creator.publicKey);
+    expectOk(send(svm, creator, c.freeze(title, collection)), "owner adds a freeze delegate (an owner-managed plugin)");
+    const rec = record(svm, creator);
+    expectError(send(svm, creator, [openDeposit({ creator, title, record: rec, mint: NATIVE, price: SOL, collection })]), "TitleHasDelegate", "deposit");
   });
 });
 

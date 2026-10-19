@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LawRecord } from "@/components/LawRecord";
 import { RecordCreate } from "@/components/RecordCreate";
-import { namedPay, readClassicMint, readCoin, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { namedPay, readClassicMint, readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { DEFAULT_MIGRATION_FEE_BPS, USDC_DEVNET, USDC_MAINNET, WSOL } from "@/lib/constants";
 import { bpsToPercent } from "@/lib/format";
 import { shrinkImageUnder } from "@/lib/image";
@@ -129,6 +130,13 @@ export type Draft = {
   burnPercent: string;
   /** Where the title goes. Auth wallets can pick escrow on the practice network. Mainnet stays on Tensor. */
   hold: "wallet" | "escrow";
+  /**
+   * Coin-paired titles: the token the title is sold for, when it is not the coin (SOL, USDC, or any mint). Empty or
+   * missing means the coin, as before. Re-read from the chain before anything is signed.
+   */
+  titlePayMint?: string;
+  /** Coin-paired Tensor path: the creator names the price token when listing. The coin is the default there. */
+  payAtListing?: boolean;
   shipDays: string;
   shipping: string;
   declared: string;
@@ -371,7 +379,7 @@ function positive(value: string) {
   return number;
 }
 
-type Checks = { hasPicture: boolean; withCoin: boolean | null; coin: boolean; pay: boolean; decimals: number };
+type Checks = { hasPicture: boolean; withCoin: boolean | null; coin: boolean; pay: boolean; decimals: number; titlePay?: string };
 
 function problemFor(step: Step, draft: Draft, checks: Checks) {
   if (checks.withCoin === null) return "Choose whether a coin goes with this title.";
@@ -397,6 +405,7 @@ function problemFor(step: Step, draft: Draft, checks: Checks) {
     if (!draft.claim.trim()) return "Write what the holder of the title can claim.";
     if (checks.withCoin && wholeDays(draft.saleDays) === null) return "The days after graduation before the title sale are a whole number from 1 to 365.";
     if (checks.withCoin && wholeBurn(draft.burnPercent) === null) return "The burn is a whole percent from 0 to 98. The PAR program keeps 2%.";
+    if (checks.withCoin && checks.titlePay) return checks.titlePay;
     if (checks.withCoin && draft.hold === "escrow" && !parseTokenAmount(draft.titlePrice, checks.decimals)) {
       return draft.sale === "auction" ? "Type the reserve in this token. A bid has to reach it." : "Type the price in this token. The buyer pays that amount.";
     }
@@ -477,6 +486,10 @@ export function AssetDesk() {
   const [pay, setPay] = useState<PayFacts | null>(null);
   const [payNote, setPayNote] = useState("");
   const [restored, setRestored] = useState(false);
+  // Coin-paired: the title's price token when it is not the coin. Null means the coin.
+  const [titlePay, setTitlePay] = useState<PayFacts | null>(null);
+  const [titlePayInput, setTitlePayInput] = useState("");
+  const [titlePayNote, setTitlePayNote] = useState("");
   const priced = namedPay(pay);
   const symbol = (coin?.symbol || priced?.symbol || draft.symbol).trim().toUpperCase();
   const escrowLive = escrowDepositAllowed(cluster, publicKey?.toBase58());
@@ -588,12 +601,27 @@ export function AssetDesk() {
     setDraft((current) => (current.hold === "escrow" ? { ...current, hold: "wallet" } : current));
   }, [escrowLive]);
 
+  // The title's price token, for a coin-paired title. Escrow refuses Token-2022 (its transfer fees and hooks break the
+  // fixed payout), and the token program cannot burn wrapped SOL, so a SOL price carries a burn of 0.
+  const chosenTitlePay = withCoin && coin && draft.titlePayMint && draft.titlePayMint !== coin.mint ? draft.titlePayMint : "";
+  const titlePayProblem = !chosenTitlePay
+    ? ""
+    : titlePay?.mint !== chosenTitlePay
+      ? "Read the title's price token again, or pick the coin."
+      : rail === "escrow" && titlePay.tokenProgram === TOKEN_2022_PROGRAM_ID.toBase58()
+        ? "That price token is Token-2022. The escrow cannot settle it. Pick the coin, SOL, USDC, or an ordinary SPL token, or use Tensor."
+        : titlePay.mint === WSOL && (wholeBurn(draft.burnPercent) ?? 0) > 0
+          ? "SOL cannot be burned by the token program. A title priced in SOL has a burn of 0."
+          : "";
+  const priceSymbol = chosenTitlePay && titlePay ? titlePay.symbol : symbol;
+
   const checks: Checks = {
     hasPicture: Boolean(picture && pictureCopy && nftPicture && nftPictureCopy),
     withCoin,
     coin: Boolean(coin),
     pay: Boolean(pay),
-    decimals: coin?.decimals ?? pay?.decimals ?? 6,
+    decimals: (coin && titlePay ? titlePay.decimals : undefined) ?? coin?.decimals ?? pay?.decimals ?? 6,
+    titlePay: titlePayProblem,
   };
   const word = profitWord(draft);
   const problem =
@@ -706,17 +734,17 @@ export function AssetDesk() {
       [
         "Title sale",
         rail === "escrow"
-          ? `Escrow is selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program, only for ${symbol || "the token"}, once the sale opens ${draft.saleDays} ${waitUnit} after graduation. ${
+          ? `Escrow is selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program, only for ${priceSymbol || "the token"}, once the sale opens ${draft.saleDays} ${waitUnit} after graduation. ${
               draft.sale === "auction"
-                ? `It is an auction. The reserve is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. ${
+                ? `It is an auction. The reserve is ${draft.titlePrice || "unset"} ${priceSymbol || "tokens"}. ${
                     shortClock
                       ? "The clock starts on the first bid at the reserve and runs 72 seconds. A bid in the last second extends it 1 second. With no bid it sits 60 seconds and does not come back on its own."
                       : `The clock starts on the first bid at the reserve and runs ${AUCTION_HOURS} hours. A bid in the last hour extends it ${AUCTION_EXTEND_HOURS} hour. With no bid it sits ${AUCTION_SIT_DAYS} days and does not come back on its own.`
                   } `
-                : `The price is ${draft.titlePrice || "unset"} ${symbol || "tokens"}. The first person to pay it gets the title. `
+                : `The price is ${draft.titlePrice || "unset"} ${priceSymbol || "tokens"}. The first person to pay it gets the title. `
             }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
-            ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, priced in ${coin.symbol} unless the creator picks SOL, USDC, or another token there, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
+            ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, ${draft.payAtListing ? `priced in ${chosenTitlePay && titlePay ? titlePay.symbol : coin.symbol} or in another token the creator names at listing` : `only for ${chosenTitlePay && titlePay ? titlePay.symbol : coin.symbol}`}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
             : `The buyer pays in ${priced?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`,
       ],
       [
@@ -740,7 +768,7 @@ export function AssetDesk() {
           : "The sale is a list at one price in the token named above. The creator sets that price on the sale page.",
       ],
     ],
-    [draft, symbol, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, priced, sizeLine, withCoin],
+    [draft, symbol, priceSymbol, chosenTitlePay, titlePay, rail, waitUnit, shortClock, pictureView, nftPictureView, coin, priced, sizeLine, withCoin],
   );
 
   function patch(partial: Partial<Draft>) {
@@ -778,6 +806,46 @@ export function AssetDesk() {
       setCoinNote(cause instanceof Error ? cause.message : "Could not read that coin.");
     }
   }
+
+  /** Coin-paired: picks the title's price token. The coin clears the choice, so the title says "this token only". */
+  async function loadTitlePay(mint: string) {
+    const trimmed = mint.trim();
+    if (!coin || !trimmed || trimmed === coin.mint) {
+      patch({ titlePayMint: "", payAtListing: draft.payAtListing });
+      setTitlePay(null);
+      setTitlePayNote(coin ? `The title is sold for the coin, ${coin.symbol}.` : "");
+      return;
+    }
+    setTitlePayNote("Reading the token…");
+    try {
+      // The escrow path refuses Token-2022 here; Tensor takes SPL Token and Token-2022 currencies.
+      const read = rail === "escrow" ? await readClassicMint(connection, trimmed) : await readPayToken(connection, trimmed);
+      setTitlePay(read);
+      patch({ titlePayMint: read.mint });
+      setTitlePayNote(`${read.name} (${read.symbol}). ${read.decimals} decimals, read on this network. Token address ${read.mint}.`);
+    } catch (cause) {
+      setTitlePay(null);
+      patch({ titlePayMint: trimmed });
+      setTitlePayNote(cause instanceof Error ? cause.message : "Could not read that token.");
+    }
+  }
+
+  // A restored draft names its price token by address only; read it again on this network.
+  useEffect(() => {
+    if (!coin || !draft.titlePayMint || draft.titlePayMint === coin.mint || titlePay?.mint === draft.titlePayMint) return;
+    let live = true;
+    (rail === "escrow" ? readClassicMint(connection, draft.titlePayMint) : readPayToken(connection, draft.titlePayMint))
+      .then((read) => {
+        if (live) setTitlePay(read);
+      })
+      .catch((cause: unknown) => {
+        if (live) setTitlePayNote(cause instanceof Error ? cause.message : "Could not read that token.");
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coin, draft.titlePayMint, connection]);
 
   async function loadPay(mint = payInput) {
     setPay(null);
@@ -1215,6 +1283,56 @@ export function AssetDesk() {
                 : `Burn ${wholeBurn(draft.burnPercent)}%. On an escrow sale you receive ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? 0)}% and the PAR program keeps ${SALE_PROGRAM_FEE_PERCENT}%. On a Tensor sale, Tensor pays you the full price and you burn this percent within ${CREATOR_BURN_DAYS} days.`}
             </span>
           </label>
+          {coin ? (
+            <>
+              <p className="eyebrow">The title&apos;s price token</p>
+              <div className="segmented" role="group" aria-label="The title's price token">
+                <button type="button" aria-pressed={!chosenTitlePay} onClick={() => void loadTitlePay(coin.mint)}>
+                  {coin.symbol} (the coin)
+                </button>
+                {coin.mint !== WSOL ? (
+                  <button type="button" aria-pressed={chosenTitlePay === WSOL} onClick={() => void loadTitlePay(WSOL)}>
+                    SOL
+                  </button>
+                ) : null}
+                {coin.mint !== (cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET) ? (
+                  <button
+                    type="button"
+                    aria-pressed={chosenTitlePay === (cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}
+                    onClick={() => void loadTitlePay(cluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}
+                  >
+                    USDC
+                  </button>
+                ) : null}
+              </div>
+              <label>
+                Or paste another token address
+                <input value={titlePayInput} onChange={(event) => setTitlePayInput(event.target.value.trim())} spellCheck={false} />
+              </label>
+              <button type="button" disabled={!titlePayInput} onClick={() => void loadTitlePay(titlePayInput)}>
+                Read this token
+              </button>
+              <p className="note">
+                {titlePayNote ||
+                  `The title is sold for the coin, ${coin.symbol}, unless you pick another token. The token you pick is written on the title.${
+                    rail === "escrow" ? " The escrow refuses Token-2022." : ""
+                  }`}
+              </p>
+              {rail !== "escrow" ? (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(draft.payAtListing)}
+                    onChange={(event) => patch({ payAtListing: event.target.checked })}
+                  />{" "}
+                  Let me name the token when I list it on Tensor. {priceSymbol} is the default there. The title says so on chain.
+                </label>
+              ) : null}
+              {chosenTitlePay && (wholeBurn(draft.burnPercent) ?? 0) > 0 ? (
+                <p className="note">The burn applies to the price token: {wholeBurn(draft.burnPercent)}% of the price in {priceSymbol} is burned, not the coin.</p>
+              ) : null}
+            </>
+          ) : null}
           {rail === "escrow" ? (
             <>
               <div className="segmented" role="group" aria-label="How the title sells">
@@ -1226,7 +1344,7 @@ export function AssetDesk() {
                 </button>
               </div>
               <label>
-                {draft.sale === "auction" ? `Reserve, in ${symbol || "this token"}` : `Price, in ${symbol || "this token"}`}
+                {draft.sale === "auction" ? `Reserve, in ${priceSymbol || "this token"}` : `Price, in ${priceSymbol || "this token"}`}
                 <input
                   value={draft.titlePrice}
                   onChange={(event) => patch({ titlePrice: event.target.value.replace(/[^\d.]/g, "") })}
@@ -1242,7 +1360,7 @@ export function AssetDesk() {
               <dl className="quote-slip">
                 <div>
                   <dt>{draft.sale === "auction" ? "Reserve" : "Price"}</dt>
-                  <dd>{draft.titlePrice.trim() || "Type it above"} {symbol || "tokens"}</dd>
+                  <dd>{draft.titlePrice.trim() || "Type it above"} {priceSymbol || "tokens"}</dd>
                 </div>
                 <div>
                   <dt>Opens</dt>
@@ -1253,7 +1371,7 @@ export function AssetDesk() {
                 </div>
                 <div>
                   <dt>Paid in</dt>
-                  <dd>This token only.</dd>
+                  <dd>{chosenTitlePay && titlePay ? `${titlePay.symbol} only (${titlePay.mint}).` : "This token only."}</dd>
                 </div>
                 <div>
                   <dt>Burn</dt>
@@ -1595,7 +1713,7 @@ export function AssetDesk() {
                 <dt>Sale path</dt>
                 <dd>
                   {coin && rail === "escrow"
-                    ? `PAR escrow. ${draft.sale === "auction" ? "Auction" : "Fixed price"} at ${draft.titlePrice.trim() || "unset"} ${symbol || "tokens"}. Opens ${draft.saleDays} ${waitUnit} after graduation.`
+                    ? `PAR escrow. ${draft.sale === "auction" ? "Auction" : "Fixed price"} at ${draft.titlePrice.trim() || "unset"} ${priceSymbol || "tokens"}. Opens ${draft.saleDays} ${waitUnit} after graduation.`
                     : coin
                       ? `Tensor. Opens ${draft.saleDays} days after graduation. Listed from the PAR sale page. Paid in ${symbol}.`
                       : `Fixed price or a bid, paid in ${symbol || "the token you read"}. You set how long before the sale opens.`}
@@ -1651,6 +1769,7 @@ export function AssetDesk() {
             preparedKeys={preparedKeys}
             coin={coin}
             pay={pay}
+            titlePaySymbol={chosenTitlePay && titlePay ? titlePay.symbol : ""}
             onCreated={() => {
               clearRwaDraft();
               if (publicKey) clearRwaKeys(publicKey.toBase58(), cluster);

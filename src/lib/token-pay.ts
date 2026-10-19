@@ -112,3 +112,35 @@ export function openTokenAccount(payer: PublicKey, owner: PublicKey, mint: Publi
     tokenProgram,
   );
 }
+
+/** What a wallet's wrapped-SOL account holds, read on this connection's network. Null when it has none. */
+export type WrappedSolHolding = { account: PublicKey; amount: bigint; lamports: bigint; closable: boolean; reason: string };
+
+/**
+ * The wrapped-SOL account a Tensor sale pays a seller into is the seller's associated token account for the wrapped
+ * SOL mint under SPL Token. Closing it returns every lamport in it (the wrapped amount and its rent) as native SOL to
+ * the owner. That is the whole unwrap: one closeAccount, signed by the owner. Nothing else is moved.
+ */
+export async function readWrappedSol(connection: Connection, owner: PublicKey): Promise<WrappedSolHolding | null> {
+  const mint = new PublicKey(WSOL);
+  const account = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID);
+  const info = await connection.getAccountInfo(account, "confirmed");
+  if (!info || !info.owner.equals(TOKEN_PROGRAM_ID) || info.data.length < 165) return null;
+  const data = info.data;
+  const amount = data.readBigUInt64LE(64);
+  // Account layout: mint 0..32, owner 32..64, amount 64..72, delegate option 72..108, state 108.
+  const holder = new PublicKey(data.subarray(32, 64));
+  const delegated = data.readUInt32LE(72) === 1;
+  const state = data[108];
+  let reason = "";
+  if (!holder.equals(owner)) reason = "That wrapped-SOL account belongs to another wallet.";
+  else if (state !== 1) reason = state === 2 ? "That wrapped-SOL account is frozen." : "That wrapped-SOL account is not open.";
+  else if (delegated) reason = "Another program may spend from that wrapped-SOL account. Remove the delegate in your wallet first.";
+  return { account, amount, lamports: BigInt(info.lamports), closable: reason === "", reason };
+}
+
+/** Unwrap: close the owner's wrapped-SOL account to the owner. The SOL in it, and its rent, come back as native SOL. */
+export function unwrapSolInstruction(owner: PublicKey): TransactionInstruction {
+  const account = getAssociatedTokenAddressSync(new PublicKey(WSOL), owner, false, TOKEN_PROGRAM_ID);
+  return createCloseAccountInstruction(account, owner, owner, [], TOKEN_PROGRAM_ID);
+}

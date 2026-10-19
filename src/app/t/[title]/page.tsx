@@ -7,6 +7,7 @@ import { ObjectPicture } from "@/components/AssetOnPool";
 import { objectPictureUrl } from "@/lib/sheet-html";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { EscrowTrade } from "@/components/EscrowTrade";
+import { UnwrapSol } from "@/components/UnwrapSol";
 import { readPayToken, type PayFacts } from "@/lib/coin-read";
 import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
@@ -19,7 +20,7 @@ import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
-import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, priceRuleAllows, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titlePriceRule, titleStatus } from "@/lib/title";
 
 export const dynamic = "force-dynamic";
 
@@ -435,23 +436,45 @@ export default async function SalePage({
     status?.rail === "escrow"
       ? "The sale of the title (NFT) runs through the PAR escrow on this page."
       : "The creator lists the title (NFT) through Tensor on this page.";
-  // A Tensor listing stores its own currency. It is read from that mint, whatever the record's token is.
-  const tensorPay: PayFacts | null = status?.tensor?.currency ? await readPayToken(connection, status.tensor.currency).catch(() => null) : null;
-  const listedHere = Boolean(status?.tensor && tensorPay);
+  // The title's own "paid in" line says which token a listing may use. Every older title says "this token only",
+  // which is the record's token, so for those titles this page lists and sells exactly as before.
+  const priceRule = titlePriceRule(title.attributes["paid in"], record?.attributes.mint || "");
+  const ownPay: PayFacts | null =
+    record?.attributes.mint && decimalsKnown ? { mint: record.attributes.mint, name: symbol, symbol, decimals } : null;
+  // A newer title priced in another token names that mint on chain. Its symbol and decimals are read from the mint.
+  const fixedPay: PayFacts | null =
+    priceRule?.kind === "fixed" && priceRule.mint !== record?.attributes.mint
+      ? await readPayToken(connection, priceRule.mint).catch(() => null)
+      : priceRule?.kind === "fixed"
+        ? ownPay
+        : null;
+  // A Tensor listing stores its own currency. A currency other than the title's token is read from its mint.
+  const tensorCurrency = status?.tensor?.currency ?? null;
+  const tensorPay: PayFacts | null = !tensorCurrency
+    ? null
+    : tensorCurrency === ownPay?.mint
+      ? ownPay
+      : tensorCurrency === fixedPay?.mint
+        ? fixedPay
+        : await readPayToken(connection, tensorCurrency).catch(() => null);
+  const listedHere = Boolean(status?.tensor && tensorPay && priceRuleAllows(priceRule, tensorCurrency));
+  const paidSymbol = priceRule?.kind === "listing" ? "the token the creator lists in" : fixedPay?.symbol ?? symbol;
   const listPrice = listedHere && status?.tensor && tensorPay ? `${formatTokenAmount(status.tensor.amount, tensorPay.decimals)} ${tensorPay.symbol}` : "";
   const payPrice = listedHere && status?.tensor && tensorPay ? `${formatTokenAmount(buyerTotal(status.tensor.amount), tensorPay.decimals)} ${tensorPay.symbol}` : "";
   const tensorSale =
     status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) && !decimalsKnown ? (
       <p className="error">The price token&apos;s decimals could not be read from the chain. Refresh before listing or buying.</p>
+    ) : status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) && priceRule?.kind === "fixed" && !fixedPay ? (
+      <p className="error">The token this title is priced in could not be read from the chain. Refresh before listing or buying.</p>
     ) : status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
       <>
         <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
         <p className="note">
           {tensorOpen
-            ? `This title (NFT) is available for purchase through Tensor's program, paid in ${symbol}.`
+            ? `This title (NFT) is available for purchase through Tensor's program, paid in ${listedHere && tensorPay ? tensorPay.symbol : paidSymbol}.`
             : noCoin
-              ? `The creator lists this title (NFT) through Tensor, paid in ${symbol}.`
-              : `The creator lists this title (NFT) through Tensor's program, paid in ${symbol}. The listing may also show on Tensor's own site.`}
+              ? `The creator lists this title (NFT) through Tensor, paid in ${paidSymbol}.`
+              : `The creator lists this title (NFT) through Tensor's program, paid in ${paidSymbol}. The listing may also show on Tensor's own site.`}
         </p>
         <SaleTrade
           pageCluster={cluster}
@@ -465,6 +488,8 @@ export default async function SalePage({
           graduated={graduated === true}
           holdsTitle={creatorHolds}
           decimals={decimals}
+          fixedPay={fixedPay}
+          payAtListing={priceRule?.kind === "listing"}
           noCoin={noCoin}
           collection={status.collection}
           listing={
@@ -514,7 +539,10 @@ export default async function SalePage({
             )}
           </div>
         </article>
-        <div className="sale-listing-side">{tensorSale}</div>
+        <div className="sale-listing-side">
+          {tensorSale}
+          {status?.rail === "creator" ? <UnwrapSol pageCluster={cluster} /> : null}
+        </div>
       </section>
       {saleKind !== "token" ? (
         <>
@@ -708,6 +736,8 @@ export default async function SalePage({
                 graduated={graduated === true}
                 holdsTitle={creatorHolds}
                 decimals={decimals}
+                fixedPay={fixedPay}
+                payAtListing={priceRule?.kind === "listing"}
                 noCoin={noCoin}
                 collection={status?.collection ?? null}
                 listing={
@@ -741,7 +771,8 @@ export default async function SalePage({
       </p>
       {status?.tensor ? (
         <p className="note">
-          Listed on Tensor for {tensorPay ? `${formatTokenAmount(status.tensor.amount, tensorPay.decimals)} ${tensorPay.symbol}` : "a price in a token this page could not read"}. Tensor adds about{" "}
+          Listed on Tensor for {tensorPay ? `${formatTokenAmount(status.tensor.amount, tensorPay.decimals)} ${tensorPay.symbol}` : "a price in a token this page could not read"}
+          {tensorPay && !listedHere ? ", which is not the token this title says it is paid in" : ""}. Tensor adds about{" "}
           {TENSOR_TAKER_FEE_PERCENT}% on the buyer&apos;s side.
         </p>
       ) : null}
