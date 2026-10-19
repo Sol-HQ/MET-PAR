@@ -29,8 +29,11 @@ import {
   deserializeAssetV1,
   deserializeCollectionV1,
   mplCore,
+  PluginType,
+  removePluginV1,
   transferV1,
   updateCollection,
+  updatePluginV1,
   updateV2,
 } from "@metaplex-foundation/mpl-core";
 import { createNoopSigner, createSignerFromKeypair, publicKey as umiKey, signerIdentity } from "@metaplex-foundation/umi";
@@ -685,6 +688,43 @@ describe("mint model: the vault-held master (record), the sealed collection (mas
     expectRefused(send(svm, vault, v.rename(recordKey.publicKey)), "vault renames the record");
     expectRefused(send(svm, vault, v.transfer(recordKey.publicKey, vault.publicKey)), "vault moves the record");
     expectRefused(send(svm, vault, v.burn(recordKey.publicKey)), "vault burns the record");
+    // As the record's owner, the vault can still attach owner-managed plugins (AddBlocker stops only authority-managed
+    // ones). Even a transfer or burn delegate it names cannot move or burn the record: the permanent freeze wins.
+    const helper = wallet(svm, 2);
+    const delegate = (type: "TransferDelegate" | "BurnDelegate") =>
+      addPluginV1(umiFor(vault.publicKey).umi, {
+        asset: umiKey(recordKey.publicKey.toBase58()),
+        payer: umiFor(vault.publicKey).signer,
+        authority: umiFor(vault.publicKey).signer,
+        plugin: createPlugin({ type }),
+        initAuthority: { __kind: "Address", address: umiKey(helper.publicKey.toBase58()) },
+      })
+        .getInstructions()
+        .map(toWeb3JsInstruction);
+    expectOk(send(svm, vault, delegate("TransferDelegate")), "vault names a transfer delegate on its record");
+    expectOk(send(svm, vault, delegate("BurnDelegate")), "vault names a burn delegate on its record");
+    const h = asAuthority(helper.publicKey);
+    expectRefused(send(svm, helper, h.transfer(recordKey.publicKey, helper.publicKey)), "the vault's transfer delegate moves the record");
+    expectRefused(send(svm, helper, h.burn(recordKey.publicKey)), "the vault's burn delegate burns the record");
+    expectRefused(send(svm, vault, v.transfer(recordKey.publicKey, helper.publicKey)), "vault moves the record after naming delegates");
+    expectRefused(send(svm, helper, h.rename(title, collection)), "the vault's delegate renames the title");
+    expectRefused(send(svm, helper, h.transfer(title, helper.publicKey, collection)), "the vault's delegate moves the title");
+    assert.equal(coreOwner(svm, recordKey.publicKey), vault.publicKey.toBase58());
+    // The vault, as the record's update authority, cannot hand that authority on, edit its attributes, or strip its locks.
+    const vu = umiFor(vault.publicKey);
+    const recordAsset = umiKey(recordKey.publicKey.toBase58());
+    const asVault = (builder: { getInstructions: () => Parameters<typeof toWeb3JsInstruction>[0][] }) => builder.getInstructions().map(toWeb3JsInstruction);
+    expectRefused(
+      send(svm, vault, asVault(updateV2(vu.umi, { asset: recordAsset, payer: vu.signer, authority: vu.signer, newUpdateAuthority: { __kind: "Address", fields: [umiKey(helper.publicKey.toBase58())] } }))),
+      "vault hands on the record's update authority",
+    );
+    expectRefused(
+      send(svm, vault, asVault(updatePluginV1(vu.umi, { asset: recordAsset, payer: vu.signer, authority: vu.signer, plugin: createPlugin({ type: "Attributes", data: { attributeList: [{ key: "record", value: "changed" }] } }) }))),
+      "vault edits the record's attributes",
+    );
+    for (const pluginType of [PluginType.PermanentFreezeDelegate, PluginType.ImmutableMetadata, PluginType.AddBlocker, PluginType.Attributes]) {
+      expectRefused(send(svm, vault, asVault(removePluginV1(vu.umi, { asset: recordAsset, payer: vu.signer, authority: vu.signer, pluginType }))), `vault removes ${PluginType[pluginType]} from the record`);
+    }
     // The vault has no authority over the title or its collection.
     expectRefused(send(svm, vault, v.rename(title, collection)), "vault renames the title");
     expectRefused(send(svm, vault, v.transfer(title, vault.publicKey, collection)), "vault moves the title");
