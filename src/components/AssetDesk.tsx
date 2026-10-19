@@ -1235,7 +1235,7 @@ export function AssetDesk() {
                 aria-pressed={rail === "escrow"}
                 onClick={() => {
                   if (!escrowDepositAllowed(cluster, publicKey?.toBase58())) {
-                    setEscrowHint("Connect the me wallet or the pa wallet to test the escrow path.");
+                    setEscrowHint("Connect your wallet to test the escrow path.");
                     return;
                   }
                   patch({ hold: "escrow" });

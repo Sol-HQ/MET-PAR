@@ -145,7 +145,7 @@ export function Faqs() {
           title that is already listed. The buyer pays that price. Tensor pays the seller the full price and
           charges the buyer about {TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn only ever burns the
           title&apos;s own coin. A title with no coin burns nothing. {ESCROW_PATH} On the practice network that program
-          is open to the two test wallets, and only when a coin is attached.
+          is open to any wallet, with or without a coin.
         </p>
         <p>
           The creator signs the terms and owes the handoff. PAR is software. It does not hold, insure, or guarantee

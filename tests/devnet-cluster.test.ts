@@ -292,9 +292,12 @@ test("mainnet-only server routes refuse a request that names devnet", async () =
   assert.equal(pay.status, 400);
 });
 
-test("escrow is offered only on devnet and only to the two PAR test wallets; mainnet never", async () => {
+test("escrow is offered on devnet to any connected wallet; mainnet never", async () => {
   const { escrowDepositAllowed, escrowOffered, ESCROW_PROGRAM } = await import("../src/lib/title");
-  assert.equal(escrowDepositAllowed("devnet", "RPS3j1r791zUDTwDwv3E1TRAK1H5qVYi1aHLd3gnBmY"), false);
+  assert.equal(escrowDepositAllowed("devnet", "RPS3j1r791zUDTwDwv3E1TRAK1H5qVYi1aHLd3gnBmY"), true);
+  assert.equal(escrowDepositAllowed("devnet", ""), false);
+  assert.equal(escrowDepositAllowed("devnet", null), false);
+  assert.equal(escrowDepositAllowed("mainnet-beta", "RPS3j1r791zUDTwDwv3E1TRAK1H5qVYi1aHLd3gnBmY"), false);
   assert.equal(escrowDepositAllowed("devnet", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), true);
   assert.equal(escrowDepositAllowed("mainnet-beta", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), false);
   assert.equal(escrowOffered("mainnet-beta"), false);

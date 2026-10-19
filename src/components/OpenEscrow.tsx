@@ -5,7 +5,6 @@ import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { ADMIN_WALLETS } from "@/lib/admins";
 import { readClassicMint, type PayFacts } from "@/lib/coin-read";
 import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
@@ -160,8 +159,7 @@ export function OpenEscrow({
       </p>
       {!allowed ? (
         <p className="error">
-          On Devnet the escrow deposit is open only to the two PAR test wallets ({ADMIN_WALLETS.map((wallet) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`).join(" and ")}).
-          {publicKey ? ` The connected wallet ${publicKey.toBase58().slice(0, 4)}…${publicKey.toBase58().slice(-4)} is not one of them, so the button stays off.` : " Connect one of them."}
+          {publicKey ? "The escrow path is open on Devnet only." : "Connect the wallet that holds this title."}
         </p>
       ) : null}
       <div className="segmented" role="group" aria-label="Payment token">

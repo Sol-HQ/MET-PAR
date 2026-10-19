@@ -4,7 +4,7 @@ import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi-web3js-adapters";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, PublicKey, SystemProgram, TransactionInstruction, type Keypair } from "@solana/web3.js";
-import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "./admins";
+import { PLATFORM_FEE_CLAIMER } from "./admins";
 import { WSOL, type ClusterName } from "./constants";
 import { CORE_PROGRAM_ID, PUBLIC_ORIGIN, type RecordAttribute } from "./record";
 
@@ -76,9 +76,9 @@ export function escrowOffered(cluster: ClusterName): boolean {
   return cluster === "devnet" && Boolean(ESCROW_PROGRAM.devnet);
 }
 
-/** A deposit is allowed only on the practice network, and only from a platform wallet. */
+/** A deposit is allowed only on the practice network, from any connected wallet. The program checks the title holder signs. */
 export function escrowDepositAllowed(cluster: ClusterName, wallet: string | null | undefined): boolean {
-  return escrowOffered(cluster) && isAdminWallet(wallet);
+  return escrowOffered(cluster) && Boolean(wallet);
 }
 
 /** Shown wherever both paths are named. The escrow button is visible and does not click. */
