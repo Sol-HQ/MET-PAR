@@ -48,7 +48,9 @@ export async function POST(request: Request) {
   } | null;
   const asset = body?.asset || "";
   const sheet = body?.sheet || "";
-  const cluster: ClusterName = body?.cluster === "devnet" ? "devnet" : "mainnet-beta";
+  // The create page always names its network. A missing or unknown network is refused, never read as mainnet.
+  if (body?.cluster !== "devnet" && body?.cluster !== "mainnet-beta") return fail("Name the network: devnet or mainnet-beta.", 400);
+  const cluster: ClusterName = body.cluster;
   if (!ADDRESS.test(asset) || !sheet || sheet.length > 110_000) return fail("Send the record address and its record sheet.", 400);
   if (REMOVED_RECORDS.has(asset)) return fail("That record is off this site.", 410);
   if (!hasIndex() && !process.env.BLOB_READ_WRITE_TOKEN) return fail("The PAR copy is not configured.", 503);

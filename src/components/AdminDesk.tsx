@@ -1,7 +1,8 @@
 "use client";
 
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import Link from "next/link";
@@ -58,7 +59,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 export function AdminDesk() {
   const { cluster } = useCluster();
   const { connection } = useConnection();
-  const { publicKey, signMessage, signTransaction } = useWallet();
+  const { publicKey, signMessage, signTransaction } = useClusterWallet();
   const [settings, setSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [share, setShare] = useState(String(DEFAULT_PLATFORM_FEE_PERCENT));
   const [error, setError] = useState("");

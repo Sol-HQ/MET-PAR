@@ -1,6 +1,7 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -11,6 +12,7 @@ import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction
 import {
   buyOnTensorTransaction,
   buyerTotal,
+  wrappedSolShortfall,
   delistOnTensorInstruction,
   formatTokenAmount,
   listOnTensorInstruction,
@@ -52,7 +54,7 @@ export function SaleTrade({
   collection?: string | null;
 }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const { cluster } = useCluster();
   const router = useRouter();
   const [price, setPrice] = useState("");
@@ -140,22 +142,35 @@ export function SaleTrade({
     );
   }
 
-  function buy() {
+  async function buy() {
     if (!listing || !publicKey) return;
     const amount = BigInt(listing.amount);
+    const mintKey = new PublicKey(mint);
+    let wrap = BigInt(0);
+    try {
+      // Read on this page's connection, which is the page's network (the guard below refuses any other).
+      wrap = await wrappedSolShortfall(connection, mintKey, publicKey, buyerTotal(amount));
+    } catch {
+      setError("Your wrapped-SOL balance could not be read. Nothing was signed.");
+      return;
+    }
     const transaction = buyOnTensorTransaction({
       title: new PublicKey(title),
-      mint: new PublicKey(mint),
+      mint: mintKey,
       seller: new PublicKey(listing.seller),
       buyer: publicKey,
       price: amount,
       collection: collectionKey,
+      wrappedSolShortfall: wrap,
     });
-    confirm(
+    void confirm(
       "Buy this title",
       [
         `You pay ${formatTokenAmount(buyerTotal(amount), decimals)} ${symbol}.`,
         `${formatTokenAmount(amount, decimals)} ${symbol} goes to the creator. The rest is Tensor's fee.`,
+        ...(wrap > BigInt(0)
+          ? [`${formatTokenAmount(wrap, decimals)} SOL is wrapped into your wrapped-SOL account first, in the same transaction. Tensor is paid from that account.`]
+          : []),
         "The title moves to your wallet.",
       ],
       transaction,
@@ -209,7 +224,7 @@ export function SaleTrade({
           </button>
         ) : null}
         {canBuy && wallet !== creator ? (
-          <button type="button" className="solid" disabled={busy || !wallet} onClick={buy}>
+          <button type="button" className="solid" disabled={busy || !wallet} onClick={() => void buy()}>
             {busy ? "Buying…" : `Buy for ${formatTokenAmount(buyerTotal(BigInt(listing?.amount || "0")), decimals)} ${symbol}`}
           </button>
         ) : null}

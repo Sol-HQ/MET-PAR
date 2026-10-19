@@ -298,8 +298,18 @@ export default async function SalePage({
               : `The token graduated. The sale opens ${delay} days after graduation.`;
 
   const inEscrow = Boolean(status?.rail === "escrow" && status.listing && title.owner === status.listing);
+  // The price token's decimals come from its mint on this page's network. The record's "decimals" line can be left
+  // off the NFT to fit 1232 bytes (RecordCreate DROP_BEFORE_SHEET); the longer "?c=devnet" sale-page link makes that
+  // happen on devnet. Guessing 6 for wrapped SOL (9) shows and lists prices 1000x off.
+  const paymentMint = ADDRESS.test(record?.attributes.mint || "") ? record?.attributes.mint || "" : "";
+  const mintDecimals = paymentMint
+    ? (await getMint(connection, new PublicKey(paymentMint), "confirmed").catch(() => null))?.decimals
+    : undefined;
   const tokenDecimals = Number.parseInt(record?.attributes.decimals || "", 10);
-  const decimals = Number.isFinite(tokenDecimals) ? tokenDecimals : snapshot?.baseDecimals ?? 6;
+  const knownDecimals =
+    mintDecimals ?? (Number.isInteger(tokenDecimals) && tokenDecimals >= 0 && tokenDecimals <= 9 ? tokenDecimals : snapshot?.baseDecimals);
+  const decimalsKnown = typeof knownDecimals === "number";
+  const decimals = knownDecimals ?? 6;
   const tensorOpen = noCoin ? Boolean(status?.tensor) : Boolean(status?.tensor && saleOpen);
   const creatorAccount = status?.creator || "";
   const creatorHolds = Boolean(
@@ -426,7 +436,9 @@ export default async function SalePage({
   const listPrice = listedHere && status?.tensor ? formatTokenAmount(status.tensor.amount, decimals) : "";
   const payPrice = listedHere && status?.tensor ? formatTokenAmount(buyerTotal(status.tensor.amount), decimals) : "";
   const tensorSale =
-    status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
+    status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) && !decimalsKnown ? (
+      <p className="error">The price token&apos;s decimals could not be read from the chain. Refresh before listing or buying.</p>
+    ) : status?.rail === "creator" && record?.attributes.mint && !sold && !(noCoin && creatorHolds) ? (
       <>
         <h2>{tensorOpen ? "Available for purchase" : "Purchase"}</h2>
         <p className="note">
@@ -665,7 +677,10 @@ export default async function SalePage({
           />
         </>
       ) : null}
-      {noCoin && creatorHolds && recordAddress && record?.attributes.mint && !sold ? (
+      {noCoin && creatorHolds && recordAddress && record?.attributes.mint && !sold && !decimalsKnown ? (
+        <p className="error">The price token&apos;s decimals could not be read from the chain. Refresh before listing.</p>
+      ) : null}
+      {noCoin && creatorHolds && recordAddress && record?.attributes.mint && !sold && decimalsKnown ? (
         <>
           <h2>How this title sells</h2>
           <NoCoinChoice

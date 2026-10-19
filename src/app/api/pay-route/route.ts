@@ -45,11 +45,17 @@ export async function POST(request: Request) {
     amount?: string;
     slippageBps?: number;
     taker?: string;
+    cluster?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return Response.json({ error: "The swap request could not be read." }, { status: 400 });
+  }
+  // Jupiter routes mainnet liquidity only, and USDC_MAINNET is the mainnet mint. A devnet page must not get a mainnet
+  // route. A request with no cluster comes from a page built before this field; that page refuses devnet itself.
+  if (body.cluster !== undefined && body.cluster !== "mainnet-beta") {
+    return Response.json({ error: "The SOL and USDC swap is a mainnet-only path. Pay with the coin's own quote on Devnet." }, { status: 400 });
   }
   const inputMint = body.inputMint || "";
   const outputMint = body.outputMint || "";

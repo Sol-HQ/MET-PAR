@@ -13,7 +13,8 @@ import {
 } from "@meteora-ag/cp-amm-sdk";
 import { LockClient } from "@meteora-ag/met-lock-sdk";
 import { getAccount, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import BN from "bn.js";
 import Link from "next/link";
@@ -273,7 +274,7 @@ async function graduatedSwapTransaction(
 export function PoolView({ address }: { address: string }) {
   const { cluster } = useCluster();
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const [snapshot, setSnapshot] = useState<PoolSnapshot | null>(null);
   const [market, setMarket] = useState<DammMarket | null>(null);
   const [holding, setHolding] = useState<BN | null>(null);
@@ -410,6 +411,7 @@ export function PoolView({ address }: { address: string }) {
         outputMint: quoteMint,
         amount: spendRaw.toString(),
         slippageBps,
+        cluster,
       });
       const middle = new BN(route.otherAmountThreshold);
       poolAmount = middle;
@@ -442,6 +444,7 @@ export function PoolView({ address }: { address: string }) {
       outputMint: otherMint,
       amount: priced.minimumAmountOut.toString(),
       slippageBps,
+      cluster,
     });
     const received = new BN(route.outAmount);
     const floor = new BN(route.otherAmountThreshold);
@@ -777,6 +780,7 @@ export function PoolView({ address }: { address: string }) {
         amount: routeAmount,
         slippageBps: preview.slippageBps,
         taker: publicKey.toBase58(),
+        cluster,
       });
       if (preview.side === "buy") {
         poolIn = new BN(route.otherAmountThreshold);

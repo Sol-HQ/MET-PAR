@@ -1,6 +1,7 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { turboSignTransaction, useClusterWallet } from "@/lib/cluster-wallet";
 import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -400,13 +401,13 @@ export function signSteps(edition: boolean, escrow: boolean): string[] {
   return [
     "You sign the promises. That is a message. No SOL moves.",
     "The pictures and the sheet upload. The wallet may ask you to approve the upload. That approval does not create the record or the title.",
-    "The first time this wallet creates a record here, the wallet asks for one short signature that opens a nonce account. A nonce is a timer you own. It keeps the next signatures from expiring while you read them. The rent in it stays yours. It is not the record and not the title. Only your wallet can use it.",
+    "On Solana Mainnet, the first time this wallet creates a record here, the wallet asks for one short signature that opens a nonce account. A nonce is a timer you own. It keeps the next signatures from expiring while you read them. The rent in it stays yours. It is not the record and not the title. Only your wallet can use it.",
     "You sign the record, then wait until this page says it landed. The master goes to the program vault and stays locked. It cannot be moved or burned.",
     ...(edition ? ["You sign the master edition, then wait. That edition allows one title and no more."] : []),
     escrow
       ? "You sign the title, then wait. Then you sign the escrow deposit, then wait."
       : "You sign the title, then wait. The title lands in your wallet, and it stays there until you list it.",
-    "If the wallet shows Advance nonce, that line only updates the timer inside the same signature you are reading. After it lands, that signature cannot be sent again. A piece already on chain is skipped, and you are not charged for it again.",
+    "On Solana Mainnet, if the wallet shows Advance nonce, that line only updates the timer inside the same signature you are reading. After it lands, that signature cannot be sent again. A piece already on chain is skipped, and you are not charged for it again.",
   ];
 }
 
@@ -438,7 +439,7 @@ export function RecordCreate({
   onCreated?: () => void;
 }) {
   const { connection } = useConnection();
-  const wallet = useWallet();
+  const wallet = useClusterWallet();
   const { cluster } = useCluster();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [progress, setProgress] = useState<Progress[]>([]);
@@ -868,7 +869,7 @@ export function RecordCreate({
       const { TurboFactory } = await import("@ardrive/turbo-sdk/web");
       const turbo = TurboFactory.authenticated({
         token: "solana",
-        walletAdapter: { publicKey: payer, signMessage, signTransaction },
+        walletAdapter: { publicKey: payer, signMessage, signTransaction: turboSignTransaction(cluster, signTransaction) },
       });
       const sheetPictureBytes = new Uint8Array(await picture.arrayBuffer());
       const sheetImageSha256 = await sha256Hex(sheetPictureBytes);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -69,7 +70,7 @@ export function OpenEscrow({
   record: string;
 }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const { cluster } = useCluster();
   const router = useRouter();
   const [mintInput, setMintInput] = useState("");

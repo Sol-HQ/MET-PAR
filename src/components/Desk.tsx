@@ -1,7 +1,8 @@
 ﻿"use client";
 
 import { deriveDbcPoolAddress, DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { turboSignTransaction, useClusterWallet } from "@/lib/cluster-wallet";
 import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -212,7 +213,7 @@ async function waitForAccount(connection: Connection, key: PublicKey) {
 export function Desk() {
   const { cluster } = useCluster();
   const { connection } = useConnection();
-  const { publicKey, signTransaction, signMessage } = useWallet();
+  const { publicKey, signTransaction, signMessage } = useClusterWallet();
   const [preset, setPreset] = useState<"meme" | "starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
   const [onPar, setOnPar] = useState(true);
   const [supplyText, setSupplyText] = useState(String(BILLION_SUPPLY));
@@ -644,7 +645,7 @@ export function Desk() {
     const { TurboFactory } = await import("@ardrive/turbo-sdk/web");
     const turbo = TurboFactory.authenticated({
       token: "solana",
-      walletAdapter: { publicKey, signMessage, signTransaction },
+      walletAdapter: { publicKey, signMessage, signTransaction: turboSignTransaction(cluster, signTransaction) },
     });
     let imageUri = "";
     let imageSha = "";

@@ -2,9 +2,12 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  createSyncNativeInstruction,
+  getAccount,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction, type Connection } from "@solana/web3.js";
+import { WSOL } from "./constants";
 import { CORE_PROGRAM_ID } from "./record";
 import { TENSOR_MARKETPLACE, TENSOR_TAKER_FEE_PERCENT, tensorListAddress } from "./title";
 
@@ -131,6 +134,11 @@ export function buyOnTensorInstruction(input: {
   });
 }
 
+/**
+ * Tensor's buy_core_spl moves SPL tokens out of the buyer's token account. A listing priced in SOL uses the wrapped
+ * SOL mint, so a buyer holding only native SOL needs that shortfall wrapped first, in the same transaction.
+ * `wrappedSolShortfall` is that amount in lamports. It is 0 for any other mint.
+ */
 export function buyOnTensorTransaction(input: {
   title: PublicKey;
   mint: PublicKey;
@@ -138,12 +146,38 @@ export function buyOnTensorTransaction(input: {
   buyer: PublicKey;
   price: bigint;
   collection?: PublicKey | null;
+  wrappedSolShortfall?: bigint;
 }): Transaction {
+  if (input.price <= BigInt(0)) throw new Error("Listing price must be positive.");
+  const total = buyerTotal(input.price);
+  const wrap = input.wrappedSolShortfall ?? BigInt(0);
+  const isWrappedSol = input.mint.toBase58() === WSOL;
+  if (wrap < BigInt(0) || (wrap > BigInt(0) && !isWrappedSol) || wrap > total) {
+    throw new Error("Wrapped-SOL funding amount is invalid.");
+  }
   const buyerTokens = getAssociatedTokenAddressSync(input.mint, input.buyer);
-  return new Transaction().add(
+  const transaction = new Transaction().add(
     createAssociatedTokenAccountIdempotentInstruction(input.buyer, buyerTokens, input.buyer, input.mint),
-    buyOnTensorInstruction(input),
   );
+  if (wrap > BigInt(0)) {
+    transaction.add(
+      SystemProgram.transfer({ fromPubkey: input.buyer, toPubkey: buyerTokens, lamports: wrap }),
+      createSyncNativeInstruction(buyerTokens),
+    );
+  }
+  return transaction.add(buyOnTensorInstruction(input));
+}
+
+/**
+ * How many lamports the buyer must wrap so the wrapped-SOL account holds the buyer total. Read on the page's own
+ * connection, so it is that network's balance. 0 for a listing not priced in wrapped SOL.
+ */
+export async function wrappedSolShortfall(connection: Connection, mint: PublicKey, buyer: PublicKey, total: bigint): Promise<bigint> {
+  if (mint.toBase58() !== WSOL) return BigInt(0);
+  const tokens = getAssociatedTokenAddressSync(mint, buyer);
+  const info = await connection.getAccountInfo(tokens, "confirmed");
+  const held = info ? (await getAccount(connection, tokens, "confirmed")).amount : BigInt(0);
+  return total > held ? total - held : BigInt(0);
 }
 
 /** The creator takes the listing down. The title returns to the creator's wallet. */

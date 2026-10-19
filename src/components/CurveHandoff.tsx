@@ -1,7 +1,8 @@
 "use client";
 
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey } from "@solana/web3.js";
 import { useState } from "react";
 import { MainnetGate } from "@/components/MainnetGate";
@@ -14,7 +15,7 @@ type Pending = { prepared: PreparedTransaction; lines: string[]; done: string };
 function useHandoff(onDone?: () => void) {
   const { cluster } = useCluster();
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");

@@ -1,11 +1,5 @@
-import {
-  createAssociatedTokenAccountIdempotentInstruction,
-  createSyncNativeInstruction,
-  getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
-import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { buyerTotal, buyOnTensorInstruction } from "../src/lib/tensor-sale";
-import { WSOL } from "../src/lib/constants";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import { buyOnTensorTransaction } from "../src/lib/tensor-sale";
 
 export type TensorPurchaseInput = {
   title: PublicKey;
@@ -17,36 +11,9 @@ export type TensorPurchaseInput = {
   wrappedSolShortfall?: bigint;
 };
 
-/** Build only PAR's existing single-title Tensor Core/SPL purchase transaction. */
+/** Build only PAR's existing single-title Tensor Core/SPL purchase transaction. The sale page builds the same one. */
 export function buildTensorPurchaseTransaction(input: TensorPurchaseInput): Transaction {
-  if (input.price <= BigInt(0)) throw new Error("Listing price must be positive.");
-  const total = buyerTotal(input.price);
-  const isWrappedSol = input.mint.toBase58() === WSOL;
-  const wrap = input.wrappedSolShortfall ?? BigInt(0);
-  if (wrap < BigInt(0) || (wrap > BigInt(0) && !isWrappedSol) || wrap > total) {
-    throw new Error("Wrapped-SOL funding amount is invalid.");
-  }
-
-  const buyerAta = getAssociatedTokenAddressSync(input.mint, input.buyer);
-  const transaction = new Transaction().add(
-    createAssociatedTokenAccountIdempotentInstruction(input.buyer, buyerAta, input.buyer, input.mint),
-  );
-  if (wrap > BigInt(0)) {
-    transaction.add(
-      SystemProgram.transfer({ fromPubkey: input.buyer, toPubkey: buyerAta, lamports: wrap }),
-      createSyncNativeInstruction(buyerAta),
-    );
-  }
-  transaction.add(
-    buyOnTensorInstruction({
-      title: input.title,
-      mint: input.mint,
-      seller: input.seller,
-      buyer: input.buyer,
-      price: input.price,
-      collection: input.collection,
-    }),
-  );
+  const transaction = buyOnTensorTransaction(input);
   transaction.feePayer = input.buyer;
   return transaction;
 }
