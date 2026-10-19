@@ -11,6 +11,7 @@ import { UnwrapSol } from "@/components/UnwrapSol";
 import { readPayToken, type PayFacts } from "@/lib/coin-read";
 import { Fold } from "@/components/Fold";
 import { HandoffDesk } from "@/components/HandoffDesk";
+import { NftListingCard } from "@/components/NftListingCard";
 import { NoCoinChoice, OpenEscrow } from "@/components/OpenEscrow";
 import { SaleTrade } from "@/components/SaleTrade";
 import { ShareOnX } from "@/components/ShareOnX";
@@ -25,6 +26,8 @@ import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, priceR
 export const dynamic = "force-dynamic";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+/** Title attributes that are accounts, links, or long terms. They show under Details or the meta sheet, not as traits. */
+const NOT_TRAITS = new Set(["record", "mint", "pool", "creator", "full sheet", "sale page", "sheet sha256", "escrow program", "auction"]);
 
 type Sheet = {
   name?: string;
@@ -501,6 +504,82 @@ export default async function SalePage({
       </>
     ) : null;
 
+  // Escrow buy only: the title is shown as an NFT listing, with the escrow panel inside it. Every value is read above
+  // for this page already; a missing one is left out. Any other state renders the page exactly as before.
+  const escrowCard =
+    inEscrow && listing && listingPay && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
+      <NftListingCard
+        cluster={cluster}
+        image={face}
+        name={title.name || pageTitle}
+        collectionName={title.collectionName}
+        edition={title.edition}
+        standard={title.exists ? "Metaplex Core" : undefined}
+        status={shownState}
+        live={forSaleNow}
+        seller={listing.creator}
+        price={
+          auction && listing.highBid > BigInt(0)
+            ? {
+                label: "Current bid",
+                amount: formatTokenAmount(listing.highBid, listingPay.decimals),
+                symbol: listingPay.symbol,
+                note: `Reserve ${formatTokenAmount(listing.price, listingPay.decimals)} ${listingPay.symbol}`,
+              }
+            : {
+                label: auction ? "Reserve" : "Price",
+                amount: formatTokenAmount(listing.price, listingPay.decimals),
+                symbol: listingPay.symbol,
+                note: auction ? "Bids run inside the escrow program." : undefined,
+              }
+        }
+        traits={Object.entries(title.attributes)
+          .filter(([key, value]) => !NOT_TRAITS.has(key) && value.trim() && value.length <= 48 && !ADDRESS.test(value) && !/^https?:\/\//.test(value))
+          .map(([type, value]) => ({ type, value: value.trim() }))}
+        details={[
+          { label: "Title (NFT)", value: shortAddress(address), address },
+          ...(title.collection
+            ? [{ label: "Collection", value: title.collectionName ? `${title.collectionName} · ${shortAddress(title.collection)}` : shortAddress(title.collection), address: title.collection }]
+            : []),
+          ...(ADDRESS.test(recordAddress) ? [{ label: "Record", value: shortAddress(recordAddress), address: recordAddress }] : []),
+          ...(ADDRESS.test(listing.creator) ? [{ label: "Creator", value: shortAddress(listing.creator), address: listing.creator }] : []),
+          { label: "Price token", value: `${listingPay.symbol} · ${shortAddress(listingPay.mint)}`, address: listingPay.mint },
+          ...(title.royaltyBasisPoints !== null
+            ? [{ label: "Creator royalties", value: `${(title.royaltyBasisPoints / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%` }]
+            : []),
+          { label: "Network", value: cluster === "devnet" ? "Solana Devnet" : "Solana Mainnet" },
+        ]}
+      >
+        <h2>{forSaleNow ? (auction ? "In auction" : "Available for purchase") : "Purchase"}</h2>
+        <p className="note">
+          {forSaleNow
+            ? `This title (NFT) is available for purchase from the PAR escrow, paid in ${listingPay.symbol}.`
+            : `The PAR escrow holds this title (NFT). Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
+        </p>
+        <EscrowTrade
+          pageCluster={cluster}
+          program={ESCROW_PROGRAM[cluster]}
+          title={address}
+          mint={listing.mint}
+          creator={listing.creator}
+          pool={listing.pool}
+          symbol={listingPay.symbol}
+          price={listing.price.toString()}
+          burnPercent={listing.burnPercent}
+          sale={listing.sale}
+          graduatedAt={listing.graduatedAt}
+          delaySeconds={listing.delaySeconds}
+          highBid={listing.highBid.toString()}
+          previousBidder={listing.highBidder}
+          endsAt={listing.endsAt}
+          curveFull={snapshot?.isMigrated === true}
+          decimals={listingPay.decimals}
+          payees={payees.map((row) => ({ wallet: row.wallet, amount: row.amount.toString() }))}
+          collection={title.collection}
+        />
+      </NftListingCard>
+    ) : null;
+
   return (
     <section className="card record-create sale-page">
       <div className="sale-share-row">
@@ -519,31 +598,33 @@ export default async function SalePage({
             : `${tokenLabel} is a token. It is not paired with a real-world asset.`}
       </p>
       {stateLine !== saleLine ? <p className="note">{holderLine} {saleLine}</p> : <p className="note">{holderLine}</p>}
-      <section className="sale-listing">
-        <article className="nft-mock-card">
-          {face ? (
-            <img className="nft-mock-shot" src={face} alt={pageTitle} />
-          ) : (
-            <div className="nft-mock-shot nft-mock-empty">The NFT image is not on this page.</div>
-          )}
-          <div className="nft-mock-body">
-            <p className="eyebrow">The NFT</p>
-            <h2>{title.name || pageTitle}</h2>
-            <p>Edition 1 · Metaplex Core</p>
-            {listPrice ? (
-              <p>
-                Listed for {listPrice}. A buyer pays {payPrice}.
-              </p>
-            ) : (
-              <p>{shownState}</p>
-            )}
-          </div>
-        </article>
-        <div className="sale-listing-side">
-          {tensorSale}
-          {status?.rail === "creator" ? <UnwrapSol pageCluster={cluster} /> : null}
-        </div>
-      </section>
+      {escrowCard ?? (
+          <section className="sale-listing">
+            <article className="nft-mock-card">
+              {face ? (
+                <img className="nft-mock-shot" src={face} alt={pageTitle} />
+              ) : (
+                <div className="nft-mock-shot nft-mock-empty">The NFT image is not on this page.</div>
+              )}
+              <div className="nft-mock-body">
+                <p className="eyebrow">The NFT</p>
+                <h2>{title.name || pageTitle}</h2>
+                <p>Edition 1 · Metaplex Core</p>
+                {listPrice ? (
+                  <p>
+                    Listed for {listPrice}. A buyer pays {payPrice}.
+                  </p>
+                ) : (
+                  <p>{shownState}</p>
+                )}
+              </div>
+            </article>
+            <div className="sale-listing-side">
+              {tensorSale}
+              {status?.rail === "creator" ? <UnwrapSol pageCluster={cluster} /> : null}
+            </div>
+          </section>
+      )}
       {saleKind !== "token" ? (
         <>
           <h2>The RWA</h2>
@@ -682,37 +763,6 @@ export default async function SalePage({
       ) : null}
       {inEscrow && listing && !listingPay && !sold ? (
         <p className="error">The escrow listing&apos;s price token could not be read from the chain. Refresh before buying.</p>
-      ) : null}
-      {inEscrow && listing && listingPay && record?.attributes.mint && ESCROW_PROGRAM[cluster] && !sold ? (
-        <>
-          <h2>{forSaleNow ? (auction ? "In auction" : "Available for purchase") : "Purchase"}</h2>
-          <p className="note">
-            {forSaleNow
-              ? `This title (NFT) is available for purchase from the PAR escrow, paid in ${listingPay.symbol}.`
-              : `The PAR escrow holds this title (NFT). Purchase stays closed until ${graduated === false ? "the token graduates and the wait ends" : "the sale opens"}.`}
-          </p>
-          <EscrowTrade
-            pageCluster={cluster}
-            program={ESCROW_PROGRAM[cluster]}
-            title={address}
-            mint={listing.mint}
-            creator={listing.creator}
-            pool={listing.pool}
-            symbol={listingPay.symbol}
-            price={listing.price.toString()}
-            burnPercent={listing.burnPercent}
-            sale={listing.sale}
-            graduatedAt={listing.graduatedAt}
-            delaySeconds={listing.delaySeconds}
-            highBid={listing.highBid.toString()}
-            previousBidder={listing.highBidder}
-            endsAt={listing.endsAt}
-            curveFull={snapshot?.isMigrated === true}
-            decimals={listingPay.decimals}
-            payees={payees.map((row) => ({ wallet: row.wallet, amount: row.amount.toString() }))}
-            collection={title.collection}
-          />
-        </>
       ) : null}
       {noCoin && creatorHolds && recordAddress && record?.attributes.mint && !sold && !decimalsKnown ? (
         <p className="error">The price token&apos;s decimals could not be read from the chain. Refresh before listing.</p>
