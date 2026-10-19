@@ -418,7 +418,7 @@ describe("par-escrow, no-coin RWA in its sealed collection", () => {
     assert.equal(paymentInstructions(plan, Keypair.generate().publicKey).before.length, 1, "only the idempotent account open");
   });
 
-  test("priced in another token (USDC-like, 6 decimals) with a 25% burn and a named payout", () => {
+  test("priced in another token (USDC-like, 6 decimals), burn 0, and a named payout", () => {
     const svm = boot();
     const creator = wallet(svm);
     const buyer = wallet(svm);
@@ -428,7 +428,7 @@ describe("par-escrow, no-coin RWA in its sealed collection", () => {
     const price = BigInt(100_000_000);
     fund(svm, creator, usdc, buyer.publicKey, price);
     expectOk(
-      send(svm, creator, [openDeposit({ creator, title, record: record(svm, creator), mint: usdc, price, burn: 25, collection, payouts: [{ wallet: payee, amount: BigInt(10_000_000) }] })]),
+      send(svm, creator, [openDeposit({ creator, title, record: record(svm, creator), mint: usdc, price, burn: 0, collection, payouts: [{ wallet: payee, amount: BigInt(10_000_000) }] })]),
       "deposit_open",
     );
     const { instructions } = buyInstructions(svm, { buyer, creator: creator.publicKey, title, mint: usdc, price, payees: [payee], collection });
@@ -436,7 +436,7 @@ describe("par-escrow, no-coin RWA in its sealed collection", () => {
     assert.equal(coreOwner(svm, title), buyer.publicKey.toBase58());
     assert.equal(balance(svm, usdc, TREASURY), BigInt(2_000_000));
     assert.equal(balance(svm, usdc, payee), BigInt(10_000_000));
-    assert.equal(balance(svm, usdc, creator.publicKey), BigInt(63_000_000));
+    assert.equal(balance(svm, usdc, creator.publicKey), BigInt(88_000_000));
     assert.equal(balance(svm, usdc, buyer.publicKey), BigInt(0));
   });
 
@@ -797,6 +797,69 @@ describe("mint model: the vault-held master (record), the sealed collection (mas
   });
 });
 
+describe("burn only ever burns the title's own paired coin (BurnNotCoin)", () => {
+  /** A coin-paired deposit priced in `mint`, built with burn 0 and then patched to `burn` so the program decides. */
+  function coinDeposit(svm: Svm, priceMint: (creator: Keypair, coin: PublicKey) => PublicKey, burn: number) {
+    const creator = wallet(svm);
+    const coin = newMint(svm, creator, 6);
+    const { title, collection } = sealedTitle(svm, creator);
+    const mint = priceMint(creator, coin);
+    const input = { program: PROGRAM, creator: creator.publicKey, title, record: record(svm, creator), mint, coin, pool: pool(svm, coin, false), collection, price: BigInt(1_000_000), delayDays: 1 };
+    if (burn > 0 && !mint.equals(coin)) {
+      assert.throws(() => escrowDepositInstruction({ ...input, burnPercent: burn }), /only burns this title's own coin/, "the client refuses first");
+    }
+    const ix = escrowDepositInstruction({ ...input, burnPercent: 0 });
+    ix.data.writeUInt16LE(burn * 100, 18);
+    return { creator, ix, title };
+  }
+
+  test("allowed: coin-paired, priced in its own coin, 25% burn", () => {
+    const svm = boot();
+    const { creator, ix, title } = coinDeposit(svm, (_c, coin) => coin, 25);
+    expectOk(send(svm, creator, [ix]), "deposit with a coin burn");
+    assert.equal(coreOwner(svm, title), listingAddress(title, PROGRAM).toBase58());
+    assert.equal(Buffer.from(svm.getAccount(listingAddress(title, PROGRAM))!.data).readUInt16LE(200), 2500);
+  });
+
+  test("allowed: coin-paired priced in another token with burn 0", () => {
+    const svm = boot();
+    const { creator, ix } = coinDeposit(svm, (creator) => newMint(svm, creator, 6), 0);
+    expectOk(send(svm, creator, [ix]), "deposit, other token, burn 0");
+  });
+
+  const others: [string, (svm: Svm, creator: Keypair) => PublicKey][] = [
+    ["SOL (wrapped SOL)", () => NATIVE],
+    ["USDC (another 6-decimal SPL token)", (svm, creator) => newMint(svm, creator, 6)],
+    ["any other mint (9 decimals)", (svm, creator) => newMint(svm, creator, 9)],
+  ];
+  for (const [name, pick] of others) {
+    test(`refused: coin-paired, priced in ${name}, 25% burn`, () => {
+      const svm = boot();
+      const { creator, ix, title } = coinDeposit(svm, (creator) => pick(svm, creator), 25);
+      expectError(send(svm, creator, [ix]), "BurnNotCoin", `deposit priced in ${name} with a burn`);
+      assert.equal(coreOwner(svm, title), creator.publicKey.toBase58(), "the title stays with the creator");
+    });
+  }
+
+  const noCoinMints: [string, (svm: Svm, creator: Keypair) => PublicKey][] = [
+    ["SOL", () => NATIVE],
+    ["USDC-like", (svm, creator) => newMint(svm, creator, 6)],
+  ];
+  for (const [name, mintOf] of noCoinMints) {
+    test(`refused: no-coin title priced in ${name}, 25% burn`, () => {
+      const svm = boot();
+      const creator = wallet(svm);
+      const { title, collection } = sealedTitle(svm, creator);
+      const mint = mintOf(svm, creator);
+      assert.throws(() => openDeposit({ creator, title, record: record(svm, creator), mint, price: SOL, burn: 25, collection }), /only burns this title's own coin/);
+      const ix = openDeposit({ creator, title, record: record(svm, creator), mint, price: SOL, burn: 0, collection });
+      ix.data.writeUInt16LE(2500, 18);
+      expectError(send(svm, creator, [ix]), "BurnNotCoin", `no-coin deposit_open with a burn in ${name}`);
+      assert.equal(coreOwner(svm, title), creator.publicKey.toBase58());
+    });
+  }
+});
+
 describe("par-escrow refuses titles and tokens it cannot keep safe", () => {
   let svm: Svm;
   let creator: Keypair;
@@ -837,10 +900,10 @@ describe("par-escrow refuses titles and tokens it cannot keep safe", () => {
 
   test("a burn on a SOL price (the token program cannot burn wrapped SOL)", () => {
     const { title, collection } = sealedTitle(svm, creator);
-    assert.throws(() => openDeposit({ creator, title, record: rec, mint: NATIVE, price: SOL, burn: 25, collection }), /SOL cannot be burned/);
+    assert.throws(() => openDeposit({ creator, title, record: rec, mint: NATIVE, price: SOL, burn: 25, collection }), /only burns this title's own coin/);
     const ix = openDeposit({ creator, title, record: rec, mint: NATIVE, price: SOL, burn: 0, collection });
     ix.data.writeUInt16LE(2500, 18);
-    expectError(send(svm, creator, [ix]), "NativeBurn", "program-level native burn");
+    expectError(send(svm, creator, [ix]), "BurnNotCoin", "program-level burn on a no-coin SOL price");
   });
 
   test("a Token-2022 price token", () => {

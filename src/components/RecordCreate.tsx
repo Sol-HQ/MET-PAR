@@ -9,7 +9,7 @@ import { type Draft } from "@/components/AssetDesk";
 import { HandoffDesk } from "@/components/HandoffDesk";
 import { MainnetGate, ReviewFile, reviewText } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
-import { WSOL, explorerAccount, explorerTx } from "@/lib/constants";
+import { explorerAccount, explorerTx } from "@/lib/constants";
 import { bpsToPercent, formatLamports } from "@/lib/format";
 import { METEORA_TRADING_FEE_PERCENT } from "@/lib/platform";
 import {
@@ -45,6 +45,8 @@ import {
   salePath,
   saleUrl,
   saleVenueWords,
+  BURN_COIN_ONLY,
+  burnAllowed,
   CREATOR_BURN_DAYS,
   ESCROW_PATH,
   TENSOR_TAKER_FEE_PERCENT,
@@ -385,7 +387,7 @@ function sheetJson(input: {
                 : draft.titlePrice.trim()
                   ? `${draft.titlePrice.trim()} of this token`
                   : "Set by the creator in this token.",
-            burnedBy: plan.noCoin ? "the creator's own promise, if the creator burns any of the price" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
+            burnedBy: plan.noCoin ? "none: a title with no coin burns nothing" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
             auction:
               plan.rail === "escrow" && draft.sale === "auction"
                 ? {
@@ -543,8 +545,9 @@ export function RecordCreate({
       const picked = pickedMint ? await (useRailNow === "escrow" ? readClassicMint : readPayToken)(connection, pickedMint) : null;
       const priceToken = picked ?? (read ? { mint: read.mint, name: read.name, symbol: read.symbol, decimals: read.decimals } : null);
       const payAtListing = Boolean(read && useRailNow !== "escrow" && draft.payAtListing);
-      if (priceToken && priceToken.mint === WSOL && read && burnOf(draft) > 0) {
-        throw new Error("SOL cannot be burned by the token program. A title priced in SOL has a burn of 0. Change it on Claim.");
+      // A burn only ever burns the title's own coin: priced in another token, or named at listing, the burn is 0.
+      if (read && burnOf(draft) > 0 && (!burnAllowed(priceToken?.mint, read.mint) || payAtListing)) {
+        throw new Error(`${BURN_COIN_ONLY} Change it on Claim.`);
       }
       const keys: Keys = preparedKeys;
       const mint = read?.mint || paid?.mint || "";
@@ -819,7 +822,7 @@ export function RecordCreate({
         useRail === "escrow"
           ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.priceSymbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.priceSymbol} only${draftPlan.priceMint !== mint ? ` (token address ${draftPlan.priceMint}, not the coin)` : ""}: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if you promised one, is your own promise.`
+            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn.`
             : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.${
                 draftPlan.payAtListing
                   ? ` You name the price token when you list. ${draftPlan.priceSymbol} is the default. The title says so on chain.`
@@ -968,7 +971,7 @@ export function RecordCreate({
       mark("NFT image stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
-        ? "Sale path: Tensor. The creator lists one price on the sale page. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise."
+        ? "Sale path: Tensor. The creator lists one price on the sale page. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn."
         : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
           : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
@@ -1252,7 +1255,7 @@ export function RecordCreate({
                 ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
                 : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
               : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."
-            : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
+            : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn. ${ESCROW_PATH}`}
           {coin && cluster !== "devnet" && rail !== "escrow" ? ` ${ESCROW_PATH}` : ""}
         </p>
         <div className="record-promises">

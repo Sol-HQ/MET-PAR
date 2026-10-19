@@ -11,7 +11,7 @@ import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
-import { ESCROW_COMING, ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction, escrowOffered } from "@/lib/title";
+import { BURN_COIN_ONLY, ESCROW_COMING, ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction, escrowOffered } from "@/lib/title";
 
 type Row = { wallet: string; amount: string };
 
@@ -53,8 +53,8 @@ export function NoCoinChoice({
       {path === null ? (
         <p className="note">
           {escrowOpen
-            ? "Escrow holds the title. The sale is a fixed price or an auction. The bids run inside the program. A whole-percent burn from 0% to 98% happens in the program at the sale. The PAR program keeps 2%. Up to three extra wallets can be named. Tensor lists one price in the token already written on the title, and PAR takes none of that sale."
-            : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
+            ? "Escrow holds the title. The sale is a fixed price or an auction. The bids run inside the program. Nothing is burned: a title with no coin has no token of its own to burn. The PAR program keeps 2%. Up to three extra wallets can be named. Tensor lists one price in the token already written on the title, and PAR takes none of that sale."
+            : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn. ${ESCROW_PATH}`}
         </p>
       ) : null}
       {path === "escrow" && escrowOpen ? escrow : null}
@@ -84,7 +84,8 @@ export function OpenEscrow({
   const [note, setNote] = useState("");
   const [sale, setSale] = useState<"fixed" | "auction">("fixed");
   const [price, setPrice] = useState("");
-  const [burn, setBurn] = useState("0");
+  // A title with no coin burns nothing. The field stays at 0.
+  const burn = "0";
   const [wait, setWait] = useState("0");
   const [rows, setRows] = useState<Row[]>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -188,9 +189,9 @@ export function OpenEscrow({
             <input value={price} onChange={(event) => setPrice(event.target.value.replace(/[^\d.]/g, ""))} inputMode="decimal" />
           </label>
           <label>
-            Burn, whole percent from 0 to 98
-            <input value={burn} onChange={(event) => setBurn(event.target.value.replace(/\D/g, "").slice(0, 2))} inputMode="numeric" />
-            <span className="note">Zero burns nothing. 99 and above are refused. The 2% program share stays.</span>
+            Burn
+            <input value="0" disabled readOnly inputMode="numeric" />
+            <span className="note">{BURN_COIN_ONLY} This title has no coin, so its burn is 0. The 2% program share stays.</span>
           </label>
           <label>
             Days before the sale opens
@@ -265,8 +266,9 @@ function terms(
   if (!/^\d+$/.test(wait) || Number(wait) > 365) {
     return { ...empty, error: "Type the wait. Zero opens the sale now. The highest is 365." };
   }
-  if (pay.mint === WSOL && Number(burn) > 0) {
-    return { ...empty, error: "SOL cannot be burned by the token program. A sale priced in SOL has a burn of 0." };
+  // A title with no coin has nothing of its own to burn (the program refuses with BurnNotCoin).
+  if (Number(burn) > 0) {
+    return { ...empty, error: BURN_COIN_ONLY };
   }
   const raw = parseTokenAmount(price, pay.decimals);
   if (!raw) {

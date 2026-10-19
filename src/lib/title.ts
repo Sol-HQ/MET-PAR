@@ -173,7 +173,7 @@ export function creatorPromises(input: {
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
-        : "Tensor pays me the full price. PAR takes none of that sale. If I burn any of that price, the burn is my own promise.",
+        : "Tensor pays me the full price. PAR takes none of that sale. Nothing is burned: this title has no coin of its own.",
     `The ${goodFaithMark(input.handoffDays)} after the claim is a good faith delivery date. By that day I will do my best to put the item in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, I am not liable for shipping issues.`,
     escrow
       ? auction
@@ -275,7 +275,7 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "held by", value: railWords(facts.rail) },
     { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
     { key: "paid in", value: paidInWords(facts.mint, facts.priceMint, facts.payAtListing) },
-    { key: "burned", value: facts.noCoin ? "the creator's own promise, if the creator burns any of the price" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
+    { key: "burned", value: facts.noCoin ? "none: a title with no coin burns nothing" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
     { key: "sale", value: facts.noCoin ? "tensor" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
   ];
@@ -433,9 +433,27 @@ export function listingAddress(title: PublicKey, program: PublicKey): PublicKey 
 }
 
 /**
+ * The burn rule, everywhere a burn exists (escrow and Tensor, both networks): a burn only ever burns the title's own
+ * paired coin, to reduce its supply. It is allowed only when the price token is that coin. SOL, wrapped SOL, USDC and
+ * every other token burn 0, and a title with no coin burns 0. The escrow program enforces the same rule (`BurnNotCoin`).
+ */
+export function burnAllowed(priceMint: string | null | undefined, coin: string | null | undefined): boolean {
+  return Boolean(coin) && Boolean(priceMint) && priceMint === coin;
+}
+
+/** Shown wherever the burn is turned off because the price token is not the coin. */
+export const BURN_COIN_ONLY =
+  "A burn only burns this title's own coin, to reduce its supply. Priced in any other token, or with no coin, the burn is 0.";
+
+/** Throws unless a burn of `burnPercent` is allowed for this price token and coin. */
+export function requireCoinBurn(burnPercent: number, priceMint: string | null, coin: string | null): void {
+  if (burnPercent > 0 && !burnAllowed(priceMint, coin)) throw new Error(BURN_COIN_ONLY);
+}
+
+/**
  * Moves the title into the escrow. Price is in the smallest unit of `mint`, the price token, which can be the coin, wrapped
  * SOL, USDC, or any ordinary SPL token. `coin` is the title's coin; the program checks it is the pool's base mint.
- * `burnPercent` is a whole percent from 0 to 98, and 0 when the price is in SOL (the token program cannot burn it).
+ * `burnPercent` is a whole percent from 0 to 98, and 0 unless `mint` is the coin (`burnAllowed`).
  */
 export function escrowDepositInstruction(input: {
   program: PublicKey;
@@ -455,6 +473,7 @@ export function escrowDepositInstruction(input: {
   if (!Number.isInteger(input.burnPercent) || input.burnPercent < 0 || input.burnPercent > 98) {
     throw new Error("The burn has to be a whole percent from 0 to 98.");
   }
+  requireCoinBurn(input.burnPercent, input.mint.toBase58(), input.coin.toBase58());
   if (input.burnPercent > 0 && isWrappedSol(input.mint)) {
     throw new Error("SOL cannot be burned. A sale priced in SOL has a burn of 0.");
   }
@@ -485,7 +504,10 @@ export function escrowDepositInstruction(input: {
 
 export type SalePayout = { wallet: PublicKey; amount: bigint };
 
-/** A title with no coin. The mint must be an ordinary SPL token. Up to three fixed payouts, then the rest to the creator. */
+/**
+ * A title with no coin. The mint must be an ordinary SPL token. Up to three fixed payouts, then the rest to the creator.
+ * With no coin there is nothing of the creator's own to burn, so `burnPercent` has to be 0.
+ */
 export function escrowDepositOpenInstruction(input: {
   program: PublicKey;
   creator: PublicKey;
@@ -500,9 +522,7 @@ export function escrowDepositOpenInstruction(input: {
   payouts?: SalePayout[];
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
-  if (input.burnPercent > 0 && isWrappedSol(input.mint)) {
-    throw new Error("SOL cannot be burned. A sale priced in SOL has a burn of 0.");
-  }
+  requireCoinBurn(input.burnPercent, input.mint.toBase58(), null);
   if (!Number.isInteger(input.delayDays) || input.delayDays < 0 || input.delayDays > 365) {
     throw new Error("The wait is a whole number from 0 to 365 days. Zero opens the sale now.");
   }

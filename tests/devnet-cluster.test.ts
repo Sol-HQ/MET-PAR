@@ -308,7 +308,7 @@ test("escrow builders pass the title's collection and refuse a SOL burn", async 
   const collection = key();
   const open = escrowDepositOpenInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), collection, price: BigInt(1), delayDays: 0, burnPercent: 0 });
   assert.equal(open.keys.at(-1)?.pubkey.toBase58(), collection.toBase58());
-  assert.throws(() => escrowDepositOpenInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), price: BigInt(1), delayDays: 0, burnPercent: 25 }), /SOL cannot be burned/);
+  assert.throws(() => escrowDepositOpenInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), price: BigInt(1), delayDays: 0, burnPercent: 25 }), /only burns this title's own coin/);
   const coin = key();
   const paired = escrowDepositInstruction({ program, creator: key(), title: key(), record: key(), mint: new PublicKey(WSOL), coin, pool: key(), collection, price: BigInt(1), delayDays: 1, burnPercent: 0 });
   assert.equal(paired.keys[8].pubkey.toBase58(), coin.toBase58(), "the coin follows the system program");

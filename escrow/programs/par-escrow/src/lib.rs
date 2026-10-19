@@ -64,6 +64,7 @@ pub mod par_escrow {
     /// `burn_bps` is the share of the sale price that is burned. It is a whole percent, from 0 to 98.
     /// `sale_kind` is 0 for a fixed price or 1 for an auction. It is fixed at deposit.
     /// `mint` is the token the price is in. It can be the coin or any ordinary SPL token, wrapped SOL included.
+    /// A burn above 0 is allowed only when `mint` is the coin: a burn only ever reduces the title's own coin.
     /// `coin` is the title's coin and has to be the pool's base mint. A title in a collection passes the
     /// collection in the remaining accounts.
     pub fn deposit<'a, 'b, 'c, 'info>(
@@ -82,6 +83,7 @@ pub mod par_escrow {
             anchor_spl::token::ID,
             EscrowError::UnsupportedToken
         );
+        require_coin_burn(&ctx.accounts.mint.key(), Some(&ctx.accounts.coin.key()), burn_bps)?;
         require_burnable(&ctx.accounts.mint.key(), burn_bps)?;
         require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
         let asset = ctx.accounts.asset.to_account_info();
@@ -131,7 +133,8 @@ pub mod par_escrow {
         Ok(())
     }
 
-    /// A title with no coin. The creator names an ordinary SPL token, a burn, and up to three fixed payouts.
+    /// A title with no coin. The creator names an ordinary SPL token and up to three fixed payouts. With no coin
+    /// there is nothing of the creator's own to burn, so `burn_bps` has to be 0 (`BurnNotCoin`).
     /// There is no pool and no graduation. The program still keeps 2% of the price. Token-2022 is refused.
     /// A title in a collection passes the collection in the remaining accounts.
     pub fn deposit_open<'a, 'b, 'c, 'info>(
@@ -152,6 +155,7 @@ pub mod par_escrow {
             anchor_spl::token::ID,
             EscrowError::UnsupportedToken
         );
+        require_coin_burn(&ctx.accounts.mint.key(), None, burn_bps)?;
         require_burnable(&ctx.accounts.mint.key(), burn_bps)?;
         require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
         let asset = ctx.accounts.asset.to_account_info();
@@ -702,7 +706,15 @@ fn read_pool(pool: &AccountInfo, coin: Option<&Pubkey>) -> Result<bool> {
     Ok(data[POOL_MIGRATED_AT] == 1)
 }
 
+/// A burn only ever destroys the title's own paired coin, to reduce its supply. A sale priced in any other token
+/// (SOL, USDC, anything else), and every sale of a title with no coin (`coin` is None), has to burn 0.
+fn require_coin_burn(mint: &Pubkey, coin: Option<&Pubkey>, burn_bps: u16) -> Result<()> {
+    require!(burn_bps == 0 || coin == Some(mint), EscrowError::BurnNotCoin);
+    Ok(())
+}
+
 /// The token program will not burn wrapped SOL, so a burn there would make the sale impossible.
+/// `require_coin_burn` already stops it (a coin is never wrapped SOL); this stays as a second check.
 fn require_burnable(mint: &Pubkey, burn_bps: u16) -> Result<()> {
     require!(burn_bps == 0 || *mint != NATIVE_MINT, EscrowError::NativeBurn);
     Ok(())
@@ -1174,4 +1186,6 @@ pub enum EscrowError {
     CollectionNotSingle,
     #[msg("Wrapped SOL cannot be burned. A sale priced in SOL has to have a burn of 0.")]
     NativeBurn,
+    #[msg("A burn only burns the title's own coin. Priced in any other token, or for a title with no coin, the burn has to be 0.")]
+    BurnNotCoin,
 }

@@ -17,7 +17,7 @@ import { FREE_UPLOAD_BYTES } from "@/lib/record";
 import { clearRwaDraft, clearRwaKeys, makeRwaKeys, readRwaDraftRaw, readRwaKeys, writeRwaDraftRaw, writeRwaKeys } from "@/lib/rwa-draft";
 import { useCluster } from "@/lib/cluster";
 import { parseTokenAmount } from "@/lib/tensor-sale";
-import { AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, poolsPath, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE } from "@/lib/title";
+import { BURN_COIN_ONLY, AUCTION_EXTEND_HOURS, AUCTION_HOURS, AUCTION_SIT_DAYS, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, chosenRail, COIN_WORDS, creatorSalePercent, ESCROW_COMING, escrowDepositAllowed, poolsPath, SALE_BURN_PERCENT, SALE_DAY_PRESETS, SALE_DELAY_DAYS, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE } from "@/lib/title";
 
 /** The pool price sits 20% above par, inside the PAR rule of at most twice par. */
 const POOL_LIFT = 1.2;
@@ -602,7 +602,7 @@ export function AssetDesk() {
   }, [escrowLive]);
 
   // The title's price token, for a coin-paired title. Escrow refuses Token-2022 (its transfer fees and hooks break the
-  // fixed payout), and the token program cannot burn wrapped SOL, so a SOL price carries a burn of 0.
+  // fixed payout), and a burn only ever burns the coin, so any other price token carries a burn of 0.
   const chosenTitlePay = withCoin && coin && draft.titlePayMint && draft.titlePayMint !== coin.mint ? draft.titlePayMint : "";
   const titlePayProblem = !chosenTitlePay
     ? ""
@@ -610,10 +610,17 @@ export function AssetDesk() {
       ? "Read the title's price token again, or pick the coin."
       : rail === "escrow" && titlePay.tokenProgram === TOKEN_2022_PROGRAM_ID.toBase58()
         ? "That price token is Token-2022. The escrow cannot settle it. Pick the coin, SOL, USDC, or an ordinary SPL token, or use Tensor."
-        : titlePay.mint === WSOL && (wholeBurn(draft.burnPercent) ?? 0) > 0
-          ? "SOL cannot be burned by the token program. A title priced in SOL has a burn of 0."
+        : (wholeBurn(draft.burnPercent) ?? 0) > 0
+          ? BURN_COIN_ONLY
           : "";
   const priceSymbol = chosenTitlePay && titlePay ? titlePay.symbol : symbol;
+  // A burn only ever burns the title's own coin. Another price token, or a token named later at listing, burns 0.
+  const burnLocked = Boolean(withCoin && coin && (chosenTitlePay || (rail !== "escrow" && draft.payAtListing)));
+  useEffect(() => {
+    if (burnLocked && draft.burnPercent !== "0") patch({ burnPercent: "0" });
+    // Re-checked whenever the price token or the "name it at listing" choice changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [burnLocked, draft.burnPercent]);
 
   const checks: Checks = {
     hasPicture: Boolean(picture && pictureCopy && nftPicture && nftPictureCopy),
@@ -745,7 +752,7 @@ export function AssetDesk() {
             }${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price is burned by the escrow, ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT)}% goes to the creator, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : coin
             ? `Tensor is selected on Claim. The title is listed from the PAR sale page through Tensor's marketplace program, ${draft.payAtListing ? `priced in ${chosenTitlePay && titlePay ? titlePay.symbol : coin.symbol} or in another token the creator names at listing` : `only for ${chosenTitlePay && titlePay ? titlePay.symbol : coin.symbol}`}, and not before ${draft.saleDays} days after graduation. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Within ${CREATOR_BURN_DAYS} days the creator burns ${wholeBurn(draft.burnPercent) ?? SALE_BURN_PERCENT}% of the price and keeps the rest.`
-            : `The buyer pays in ${priced?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise.`,
+            : `The buyer pays in ${priced?.symbol || "the token you name"}. The creator lists one price on the PAR sale page through Tensor's marketplace program. A buyer pays that price. Tensor pays the creator the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn.`,
       ],
       [
         "Token",
@@ -1273,12 +1280,15 @@ export function AssetDesk() {
           <label>
             Burn, whole percent from 0 to 98
             <input
-              value={draft.burnPercent}
+              value={burnLocked ? "0" : draft.burnPercent}
+              disabled={burnLocked}
               onChange={(event) => patch({ burnPercent: event.target.value.replace(/\D/g, "") })}
               inputMode="numeric"
             />
             <span className="note">
-              {wholeBurn(draft.burnPercent) === null
+              {burnLocked
+                ? `${BURN_COIN_ONLY} ${draft.payAtListing && !chosenTitlePay ? "The token is named at listing, so it may not be the coin." : `This title is priced in ${priceSymbol}, not ${coin?.symbol ?? "the coin"}.`} Pick the coin to set a burn.`
+                : wholeBurn(draft.burnPercent) === null
                 ? `Type a whole percent from 0 to 98. Zero burns nothing. The PAR program still keeps ${SALE_PROGRAM_FEE_PERCENT}% of an escrow sale.`
                 : `Burn ${wholeBurn(draft.burnPercent)}%. On an escrow sale you receive ${creatorSalePercent(wholeBurn(draft.burnPercent) ?? 0)}% and the PAR program keeps ${SALE_PROGRAM_FEE_PERCENT}%. On a Tensor sale, Tensor pays you the full price and you burn this percent within ${CREATOR_BURN_DAYS} days.`}
             </span>
@@ -1327,9 +1337,6 @@ export function AssetDesk() {
                   />{" "}
                   Let me name the token when I list it on Tensor. {priceSymbol} is the default there. The title says so on chain.
                 </label>
-              ) : null}
-              {chosenTitlePay && (wholeBurn(draft.burnPercent) ?? 0) > 0 ? (
-                <p className="note">The burn applies to the price token: {wholeBurn(draft.burnPercent)}% of the price in {priceSymbol} is burned, not the coin.</p>
               ) : null}
             </>
           ) : null}

@@ -18,7 +18,7 @@ import {
   listOnTensorInstruction,
   parseTokenAmount,
 } from "@/lib/tensor-sale";
-import { CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT } from "@/lib/title";
+import { BURN_COIN_ONLY, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, burnAllowed } from "@/lib/title";
 import { planTokenPayment } from "@/lib/token-pay";
 
 type Listing = { amount: string; currency: string | null; seller: string };
@@ -114,9 +114,9 @@ export function SaleTrade({
     setPayNote("Reading the token…");
     try {
       const read = await readPayToken(connection, next);
-      // The token program cannot burn wrapped SOL, so a promised burn cannot be kept on a SOL price.
-      if (burn > 0 && read.mint === WSOL) {
-        setPayNote(`This title promises a ${burn}% burn of the price. SOL cannot be burned by the token program, so pick another token.`);
+      // A burn only ever burns the title's own coin. A title that promises a burn lists only in its coin.
+      if (burn > 0 && !burnAllowed(read.mint, noCoin ? null : mint)) {
+        setPayNote(`This title promises a ${burn}% burn of the price. ${BURN_COIN_ONLY}`);
         return;
       }
       setListPay(read);
@@ -172,6 +172,10 @@ export function SaleTrade({
     // Only a title that lets the creator name the token at listing can list in anything but the title's token.
     const pay = payAtListing ? listPay : titlePay;
     const own = pay.mint === mint;
+    if (burn > 0 && !burnAllowed(pay.mint, noCoin ? null : mint)) {
+      setError(`This title promises a ${burn}% burn of the price. ${BURN_COIN_ONLY}`);
+      return;
+    }
     const amount = parseTokenAmount(price, pay.decimals);
     if (!amount || !publicKey) {
       setError(own ? "Enter the price in the token." : `Enter the price in ${pay.symbol}. It uses ${pay.decimals} decimals.`);
@@ -288,7 +292,7 @@ export function SaleTrade({
           <div className="segmented" role="group" aria-label="Price token">
             <button type="button" aria-pressed={listPay.mint === titlePay.mint} onClick={() => { setListPay(titlePay); setPayNote(""); }}>{titlePay.symbol}</button>
             {titlePay.mint !== WSOL && burn === 0 ? <button type="button" aria-pressed={listPay.mint === WSOL} onClick={() => void choosePay(WSOL)}>SOL</button> : null}
-            {titlePay.mint !== quoteMintAddress(pageCluster, "usdc").toBase58() ? (
+            {titlePay.mint !== quoteMintAddress(pageCluster, "usdc").toBase58() && burn === 0 ? (
               <button type="button" aria-pressed={listPay.mint === quoteMintAddress(pageCluster, "usdc").toBase58()} onClick={() => void choosePay(quoteMintAddress(pageCluster, "usdc").toBase58())}>USDC</button>
             ) : null}
           </div>

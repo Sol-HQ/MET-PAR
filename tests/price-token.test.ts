@@ -7,7 +7,7 @@ import test from "node:test";
 import { Keypair, PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 import { ACCOUNT_SIZE, AccountLayout, MINT_SIZE, MintLayout, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { WSOL } from "../src/lib/constants";
-import { PAID_AT_LISTING, PAID_IN_OWN, paidInWords, priceRuleAllows, titleAttributes, titlePriceRule, type TitleFacts } from "../src/lib/title";
+import { BURN_COIN_ONLY, ESCROW_PROGRAM, PAID_AT_LISTING, PAID_IN_OWN, burnAllowed, escrowDepositInstruction, escrowDepositOpenInstruction, paidInWords, priceRuleAllows, requireCoinBurn, titleAttributes, titlePriceRule, type TitleFacts } from "../src/lib/title";
 import { readWrappedSol, unwrapSolInstruction } from "../src/lib/token-pay";
 import { readClassicMint } from "../src/lib/coin-read";
 
@@ -134,4 +134,30 @@ test("escrow price tokens: Token-2022 is refused with a clear message", async ()
   await assert.rejects(readClassicMint(stub(new Map()), mint.toBase58()), /not a token on this network/);
   const other = stub(new Map([[mint.toBase58(), { data, executable: false, lamports: 1, owner: Keypair.generate().publicKey, rentEpoch: 0 }]]));
   await assert.rejects(readClassicMint(other, mint.toBase58()), /not an ordinary SPL token/);
+});
+
+test("burn rule: a burn only ever burns the title's own coin", () => {
+  const coin = Keypair.generate().publicKey.toBase58();
+  const usdc = Keypair.generate().publicKey.toBase58();
+  assert.equal(burnAllowed(coin, coin), true);
+  for (const [mint, own] of [[WSOL, coin], [usdc, coin], [coin, null], [WSOL, null], [undefined, coin]] as const) {
+    assert.equal(burnAllowed(mint, own), false, `${mint} vs ${own}`);
+    assert.throws(() => requireCoinBurn(25, mint ?? null, own), (e: Error) => e.message === BURN_COIN_ONLY);
+    assert.doesNotThrow(() => requireCoinBurn(0, mint ?? null, own), "burn 0 is always fine");
+  }
+  assert.doesNotThrow(() => requireCoinBurn(25, coin, coin));
+});
+
+test("burn rule: the escrow deposit builders refuse a burn of any token but the coin", () => {
+  const key = () => Keypair.generate().publicKey;
+  const program = new PublicKey(ESCROW_PROGRAM.devnet);
+  const [creator, title, record, collection, coin, pool, usdc] = Array.from({ length: 7 }, key);
+  const base = { program, creator, title, record, collection, price: BigInt(1_000_000), delayDays: 1 };
+  assert.doesNotThrow(() => escrowDepositInstruction({ ...base, mint: coin, coin, pool, burnPercent: 25 }));
+  for (const mint of [new PublicKey(WSOL), usdc]) {
+    assert.throws(() => escrowDepositInstruction({ ...base, mint, coin, pool, burnPercent: 25 }), /only burns this title's own coin/);
+    assert.doesNotThrow(() => escrowDepositInstruction({ ...base, mint, coin, pool, burnPercent: 0 }));
+    assert.throws(() => escrowDepositOpenInstruction({ ...base, mint, burnPercent: 25 }), /only burns this title's own coin/);
+    assert.doesNotThrow(() => escrowDepositOpenInstruction({ ...base, mint, burnPercent: 0 }));
+  }
 });
