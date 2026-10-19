@@ -5,6 +5,7 @@ import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { ADMIN_WALLETS } from "@/lib/admins";
 import { readClassicMint, type PayFacts } from "@/lib/coin-read";
 import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
@@ -24,12 +25,15 @@ export function NoCoinChoice({
   escrow,
   tensor,
   pageCluster,
+  escrowBlocked = "",
 }: {
   escrow: ReactNode;
   tensor: ReactNode;
   pageCluster: ClusterName;
+  /** Why this title cannot go into the escrow program at all. Empty when it can. */
+  escrowBlocked?: string;
 }) {
-  const escrowOpen = pageCluster === "devnet";
+  const escrowOpen = pageCluster === "devnet" && !escrowBlocked;
   const [path, setPath] = useState<"escrow" | "tensor" | null>(null);
   return (
     <>
@@ -43,10 +47,11 @@ export function NoCoinChoice({
           onClick={() => setPath("escrow")}
         >
           Escrow
-          {escrowOpen ? null : <span className="soon-stamp">Coming soon</span>}
+          {escrowOpen ? null : <span className="soon-stamp">{escrowBlocked && pageCluster === "devnet" ? "Not for this title" : "Coming soon"}</span>}
         </button>
         <button type="button" aria-pressed={path === "tensor"} onClick={() => setPath("tensor")}>Tensor</button>
       </div>
+      {escrowBlocked && pageCluster === "devnet" ? <p className="note">{escrowBlocked}</p> : null}
       {path === null ? (
         <p className="note">
           {escrowOpen
@@ -150,7 +155,12 @@ export function OpenEscrow({
         Name the token the buyer pays. USDC and SOL are filled in. Any other ordinary SPL token can be read. Token-2022 stops here.
         The PAR program keeps {SALE_PROGRAM_FEE_PERCENT}% of the price. That does not move.
       </p>
-      {!allowed ? <p className="note">Connect the me wallet or the pa wallet to test the escrow path.</p> : null}
+      {!allowed ? (
+        <p className="error">
+          On Devnet the escrow deposit is open only to the two PAR test wallets ({ADMIN_WALLETS.map((wallet) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`).join(" and ")}).
+          {publicKey ? ` The connected wallet ${publicKey.toBase58().slice(0, 4)}…${publicKey.toBase58().slice(-4)} is not one of them, so the button stays off.` : " Connect one of them."}
+        </p>
+      ) : null}
       <div className="segmented" role="group" aria-label="Payment token">
         <button type="button" onClick={() => void loadMint(pageCluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>
         <button type="button" onClick={() => void loadMint(WSOL)}>SOL</button>

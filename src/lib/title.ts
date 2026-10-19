@@ -81,6 +81,20 @@ export function escrowDepositAllowed(cluster: ClusterName, wallet: string | null
   return escrowOffered(cluster) && isAdminWallet(wallet);
 }
 
+/**
+ * Why a title cannot be deposited into the escrow program, or "" when it can. The program's check_title
+ * (escrow/programs/par-escrow/src/lib.rs:678) needs update authority None. A creator-path title is minted as edition 1 of
+ * a sealed collection (RecordCreate useEdition, titleInstructions), so its update authority is that collection and the
+ * program refuses it with TitleChangeable (6008).
+ */
+export function escrowBlockedReason(title: { exists: boolean; collection: string | null }): string {
+  if (!title.exists) return "The title could not be read.";
+  if (title.collection) {
+    return "This title was minted as edition 1 of a sealed collection for the creator-wallet and Tensor path. The escrow program only takes a title with no update authority, so it refuses this one (TitleChangeable). Sell it through Tensor.";
+  }
+  return "";
+}
+
 /** Shown wherever both paths are named. The escrow button is visible and does not click. */
 export const ESCROW_COMING = "(The escrow path is not a mainnet option yet. Coming soon.)";
 

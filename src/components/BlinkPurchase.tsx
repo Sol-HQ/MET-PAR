@@ -1,7 +1,6 @@
 "use client";
 
-import { useConnection } from "@solana/wallet-adapter-react";
-import { useClusterWallet } from "@/lib/cluster-wallet";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Transaction } from "@solana/web3.js";
 import Link from "next/link";
@@ -21,7 +20,7 @@ type ActionMetadata = {
 
 export function BlinkPurchase({ title, pageCluster }: { title: string; pageCluster: ClusterName }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useClusterWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { cluster } = useCluster();
   const [action, setAction] = useState<ActionMetadata | null>(null);
   const [loadError, setLoadError] = useState("");

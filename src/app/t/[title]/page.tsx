@@ -18,7 +18,7 @@ import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
-import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
+import { creatorSalePercent, ESCROW_PROGRAM, escrowBlockedReason, goodFaithDelivery, poolPath, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titleStatus } from "@/lib/title";
 
 export const dynamic = "force-dynamic";
 
@@ -685,6 +685,7 @@ export default async function SalePage({
           <h2>How this title sells</h2>
           <NoCoinChoice
             pageCluster={cluster}
+            escrowBlocked={escrowBlockedReason(title)}
             escrow={<OpenEscrow pageCluster={cluster} title={address} record={recordAddress} />}
             tensor={
               <SaleTrade

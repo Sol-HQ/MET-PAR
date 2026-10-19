@@ -291,3 +291,13 @@ test("mainnet-only server routes refuse a request that names devnet", async () =
   const pay = await payRoutePost(post({ cluster: "devnet", inputMint: WSOL, outputMint: WSOL, amount: "1", slippageBps: 50 }));
   assert.equal(pay.status, 400);
 });
+
+test("escrow is refused up front for a title minted into a collection (the program's TitleChangeable)", async () => {
+  const { escrowBlockedReason, escrowDepositAllowed } = await import("../src/lib/title");
+  assert.match(escrowBlockedReason({ exists: true, collection: "7WCvRVVEFaa2fPsdCe1HgYw1yT5diUnuuxHcL5s3yxvc" }), /TitleChangeable/);
+  assert.equal(escrowBlockedReason({ exists: true, collection: null }), "");
+  // The devnet deposit gate is unchanged: only the two PAR test wallets.
+  assert.equal(escrowDepositAllowed("devnet", "RPS3j1r791zUDTwDwv3E1TRAK1H5qVYi1aHLd3gnBmY"), false);
+  assert.equal(escrowDepositAllowed("devnet", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), true);
+  assert.equal(escrowDepositAllowed("mainnet-beta", "mejmPbxqeMgnKqZeF4du3TkBncRAfLmnof7LnGnnpNf"), false);
+});
