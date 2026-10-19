@@ -224,7 +224,7 @@ Open [http://localhost:3000](http://localhost:3000). The UI defaults to Devnet. 
 | `HELIUS_WEBHOOK_SECRET` | Authenticate the handoff webhook | Optional operational integration; do not expose it to the client. |
 | `CRON_SECRET` | Protect scheduled handoff/escrow routes | Optional operational integration; keep it private. |
 
-`.env.example` is a starter, not a production deployment recipe. Its `NEXT_PUBLIC_DEVNET_RPC_URL` and `NEXT_PUBLIC_MAINNET_RPC_URL` entries are legacy names; the current app reads the server-side variables in the table above. The exact features available locally depend on which server integrations are configured.
+`.env.example` is a starter, not a production deployment recipe. It lists the server-side `DEVNET_RPC_URL` and `MAINNET_RPC_URL` variables the app reads (the older `NEXT_PUBLIC_*_RPC_URL` names are not read). The exact features available locally depend on which server integrations are configured.
 
 ## Tests and current verification limits
 

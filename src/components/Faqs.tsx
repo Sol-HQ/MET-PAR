@@ -143,8 +143,8 @@ export function Faqs() {
         <p>
           A normal wallet lists the title through Tensor&apos;s marketplace program, at one price, and can buy a
           title that is already listed. The buyer pays that price. Tensor pays the seller the full price and
-          charges the buyer about {TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if the
-          creator promised one, is the creator&apos;s own promise. {ESCROW_PATH} On the practice network that program
+          charges the buyer about {TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn only ever burns the
+          title&apos;s own coin. A title with no coin burns nothing. {ESCROW_PATH} On the practice network that program
           is open to the two test wallets, and only when a coin is attached.
         </p>
         <p>

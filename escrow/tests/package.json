@@ -1,0 +1,15 @@
+{
+  "name": "par-escrow-tests",
+  "private": true,
+  "type": "module",
+  "description": "Program tests for par-escrow. They run the built .so in LiteSVM with the real Metaplex Core program and devnet account copies. Nothing is sent to a network.",
+  "scripts": {
+    "test": "tsx --test escrow.test.ts",
+    "fixtures": "node fetch-fixtures.mjs"
+  },
+  "devDependencies": {
+    "litesvm": "0.8.0",
+    "tsx": "^4.19.0",
+    "@solana/web3.js": "file:../../node_modules/@solana/web3.js"
+  }
+}

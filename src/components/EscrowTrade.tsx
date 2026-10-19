@@ -1,7 +1,7 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,7 @@ import { explorerTx, type ClusterName } from "@/lib/constants";
 import { landingCost, prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
 import { escrowBidInstruction, escrowBuyInstruction, escrowSetPriceInstruction, markGraduatedInstruction, SALE_PROGRAM_FEE_PERCENT, type SaleMode } from "@/lib/title";
+import { openTokenAccount, paymentInstructions, planTokenPayment, type TokenPayPlan } from "@/lib/token-pay";
 
 function split(price: bigint, burnPercent: number): { paid: bigint; burned: bigint; fee: bigint } {
   const fee = (price * BigInt(SALE_PROGRAM_FEE_PERCENT * 100)) / BigInt(10000);
@@ -36,8 +37,9 @@ export function EscrowTrade({
   previousBidder,
   endsAt,
   curveFull,
-  decimals = 6,
+  decimals,
   payees = [],
+  collection = null,
 }: {
   pageCluster: ClusterName;
   program: string;
@@ -55,11 +57,14 @@ export function EscrowTrade({
   previousBidder: string | null;
   endsAt: number;
   curveFull: boolean;
-  decimals?: number;
+  /** Read from the price mint on this network. The page hides this panel when it cannot read them. */
+  decimals: number;
   payees?: { wallet: string; amount: string }[];
+  /** The title's collection. Every title the app mints now has one; older escrow titles do not. */
+  collection?: string | null;
 }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const { cluster } = useCluster();
   const router = useRouter();
   const [bid, setBid] = useState("");
@@ -82,10 +87,29 @@ export function EscrowTrade({
   const needsMark = curveFull && graduatedAt === 0;
   const clockOver = sale === "auction" && endsAt > 0 && now >= endsAt;
 
-  async function tokenProgram(): Promise<PublicKey> {
-    const info = await connection.getAccountInfo(new PublicKey(mint), "confirmed");
-    if (!info) throw new Error("The coin mint is not on this network.");
-    return info.owner;
+  const collectionKey = collection ? new PublicKey(collection) : null;
+  // A listing with no pool is a no-coin sale; the program then reads its payout account on every sale.
+  const openSale = pool === PublicKey.default.toBase58();
+
+  /** Plans the payment in the listing's price token, wrapping SOL only when that token is wrapped SOL. */
+  async function plan(need: bigint): Promise<TokenPayPlan> {
+    if (!publicKey) throw new Error("Connect a wallet.");
+    const read = await planTokenPayment(connection, new PublicKey(mint), publicKey, need);
+    if (read.short > BigInt(0)) {
+      throw new Error(
+        read.wrappedSol
+          ? `This needs ${showAmount(need)} ${symbol} plus network fees. Your wallet is short by ${showAmount(read.short)} SOL. Nothing was signed.`
+          : `This needs ${showAmount(need)} ${symbol}. Your wallet holds ${showAmount(read.held)} ${symbol}. Nothing was signed.`,
+      );
+    }
+    return read;
+  }
+
+  function wrapLines(read: TokenPayPlan): string[] {
+    return [
+      ...(read.wrap > BigInt(0) ? [`${showAmount(read.wrap)} SOL is wrapped into your wrapped-SOL account first, in the same transaction.`] : []),
+      ...(read.wrappedSol && !read.existed ? ["That wrapped-SOL account is closed again after the buy, so its rent comes back."] : []),
+    ];
   }
 
   async function send(transaction: Transaction, landed: string) {
@@ -121,27 +145,31 @@ export function EscrowTrade({
 
   async function buy() {
     if (!publicKey) return;
-    const owner = await tokenProgram();
+    const read = await plan(reserve);
+    const owner = read.tokenProgram;
     const mintKey = new PublicKey(mint);
     const creatorKey = new PublicKey(creator);
     const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
-    const ata = (holder: PublicKey) => getAssociatedTokenAddressSync(mintKey, holder, true, owner);
     const named = payees.map((row) => ({ wallet: new PublicKey(row.wallet), amount: BigInt(row.amount) }));
+    const pay = paymentInstructions(read, publicKey);
     const transaction = new Transaction().add(
-      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(publicKey), publicKey, mintKey, owner),
-      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(creatorKey), creatorKey, mintKey, owner),
-      createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(treasury), treasury, mintKey, owner),
-      ...named.map((row) => createAssociatedTokenAccountIdempotentInstruction(publicKey, ata(row.wallet), row.wallet, mintKey, owner)),
+      ...pay.before,
+      openTokenAccount(publicKey, creatorKey, mintKey, owner),
+      openTokenAccount(publicKey, treasury, mintKey, owner),
+      ...named.map((row) => openTokenAccount(publicKey, row.wallet, mintKey, owner)),
       escrowBuyInstruction({
         program: new PublicKey(program),
         buyer: publicKey,
-        creator: new PublicKey(creator),
+        creator: creatorKey,
         title: new PublicKey(title),
-        mint: new PublicKey(mint),
+        mint: mintKey,
         tokenProgram: owner,
         price: reserve,
+        openSale,
         payees: named.map((row) => row.wallet),
+        collection: collectionKey,
       }),
+      ...pay.after,
     );
     const assigned = named.reduce((sum, row) => sum + row.amount, BigInt(0));
     const creatorPaid = parts.paid > assigned ? parts.paid - assigned : BigInt(0);
@@ -152,6 +180,7 @@ export function EscrowTrade({
       ...named.map((row) => `${showAmount(row.amount)} ${symbol} goes to ${row.wallet.toBase58()}.`),
       `${showAmount(creatorPaid)} ${symbol} goes to the creator.`,
       `${showAmount(parts.fee)} ${symbol} goes to the PAR program.`,
+      ...wrapLines(read),
       "The title moves to your wallet.",
       landingCost(prepared),
     ], prepared.transaction);
@@ -193,8 +222,13 @@ export function EscrowTrade({
       setError(leading > BigInt(0) ? `Bid more than ${showAmount(leading)} ${symbol}.` : `Bid at least ${showAmount(reserve)} ${symbol}.`);
       return;
     }
-    const owner = await tokenProgram();
+    // A raise by the leader only pulls the difference; anyone else pays the whole bid.
+    const raising = leading > BigInt(0) && previousBidder === publicKey.toBase58();
+    const read = await plan(raising ? amount - leading : amount);
+    const owner = read.tokenProgram;
+    const pay = paymentInstructions(read, publicKey);
     const transaction = new Transaction().add(
+      ...pay.before,
       escrowBidInstruction({
         program: new PublicKey(program),
         bidder: publicKey,
@@ -205,10 +239,13 @@ export function EscrowTrade({
         previousBidder: previousBidder ? new PublicKey(previousBidder) : null,
       }),
     );
+    // The bid's coins stay in the escrow. A refund comes back to the wrapped-SOL account, so it is not closed here.
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Bid on this title", [
       `You bid ${showAmount(amount)} ${symbol}. The coins stay in the escrow until the clock ends.`,
       leading > BigInt(0) ? `The current bid is ${showAmount(leading)} ${symbol}. That bidder is repaid if you lead.` : "This is the first bid. It starts the clock.",
+      ...(read.wrap > BigInt(0) ? [`${showAmount(read.wrap)} SOL is wrapped into your wrapped-SOL account first, in the same transaction.`] : []),
+      ...(read.wrappedSol ? ["If you are outbid, the refund comes back as wrapped SOL in that account."] : []),
       landingCost(prepared),
     ], prepared.transaction);
   }

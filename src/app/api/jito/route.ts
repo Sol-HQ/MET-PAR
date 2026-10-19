@@ -14,7 +14,13 @@ function decodeRaw(transaction: string): Uint8Array | null {
 
 /** Relays one signed mainnet transaction, or a signed bundle, to Jito. The browser cannot call the block engine directly. */
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { transaction?: string; transactions?: string[] } | null;
+  const body = (await request.json().catch(() => null)) as { cluster?: unknown; transaction?: string; transactions?: string[] } | null;
+  // Jito's block engine here is mainnet only (https://docs.jito.wtf/lowlatencytxnsend/ lists mainnet and testnet
+  // engines, no devnet). A request that names any other network is refused rather than relayed to mainnet.
+  // A request with no cluster comes from a page built before this field; such a page only relays tipped mainnet bytes.
+  if (body?.cluster !== undefined && body.cluster !== "mainnet-beta") {
+    return Response.json({ error: "Jito relays mainnet transactions only." }, { status: 400 });
+  }
   const listed = Array.isArray(body?.transactions) ? body.transactions.filter((item) => typeof item === "string") : [];
   const single = typeof body?.transaction === "string" ? body.transaction : "";
   const encoded = listed.length > 0 ? listed : single ? [single] : [];

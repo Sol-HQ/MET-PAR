@@ -5,7 +5,7 @@ import { fromWeb3JsKeypair, toWeb3JsInstruction } from "@metaplex-foundation/umi
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, PublicKey, SystemProgram, TransactionInstruction, type Keypair } from "@solana/web3.js";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "./admins";
-import type { ClusterName } from "./constants";
+import { WSOL, type ClusterName } from "./constants";
 import { CORE_PROGRAM_ID, PUBLIC_ORIGIN, type RecordAttribute } from "./record";
 
 export const TITLE_KIND = "PAR title v1";
@@ -142,11 +142,18 @@ export function creatorPromises(input: {
   /** False when this title has no coin. The price token is named in paySymbol. */
   attached?: boolean;
   paySymbol?: string;
+  /** Coin-paired only: the price token's symbol when the title is not sold for the coin. Unset: the coin, as before. */
+  priceSymbol?: string;
+  /** Coin-paired Tensor path only: the creator names the price token at listing. */
+  payAtListing?: boolean;
 }): string[] {
   const escrow = input.rail === "escrow";
   const auction = escrow && input.sale === "auction";
   const attached = input.attached !== false;
   const pay = input.paySymbol || "this token";
+  // Unset for a title sold for its own coin, so those promises read word for word as before.
+  const other = attached && !escrow && input.payAtListing ? "listing" : attached && input.priceSymbol ? input.priceSymbol : "";
+  const escrowToken = other && other !== "listing" ? other : "this token";
   const waitUnit = input.shortClock ? "seconds" : "days";
   const bidClock = input.shortClock ? "72-second" : `${AUCTION_HOURS}-hour`;
   const extend = input.shortClock ? "1 second" : `${AUCTION_EXTEND_HOURS} hour`;
@@ -157,23 +164,25 @@ export function creatorPromises(input: {
     "The title is the one claim to the item. Whoever holds the title can claim the item from me.",
     escrow
       ? auction
-        ? `The title is auctioned only through the PAR escrow program, only for this token. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. PAR platform finishes it when the clock ends.`
-        : `The title is sold only through the PAR escrow program, only for this token, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
+        ? `The title is auctioned only through the PAR escrow program, only for ${escrowToken}. The auction can open ${input.delayDays} ${waitUnit} after the token graduates. The first bid at or above the reserve starts a ${bidClock} clock. A bid in the last ${input.shortClock ? "second" : "hour"} moves the end to ${extend} after that bid. PAR platform finishes it when the clock ends.`
+        : `The title is sold only through the PAR escrow program, only for ${escrowToken}, once the sale opens ${input.delayDays} ${waitUnit} after the token graduates. The first person to pay the price gets it.`
       : attached
-        ? `I will list the title through Tensor's marketplace program, priced only in ${pay}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
+        ? `I will list the title through Tensor's marketplace program, ${other === "listing" ? `priced in ${pay} or in another token I name when I list it` : `priced only in ${other || pay}`}, and not before the sale opens ${input.delayDays} days after the token graduates. The listing may also show on Tensor's own site.`
         : `I will list this title on its PAR sale page through Tensor's marketplace program, at one price in ${pay}. A buyer pays that price.`,
     escrow
       ? `At the sale, ${input.burnPercent}% of the price is burned by the escrow, ${creatorSalePercent(input.burnPercent)}% is paid to me, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
       : attached
         ? `Tensor pays me the full price. Within ${CREATOR_BURN_DAYS} days of the sale I will burn ${input.burnPercent}% of it and keep the rest.`
-        : "Tensor pays me the full price. PAR takes none of that sale. If I burn any of that price, the burn is my own promise.",
+        : "Tensor pays me the full price. PAR takes none of that sale. Nothing is burned: this title has no coin of its own.",
     `The ${goodFaithMark(input.handoffDays)} after the claim is a good faith delivery date. By that day I will do my best to put the item in the mail, with a shipper, or in the holder's hands. Time with the carrier or customs does not count. Once it is in the mail and in transit, I am not liable for shipping issues.`,
     escrow
       ? auction
         ? `The title waits in the PAR escrow program. If nobody bids, it stays there. I can take it back ${sit} after the sale could open, and it does not come back on its own. Once a bid starts, I cannot take it back.`
         : `The title waits in the PAR escrow program until it is sold. If it never sells, it returns to me ${reclaim} after the sale could open.`
       : "Until the sale, the title stays in my wallet or in my Tensor listing. I will not sell, move, lend, or burn it any other way. Doing so breaks my word.",
-    attached
+    attached && other
+      ? `The token is a meme. The title is paid for in ${other === "listing" ? "the token named in the listing" : other}. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing.`
+      : attached
       ? "The token is a payment token and a meme. It pays for the title. The meme is the joy and heart of the object. It is not a share of the item, and it pays nothing."
       : `The buyer pays for this title in ${pay}. That payment buys the title.`,
     "If I break these promises, I alone am responsible. PAR is software. It does not hold, insure, or guarantee the item. The NFT on the chain is the proof. PAR keeps a copy of the proofs.",
@@ -209,7 +218,46 @@ export type TitleFacts = {
   sheet?: string;
   /** False when the title has no coin and the mint is only the price token. */
   noCoin?: boolean;
+  /**
+   * Coin-paired titles only: the token the title is sold for when it is not the coin (SOL, USDC, or any mint). Left
+   * out, or equal to `mint`, the title says "this token only", byte for byte what every earlier title says.
+   */
+  priceMint?: string | null;
+  /** Tensor path only: the creator names the price token when listing. Written on the title as PAID_AT_LISTING. */
+  payAtListing?: boolean;
 };
+
+/** What every title minted before the price-token choice says, and what a title priced in its own token still says. */
+export const PAID_IN_OWN = "this token only";
+/** A Tensor-path title whose creator names the price token at listing time. */
+export const PAID_AT_LISTING = "the token named at listing";
+const MINT_TEXT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** The "paid in" line written on a new title. */
+export function paidInWords(mint: string, priceMint?: string | null, payAtListing = false): string {
+  if (payAtListing) return PAID_AT_LISTING;
+  return priceMint && priceMint !== mint ? priceMint : PAID_IN_OWN;
+}
+
+/** Which tokens a title may be listed and bought in, from its own "paid in" line. The title's line is the promise. */
+export type PriceRule = { kind: "fixed"; mint: string } | { kind: "listing" };
+
+/**
+ * Reads the title's "paid in" line. "this token only" (every older title) and any other words mean the title's own
+ * token (`ownMint`, the record's mint). A mint address means that token. PAID_AT_LISTING means the creator's pick.
+ */
+export function titlePriceRule(paidIn: string | undefined, ownMint: string): PriceRule | null {
+  const words = (paidIn ?? "").trim();
+  if (words === PAID_AT_LISTING) return { kind: "listing" };
+  if (MINT_TEXT.test(words)) return { kind: "fixed", mint: words };
+  return MINT_TEXT.test(ownMint) ? { kind: "fixed", mint: ownMint } : null;
+}
+
+/** True when a listing in `currency` keeps the title's promise. */
+export function priceRuleAllows(rule: PriceRule | null, currency: string | null | undefined): boolean {
+  if (!rule || !currency) return false;
+  return rule.kind === "listing" || rule.mint === currency;
+}
 
 export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
   const escrow = facts.rail === "escrow";
@@ -226,8 +274,8 @@ export function titleAttributes(facts: TitleFacts): RecordAttribute[] {
     { key: "creator", value: facts.creator },
     { key: "held by", value: railWords(facts.rail) },
     { key: "sale opens", value: facts.noCoin ? "when the creator lists it" : `${facts.delayDays} ${facts.shortClock ? "seconds" : "days"} after graduation` },
-    { key: "paid in", value: "this token only" },
-    { key: "burned", value: facts.noCoin ? "the creator's own promise, if the creator burns any of the price" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
+    { key: "paid in", value: paidInWords(facts.mint, facts.priceMint, facts.payAtListing) },
+    { key: "burned", value: facts.noCoin ? "none: a title with no coin burns nothing" : escrow ? `${facts.burnPercent}% by the escrow at the sale` : `${facts.burnPercent}% by the creator within ${CREATOR_BURN_DAYS} days` },
     { key: "escrow program", value: escrow && facts.program ? facts.program : "none" },
     { key: "sale", value: facts.noCoin ? "tensor" : auction ? "auction" : escrow ? "fixed price" : "tensor" },
   ];
@@ -280,10 +328,12 @@ export function editionCollectionInstructions(input: {
  *
  * With `collection` (made by `editionCollectionInstructions`): the title is minted into it as Edition 1, then the
  * collection is handed to `sealedAuthority` in the same transaction. Core does not enforce edition numbers; the sealed
- * collection, with exactly one asset ever minted into it, is what keeps the title the only one.
+ * collection, with exactly one asset ever minted into it, is what keeps the title the only one. Every new title takes
+ * this path, with or without a coin, for Tensor and for the escrow program alike (its check_title accepts it).
  *
- * Without `collection` (the escrow path, whose program takes no collection account): a standalone Core asset whose
- * update authority is set to None. ImmutableMetadata is left off: it would block setting the update authority to None.
+ * Without `collection`: a standalone Core asset whose update authority is set to None. Only older escrow titles were
+ * made this way; the escrow program still accepts them. ImmutableMetadata is left off: it would block setting the
+ * update authority to None.
  */
 export function titleInstructions(input: {
   endpoint: string;
@@ -348,6 +398,29 @@ const MARK_GRADUATED = Uint8Array.from([125, 72, 57, 129, 59, 15, 247, 251]);
 const BUY = Uint8Array.from([102, 6, 61, 18, 1, 218, 235, 234]);
 const BID = Uint8Array.from([199, 56, 85, 38, 146, 243, 37, 158]);
 const SET_PRICE = Uint8Array.from([16, 19, 182, 8, 149, 83, 72, 181]);
+const SETTLE = Uint8Array.from([175, 42, 185, 87, 144, 131, 102, 212]);
+const RECLAIM = Uint8Array.from([44, 177, 236, 249, 145, 109, 163, 186]);
+
+/** A listing priced in wrapped SOL is detected by this exact mint address and nothing else. */
+export function isWrappedSol(mint: PublicKey | string | null | undefined): boolean {
+  return Boolean(mint) && (typeof mint === "string" ? mint : mint!.toBase58()) === WSOL;
+}
+
+/**
+ * A title in a collection (every title the app mints now: edition 1 of its own sealed collection) is moved by Core only
+ * with its collection account. The escrow program takes it from the remaining accounts, after any payout accounts.
+ */
+function collectionKey(collection: PublicKey | string | null | undefined) {
+  if (!collection) return [];
+  const key = typeof collection === "string" ? new PublicKey(collection) : collection;
+  return [{ pubkey: key, isSigner: false, isWritable: true }];
+}
+
+/** The collection a Core asset belongs to, read from its update authority (BaseAssetV1: key, owner, authority). */
+export function coreCollectionOf(data: Uint8Array | null | undefined): PublicKey | null {
+  if (!data || data.length < 66 || data[33] !== 2) return null;
+  return new PublicKey(data.subarray(34, 66));
+}
 
 function requirePracticeProgram(program: PublicKey) {
   if (!ESCROW_PROGRAM.devnet || program.toBase58() !== ESCROW_PROGRAM.devnet) {
@@ -359,14 +432,38 @@ export function listingAddress(title: PublicKey, program: PublicKey): PublicKey 
   return PublicKey.findProgramAddressSync([new TextEncoder().encode("listing"), title.toBuffer()], program)[0];
 }
 
-/** Moves the title into the escrow. Price is in the token's smallest unit. `burnPercent` is a whole percent from 0 to 98. */
+/**
+ * The burn rule, everywhere a burn exists (escrow and Tensor, both networks): a burn only ever burns the title's own
+ * paired coin, to reduce its supply. It is allowed only when the price token is that coin. SOL, wrapped SOL, USDC and
+ * every other token burn 0, and a title with no coin burns 0. The escrow program enforces the same rule (`BurnNotCoin`).
+ */
+export function burnAllowed(priceMint: string | null | undefined, coin: string | null | undefined): boolean {
+  return Boolean(coin) && Boolean(priceMint) && priceMint === coin;
+}
+
+/** Shown wherever the burn is turned off because the price token is not the coin. */
+export const BURN_COIN_ONLY =
+  "A burn only burns this title's own coin, to reduce its supply. Priced in any other token, or with no coin, the burn is 0.";
+
+/** Throws unless a burn of `burnPercent` is allowed for this price token and coin. */
+export function requireCoinBurn(burnPercent: number, priceMint: string | null, coin: string | null): void {
+  if (burnPercent > 0 && !burnAllowed(priceMint, coin)) throw new Error(BURN_COIN_ONLY);
+}
+
+/**
+ * Moves the title into the escrow. Price is in the smallest unit of `mint`, the price token, which can be the coin, wrapped
+ * SOL, USDC, or any ordinary SPL token. `coin` is the title's coin; the program checks it is the pool's base mint.
+ * `burnPercent` is a whole percent from 0 to 98, and 0 unless `mint` is the coin (`burnAllowed`).
+ */
 export function escrowDepositInstruction(input: {
   program: PublicKey;
   creator: PublicKey;
   title: PublicKey;
   record: PublicKey;
   mint: PublicKey;
+  coin: PublicKey;
   pool: PublicKey;
+  collection?: PublicKey | null;
   price: bigint;
   delayDays: number;
   burnPercent: number;
@@ -375,6 +472,10 @@ export function escrowDepositInstruction(input: {
   requirePracticeProgram(input.program);
   if (!Number.isInteger(input.burnPercent) || input.burnPercent < 0 || input.burnPercent > 98) {
     throw new Error("The burn has to be a whole percent from 0 to 98.");
+  }
+  requireCoinBurn(input.burnPercent, input.mint.toBase58(), input.coin.toBase58());
+  if (input.burnPercent > 0 && isWrappedSol(input.mint)) {
+    throw new Error("SOL cannot be burned. A sale priced in SOL has a burn of 0.");
   }
   const data = new Uint8Array(21);
   data.set(DEPOSIT, 0);
@@ -395,19 +496,25 @@ export function escrowDepositInstruction(input: {
       { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: input.coin, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
 
 export type SalePayout = { wallet: PublicKey; amount: bigint };
 
-/** A title with no coin. The mint must be an ordinary SPL token. Up to three fixed payouts, then the rest to the creator. */
+/**
+ * A title with no coin. The mint must be an ordinary SPL token. Up to three fixed payouts, then the rest to the creator.
+ * With no coin there is nothing of the creator's own to burn, so `burnPercent` has to be 0.
+ */
 export function escrowDepositOpenInstruction(input: {
   program: PublicKey;
   creator: PublicKey;
   title: PublicKey;
   record: PublicKey;
   mint: PublicKey;
+  collection?: PublicKey | null;
   price: bigint;
   delayDays: number;
   burnPercent: number;
@@ -415,6 +522,7 @@ export function escrowDepositOpenInstruction(input: {
   payouts?: SalePayout[];
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
+  requireCoinBurn(input.burnPercent, input.mint.toBase58(), null);
   if (!Number.isInteger(input.delayDays) || input.delayDays < 0 || input.delayDays > 365) {
     throw new Error("The wait is a whole number from 0 to 365 days. Zero opens the sale now.");
   }
@@ -458,6 +566,7 @@ export function escrowDepositOpenInstruction(input: {
       { pubkey: payoutAddress(title, input.program), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
@@ -508,7 +617,10 @@ export function escrowBuyInstruction(input: {
   mint: PublicKey;
   tokenProgram: PublicKey;
   price: bigint;
+  /** True when the listing has no pool (a no-coin sale). The program then always reads the payout account. */
+  openSale: boolean;
   payees?: PublicKey[];
+  collection?: PublicKey | null;
 }): TransactionInstruction {
   requirePracticeProgram(input.program);
   const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
@@ -531,12 +643,85 @@ export function escrowBuyInstruction(input: {
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ...(payees.length
+      ...(input.openSale || payees.length
         ? [
             { pubkey: payoutAddress(input.title, input.program), isSigner: false, isWritable: false },
             ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
           ]
         : []),
+      ...collectionKey(input.collection),
+    ],
+  });
+}
+
+/** Finishes an auction whose clock has ended. Anyone can send it; the watcher does. */
+export function escrowSettleInstruction(input: {
+  program: PublicKey;
+  payer: PublicKey;
+  creator: PublicKey;
+  winner: PublicKey;
+  title: PublicKey;
+  mint: PublicKey;
+  tokenProgram: PublicKey;
+  /** True when the listing has no pool (a no-coin sale). */
+  openSale: boolean;
+  payees?: PublicKey[];
+  collection?: PublicKey | null;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  const treasury = new PublicKey(PLATFORM_FEE_CLAIMER);
+  const listing = listingAddress(input.title, input.program);
+  const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(input.mint, owner, true, input.tokenProgram);
+  const payees = input.payees ?? [];
+  return new TransactionInstruction({
+    programId: input.program,
+    data: Buffer.from(SETTLE),
+    keys: [
+      { pubkey: input.payer, isSigner: true, isWritable: true },
+      { pubkey: input.creator, isSigner: false, isWritable: true },
+      { pubkey: listing, isSigner: false, isWritable: true },
+      { pubkey: input.title, isSigner: false, isWritable: true },
+      { pubkey: input.winner, isSigner: false, isWritable: true },
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: ata(listing), isSigner: false, isWritable: true },
+      { pubkey: ata(input.creator), isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: false },
+      { pubkey: ata(treasury), isSigner: false, isWritable: true },
+      { pubkey: input.tokenProgram, isSigner: false, isWritable: false },
+      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...(input.openSale || payees.length
+        ? [
+            { pubkey: payoutAddress(input.title, input.program), isSigner: false, isWritable: false },
+            ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
+          ]
+        : []),
+      ...collectionKey(input.collection),
+    ],
+  });
+}
+
+/** The creator takes an unsold title back after the program's wait. `pool` is the listing's pool, or any key without one. */
+export function escrowReclaimInstruction(input: {
+  program: PublicKey;
+  creator: PublicKey;
+  title: PublicKey;
+  pool: PublicKey;
+  collection?: PublicKey | null;
+}): TransactionInstruction {
+  requirePracticeProgram(input.program);
+  return new TransactionInstruction({
+    programId: input.program,
+    data: Buffer.from(RECLAIM),
+    keys: [
+      { pubkey: input.creator, isSigner: true, isWritable: true },
+      { pubkey: listingAddress(input.title, input.program), isSigner: false, isWritable: true },
+      { pubkey: input.title, isSigner: false, isWritable: true },
+      { pubkey: input.pool, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(CORE_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...collectionKey(input.collection),
     ],
   });
 }
@@ -718,7 +903,16 @@ export async function titleStatus(
       ok: holderOk,
     },
   ];
-  if (tensor) checks.push({ label: "The Tensor price is in this token", ok: tensor.currency === record.attributes.mint });
+  // The title's "paid in" line is the promise. Older titles (and titles priced in their own token) say "this token
+  // only": the check is then exactly the one it always was, the listing's currency against the record's token.
+  const priceRule = titlePriceRule(read.attributes["paid in"], record.attributes.mint || "");
+  if (tensor) {
+    checks.push(
+      priceRule?.kind === "listing"
+        ? { label: "The Tensor listing names its price token", ok: Boolean(tensor.currency) }
+        : { label: "The Tensor price is in this token", ok: priceRuleAllows(priceRule, tensor.currency) },
+    );
+  }
   if (read.collection) {
     checks.push({
       label: "The title is edition 1 of a sealed collection of one",

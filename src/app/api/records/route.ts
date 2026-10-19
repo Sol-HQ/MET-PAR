@@ -5,7 +5,7 @@ import { readCopy, writeCopy } from "@/lib/record-copy";
 import { REMOVED_RECORDS, readRecord, RECORD_VAULT, sha256Hex } from "@/lib/record";
 import { syncHeliusHook } from "@/lib/handoff-server";
 import { hasIndex, hasItem, saveItem } from "@/lib/store";
-import { ESCROW_PROGRAM, listingAddress, readTitle, TITLE_KIND, agreedCreator, agreedHolder } from "@/lib/title";
+import { ESCROW_PROGRAM, burnAllowed, listingAddress, readTitle, TITLE_KIND, agreedCreator, agreedHolder, titlePriceRule } from "@/lib/title";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
@@ -126,6 +126,11 @@ export async function POST(request: Request) {
     if (derived !== facts.pool) return fail("The template does not lead to the pool on the record.", 409);
     if (!Number.isInteger(delay) || delay < 1 || delay > 365 || !Number.isInteger(burn) || burn < 0 || burn > 98) {
       return fail("The record sheet sale terms are not valid.", 409);
+    }
+    // A burn only ever burns the title's own coin. The title's "paid in" line says which token it sells for.
+    const rule = titlePriceRule(title.attributes["paid in"], facts.mint);
+    if (burn > 0 && !(rule?.kind === "fixed" && burnAllowed(rule.mint, facts.mint))) {
+      return fail("A burn only burns the title's own coin. This title is not sold only for its coin, so its burn has to be 0.", 409);
     }
   }
   const signatures = Object.fromEntries(

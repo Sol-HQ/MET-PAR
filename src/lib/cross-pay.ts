@@ -9,6 +9,7 @@ import {
   VersionedTransaction,
   type Transaction,
 } from "@solana/web3.js";
+import { clusterOfEndpoint, type ClusterName } from "./constants";
 import { JITO_TIP_ACCOUNTS, JITO_TIP_LAMPORTS, jitoTipLamports, sendSignedRaw } from "./send";
 import { explainTx } from "./tx-error";
 import { reportTx, ReportedTxError } from "./tx-notice";
@@ -40,7 +41,9 @@ export async function readPayRoute(input: {
   amount: string;
   slippageBps: number;
   taker?: string;
+  cluster: ClusterName;
 }): Promise<PayRoute> {
+  if (input.cluster !== "mainnet-beta") throw new Error("The SOL and USDC swap is a mainnet-only path. Nothing was signed.");
   const response = await fetch("/api/pay-route", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -103,6 +106,9 @@ export async function buildCrossTransaction(input: {
   pool: Transaction;
   sell: boolean;
 }): Promise<{ transaction: VersionedTransaction; lastValidBlockHeight: number }> {
+  if (clusterOfEndpoint(input.connection.rpcEndpoint) !== "mainnet-beta") {
+    throw new Error("The SOL and USDC swap is a mainnet-only path. Nothing was signed.");
+  }
   if (!input.route.swapInstruction) throw new Error("The SOL and USDC swap did not return a transaction.");
   const tables = await lookupTables(input.connection, input.route.addressLookupTableAddresses || []);
   const units = Math.min(1_400_000, (input.route.computeUnitLimit || 200_000) + 400_000);

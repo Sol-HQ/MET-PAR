@@ -1,15 +1,17 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useClusterWallet } from "@/lib/cluster-wallet";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { ADMIN_WALLETS } from "@/lib/admins";
 import { readClassicMint, type PayFacts } from "@/lib/coin-read";
 import { useCluster } from "@/lib/cluster";
 import { USDC_DEVNET, USDC_MAINNET, WSOL, explorerTx, type ClusterName } from "@/lib/constants";
 import { prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
-import { ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction } from "@/lib/title";
+import { BURN_COIN_ONLY, ESCROW_COMING, ESCROW_PATH, ESCROW_PROGRAM, SALE_PROGRAM_FEE_PERCENT, escrowDepositAllowed, escrowDepositOpenInstruction, escrowOffered } from "@/lib/title";
 
 type Row = { wallet: string; amount: string };
 
@@ -28,7 +30,8 @@ export function NoCoinChoice({
   tensor: ReactNode;
   pageCluster: ClusterName;
 }) {
-  const escrowOpen = pageCluster === "devnet";
+  // The escrow is a devnet-only path. On mainnet the button stays visible, cannot be pressed, and says why.
+  const escrowOpen = escrowOffered(pageCluster);
   const [path, setPath] = useState<"escrow" | "tensor" | null>(null);
   return (
     <>
@@ -46,14 +49,15 @@ export function NoCoinChoice({
         </button>
         <button type="button" aria-pressed={path === "tensor"} onClick={() => setPath("tensor")}>Tensor</button>
       </div>
+      {escrowOpen ? null : <p className="note">{ESCROW_COMING}</p>}
       {path === null ? (
         <p className="note">
           {escrowOpen
-            ? "Escrow holds the title. The sale is a fixed price or an auction. The bids run inside the program. A whole-percent burn from 0% to 98% happens in the program at the sale. The PAR program keeps 2%. Up to three extra wallets can be named. Tensor lists one price in the token already written on the title, and PAR takes none of that sale."
-            : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
+            ? "Escrow holds the title. The sale is a fixed price or an auction. The bids run inside the program. Nothing is burned: a title with no coin has no token of its own to burn. The PAR program keeps 2%. Up to three extra wallets can be named. Tensor lists one price in the token already written on the title, and PAR takes none of that sale."
+            : `You list this title through Tensor's marketplace program, at one price in the token already written on it. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn. ${ESCROW_PATH}`}
         </p>
       ) : null}
-      {path === "escrow" ? escrow : null}
+      {path === "escrow" && escrowOpen ? escrow : null}
       {path === "tensor" ? tensor : null}
     </>
   );
@@ -63,13 +67,16 @@ export function OpenEscrow({
   pageCluster,
   title,
   record,
+  collection = null,
 }: {
   pageCluster: ClusterName;
   title: string;
   record: string;
+  /** The title's sealed collection. Core moves the title only with it. */
+  collection?: string | null;
 }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useClusterWallet();
   const { cluster } = useCluster();
   const router = useRouter();
   const [mintInput, setMintInput] = useState("");
@@ -77,7 +84,8 @@ export function OpenEscrow({
   const [note, setNote] = useState("");
   const [sale, setSale] = useState<"fixed" | "auction">("fixed");
   const [price, setPrice] = useState("");
-  const [burn, setBurn] = useState("0");
+  // A title with no coin burns nothing. The field stays at 0.
+  const burn = "0";
   const [wait, setWait] = useState("0");
   const [rows, setRows] = useState<Row[]>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -117,6 +125,7 @@ export function OpenEscrow({
           title: new PublicKey(title),
           record: new PublicKey(record),
           mint: new PublicKey(pay.mint),
+          collection: collection ? new PublicKey(collection) : null,
           price: ready.raw,
           delayDays: ready.delayDays,
           burnPercent: ready.burnPercent,
@@ -135,7 +144,7 @@ export function OpenEscrow({
     }
   }
 
-  if (pageCluster !== "devnet" || !program) {
+  if (!escrowOffered(pageCluster) || !program) {
     return <p className="note">The escrow path is not a mainnet option yet. Coming soon.</p>;
   }
   if (cluster !== pageCluster) {
@@ -149,7 +158,12 @@ export function OpenEscrow({
         Name the token the buyer pays. USDC and SOL are filled in. Any other ordinary SPL token can be read. Token-2022 stops here.
         The PAR program keeps {SALE_PROGRAM_FEE_PERCENT}% of the price. That does not move.
       </p>
-      {!allowed ? <p className="note">Connect the me wallet or the pa wallet to test the escrow path.</p> : null}
+      {!allowed ? (
+        <p className="error">
+          On Devnet the escrow deposit is open only to the two PAR test wallets ({ADMIN_WALLETS.map((wallet) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`).join(" and ")}).
+          {publicKey ? ` The connected wallet ${publicKey.toBase58().slice(0, 4)}…${publicKey.toBase58().slice(-4)} is not one of them, so the button stays off.` : " Connect one of them."}
+        </p>
+      ) : null}
       <div className="segmented" role="group" aria-label="Payment token">
         <button type="button" onClick={() => void loadMint(pageCluster === "devnet" ? USDC_DEVNET : USDC_MAINNET)}>USDC</button>
         <button type="button" onClick={() => void loadMint(WSOL)}>SOL</button>
@@ -175,9 +189,9 @@ export function OpenEscrow({
             <input value={price} onChange={(event) => setPrice(event.target.value.replace(/[^\d.]/g, ""))} inputMode="decimal" />
           </label>
           <label>
-            Burn, whole percent from 0 to 98
-            <input value={burn} onChange={(event) => setBurn(event.target.value.replace(/\D/g, "").slice(0, 2))} inputMode="numeric" />
-            <span className="note">Zero burns nothing. 99 and above are refused. The 2% program share stays.</span>
+            Burn
+            <input value="0" disabled readOnly inputMode="numeric" />
+            <span className="note">{BURN_COIN_ONLY} This title has no coin, so its burn is 0. The 2% program share stays.</span>
           </label>
           <label>
             Days before the sale opens
@@ -251,6 +265,10 @@ function terms(
   }
   if (!/^\d+$/.test(wait) || Number(wait) > 365) {
     return { ...empty, error: "Type the wait. Zero opens the sale now. The highest is 365." };
+  }
+  // A title with no coin has nothing of its own to burn (the program refuses with BurnNotCoin).
+  if (Number(burn) > 0) {
+    return { ...empty, error: BURN_COIN_ONLY };
   }
   const raw = parseTokenAmount(price, pay.decimals);
   if (!raw) {

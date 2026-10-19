@@ -112,6 +112,39 @@ export function serverRpcUrl(cluster: ClusterName): string {
   return mainnetFromSharedRpc(process.env.DEVNET_RPC_URL || "") || "https://api.mainnet-beta.solana.com";
 }
 
+/**
+ * The network a connection talks to, read from its endpoint. In the browser every connection is the PAR proxy
+ * (`/api/rpc/devnet` or `/api/rpc/mainnet`, see rpcUrl). Null means PAR cannot tell, and callers must refuse rather
+ * than guess, so a devnet page never builds a mainnet-flavored transaction or the reverse.
+ */
+export function clusterOfEndpoint(endpoint: string): ClusterName | null {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return null;
+  }
+  const proxy = /^\/api\/rpc\/(devnet|mainnet)\/?$/.exec(url.pathname);
+  if (proxy) return proxy[1] === "devnet" ? "devnet" : "mainnet-beta";
+  const host = url.hostname.toLowerCase();
+  if (/(^|[.-])devnet([.-]|$)/.test(host)) return "devnet";
+  if (/(^|[.-])mainnet(-beta)?([.-]|$)/.test(host)) return "mainnet-beta";
+  return null;
+}
+
+/** Like clusterOfEndpoint, but throws when the network cannot be named. Used before anything is signed. */
+export function requireClusterOfEndpoint(endpoint: string): ClusterName {
+  const cluster = clusterOfEndpoint(endpoint);
+  if (!cluster) throw new Error("PAR cannot tell which Solana network this connection is on. Nothing was signed.");
+  return cluster;
+}
+
+/** The Wallet Standard chain id for a cluster (https://github.com/wallet-standard/wallet-standard/blob/master/extensions/solana.md). */
+export type WalletChain = "solana:devnet" | "solana:mainnet";
+export function walletChain(cluster: ClusterName): WalletChain {
+  return cluster === "devnet" ? "solana:devnet" : "solana:mainnet";
+}
+
 /** Confirmations subscribe over a websocket. The proxy cannot carry one, so the browser uses the keyless public socket. */
 export function wsUrl(cluster: ClusterName): string {
   return cluster === "devnet" ? "wss://api.devnet.solana.com" : "wss://api.mainnet-beta.solana.com";

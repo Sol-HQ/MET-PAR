@@ -101,7 +101,7 @@ export function RecordPanel({ uri, mint, pool, cluster }: { uri: string; mint: s
         <>
           <p className="eyebrow">Title</p>
           <p className="note">
-            The title is the one NFT that sells, and only for this token.{" "}
+            The title is the one NFT that sells. The sale page shows the token it is priced in.{" "}
             {body.title.rail ? `It is held by the ${railWords(body.title.rail)}.` : "The record and the title do not name the same holder."}{" "}
             <a href={salePath(body.title.address, cluster)}>Open the sale page</a>.
           </p>

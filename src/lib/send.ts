@@ -10,7 +10,7 @@ import {
   type Connection,
 } from "@solana/web3.js";
 import { noteFreshBlockhash } from "./chain-beat";
-import { explorerTx, type ClusterName } from "./constants";
+import { clusterOfEndpoint, explorerTx, requireClusterOfEndpoint, type ClusterName } from "./constants";
 import { formatLamports } from "./format";
 import { explainTx } from "./tx-error";
 import { reportTx, ReportedTxError } from "./tx-notice";
@@ -45,10 +45,45 @@ export type PreparedTransaction = {
   signers: Keypair[];
 };
 
-/** The practice network has no Jito block engine. A local RPC does not either. */
+/**
+ * The practice network has no Jito block engine. A local RPC does not either. Only a connection PAR can name as
+ * mainnet gets a tip; an endpoint PAR cannot name gets none, so a tip never lands in a devnet transaction.
+ */
 export function jitoTipLamports(endpoint: string): number {
-  if (/devnet|localhost|127\.0\.0\.1/i.test(endpoint)) return 0;
-  return JITO_TIP_LAMPORTS;
+  if (/localhost|127\.0\.0\.1/i.test(endpoint)) return 0;
+  return clusterOfEndpoint(endpoint) === "mainnet-beta" ? JITO_TIP_LAMPORTS : 0;
+}
+
+/**
+ * A signer that knows which network it signs for. The cluster-aware wallet (src/lib/cluster-wallet.ts) attaches it,
+ * so a send can refuse when the page's connection and the wallet request disagree.
+ */
+export type SignTransaction = ((transaction: Transaction) => Promise<Transaction>) & { cluster?: ClusterName };
+
+function assertSameCluster(connection: Connection, signTransaction: SignTransaction): ClusterName {
+  const cluster = requireClusterOfEndpoint(connection.rpcEndpoint);
+  if (signTransaction.cluster && signTransaction.cluster !== cluster) {
+    throw new Error(
+      `This page is connected to ${cluster === "devnet" ? "Devnet" : "Mainnet"} but the wallet request is for ${
+        signTransaction.cluster === "devnet" ? "Devnet" : "Mainnet"
+      }. Nothing was signed.`,
+    );
+  }
+  return cluster;
+}
+
+/**
+ * Durable nonces are used on mainnet only. A nonce value is not a recent blockhash on any cluster, so a wallet that
+ * checks the blockhash cannot tell a devnet transaction from a mainnet one. Devnet has no review gate that holds the
+ * wallet open, so a plain recent devnet blockhash is enough there.
+ */
+export function usesDurableNonce(cluster: ClusterName): boolean {
+  return cluster === "mainnet-beta";
+}
+
+/** Devnet asks for a confirmed blockhash so the wallet's own devnet RPC has already seen it. Mainnet is unchanged. */
+export function walletBlockhashCommitment(cluster: ClusterName): "processed" | "confirmed" {
+  return cluster === "devnet" ? "confirmed" : "processed";
 }
 
 function transferToTip(programId: PublicKey | undefined, data: Uint8Array, destination: PublicKey | undefined): boolean {
@@ -271,6 +306,11 @@ function cloneTransaction(transaction: Transaction): Transaction {
 }
 
 const NONCE_STORE = "par.nonce.v1";
+
+/** Nonce accounts live on one cluster. The key names it. Older mainnet entries were stored under the bare wallet. */
+function nonceKey(cluster: ClusterName, payer: string): string {
+  return `${cluster}:${payer}`;
+}
 const PRIORITY_MICRO_LAMPORTS = 100_000;
 
 function nonceAdvance(nonce: PublicKey, payer: PublicKey) {
@@ -286,21 +326,22 @@ export function bytesWithDurableNonce(transaction: Transaction, payer: PublicKey
   return transactionBytes(copy);
 }
 
-function storedNonce(payer: string): PublicKey | null {
+function storedNonce(cluster: ClusterName, payer: string): PublicKey | null {
   if (typeof localStorage === "undefined") return null;
   try {
     const map = JSON.parse(localStorage.getItem(NONCE_STORE) || "{}") as Record<string, string>;
-    return map[payer] ? new PublicKey(map[payer]) : null;
+    const saved = map[nonceKey(cluster, payer)] || (cluster === "mainnet-beta" ? map[payer] : "");
+    return saved ? new PublicKey(saved) : null;
   } catch {
     return null;
   }
 }
 
-function rememberNonce(payer: string, nonce: PublicKey) {
+function rememberNonce(cluster: ClusterName, payer: string, nonce: PublicKey) {
   if (typeof localStorage === "undefined") return;
   try {
     const map = JSON.parse(localStorage.getItem(NONCE_STORE) || "{}") as Record<string, string>;
-    map[payer] = nonce.toBase58();
+    map[nonceKey(cluster, payer)] = nonce.toBase58();
     localStorage.setItem(NONCE_STORE, JSON.stringify(map));
   } catch {
     /* The nonce account still exists. The next visit creates another if this browser forgets it. */
@@ -347,7 +388,7 @@ async function relayJito(raw: Uint8Array): Promise<string> {
   const response = await fetch("/api/jito", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transaction: rawToBase64(raw) }),
+    body: JSON.stringify({ cluster: "mainnet-beta", transaction: rawToBase64(raw) }),
   });
   const body = (await response.json().catch(() => null)) as { signature?: string; error?: string } | null;
   if (!response.ok || !body?.signature) throw new Error(body?.error || "Jito did not take the transaction.");
@@ -359,7 +400,7 @@ async function relayBundle(raws: Uint8Array[]): Promise<string> {
   const response = await fetch("/api/jito", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transactions: raws.map(rawToBase64) }),
+    body: JSON.stringify({ cluster: "mainnet-beta", transactions: raws.map(rawToBase64) }),
   });
   const body = (await response.json().catch(() => null)) as { bundle?: string; error?: string } | null;
   if (!response.ok || !body?.bundle) throw new Error(body?.error || "Jito did not take the bundle.");
@@ -398,8 +439,10 @@ export async function prepareBundle(
   return prepared;
 }
 
-function clusterOf(endpoint: string): ClusterName {
-  return /devnet/i.test(endpoint) ? "devnet" : "mainnet-beta";
+/** Explorer links name the cluster of the connection that sent. No link rather than a guessed one. */
+function explorerFor(signature: string, endpoint: string): string | undefined {
+  const cluster = clusterOfEndpoint(endpoint);
+  return cluster ? explorerTx(signature, cluster) : undefined;
 }
 
 function reportFailure(connection: Connection, cause: unknown, signature?: string): never {
@@ -409,7 +452,7 @@ function reportFailure(connection: Connection, cause: unknown, signature?: strin
   reportTx({
     kind: "bad",
     text,
-    href: signature && (onChain || expired) ? explorerTx(signature, clusterOf(connection.rpcEndpoint)) : undefined,
+    href: signature && (onChain || expired) ? explorerFor(signature, connection.rpcEndpoint) : undefined,
   });
   throw new ReportedTxError(text);
 }
@@ -444,11 +487,11 @@ export async function finishSignature(
       Object.assign(failure, { logs: looked?.meta?.logMessages ?? [], err: confirmed.value.err, signature, onChain: true });
       throw failure;
     }
-    reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+    reportTx({ kind: "ok", text: landed, href: explorerFor(signature, connection.rpcEndpoint) });
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
     if (expiryText(cause) && (await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
-      reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+      reportTx({ kind: "ok", text: landed, href: explorerFor(signature, connection.rpcEndpoint) });
       return;
     }
     reportFailure(connection, cause, signature);
@@ -476,33 +519,34 @@ export async function sendSignedRaw(
 async function ensureNonceAccount(
   connection: Connection,
   payer: PublicKey,
-  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  signTransaction: SignTransaction,
 ): Promise<PublicKey | null> {
-  const saved = storedNonce(payer.toBase58());
+  const cluster = requireClusterOfEndpoint(connection.rpcEndpoint);
+  const saved = storedNonce(cluster, payer.toBase58());
   if (saved && (await readNonceValue(connection, saved))) return saved;
   reportTx({
     kind: "ok",
     text: "The next signature opens a nonce account that only your wallet can use. It is a timer so later signatures do not expire while you read them. It is not the record and not the title.",
   });
-  const nonceKey = Keypair.generate();
+  const nonceSigner = Keypair.generate();
   const lamports = await connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LENGTH);
   const create = new Transaction().add(
     SystemProgram.createNonceAccount({
       fromPubkey: payer,
-      noncePubkey: nonceKey.publicKey,
+      noncePubkey: nonceSigner.publicKey,
       authorizedPubkey: payer,
       lamports,
     }),
   );
   await sendAging(
     connection,
-    await prepareTransaction(connection, payer, create, [nonceKey], { tip: false }),
+    await prepareTransaction(connection, payer, create, [nonceSigner], { tip: false }),
     signTransaction,
     "The nonce account is ready. The next signatures can stay open while you read them.",
     null,
   );
-  rememberNonce(payer.toBase58(), nonceKey.publicKey);
-  return nonceKey.publicKey;
+  rememberNonce(cluster, payer.toBase58(), nonceSigner.publicKey);
+  return nonceSigner.publicKey;
 }
 
 function walletCopy(
@@ -555,16 +599,17 @@ function walletCopy(
 async function sendAging(
   connection: Connection,
   prepared: PreparedTransaction,
-  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  signTransaction: SignTransaction,
   landed: string,
   noncePubkey: PublicKey | null,
 ): Promise<string> {
   const payer = prepared.transaction.feePayer;
   if (!payer) throw new Error("The transaction has no fee payer.");
+  const cluster = assertSameCluster(connection, signTransaction);
   let signature = "";
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const latest = await connection.getLatestBlockhash("processed");
+      const latest = await connection.getLatestBlockhash(walletBlockhashCommitment(cluster));
       noteFreshBlockhash(latest);
       const nonceValue = noncePubkey ? await readNonceValue(connection, noncePubkey) : null;
       const nonce = noncePubkey && nonceValue ? { pubkey: noncePubkey, value: nonceValue } : null;
@@ -576,11 +621,11 @@ async function sendAging(
       await pushSigned(connection, raw, tip);
       try {
         await waitForLanded(connection, signature, latest.lastValidBlockHeight, ready.durable, () => pushSigned(connection, raw, tip));
-        reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+        reportTx({ kind: "ok", text: landed, href: explorerFor(signature, connection.rpcEndpoint) });
         return signature;
       } catch (cause) {
         if ((await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
-          reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+          reportTx({ kind: "ok", text: landed, href: explorerFor(signature, connection.rpcEndpoint) });
           return signature;
         }
         const message = cause instanceof Error ? cause.message : "";
@@ -597,7 +642,7 @@ async function sendAging(
   } catch (cause) {
     if (cause instanceof ReportedTxError) throw cause;
     if (signature && (await landedState(connection, signature).catch(() => "missing" as const)) === "ok") {
-      reportTx({ kind: "ok", text: landed, href: explorerTx(signature, clusterOf(connection.rpcEndpoint)) });
+      reportTx({ kind: "ok", text: landed, href: explorerFor(signature, connection.rpcEndpoint) });
       return signature;
     }
     reportFailure(connection, cause, signature || undefined);
@@ -639,12 +684,13 @@ async function waitForLanded(
 export async function sendPrepared(
   connection: Connection,
   prepared: PreparedTransaction,
-  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  signTransaction: SignTransaction,
   landed = "Transaction confirmed.",
 ): Promise<string> {
   const payer = prepared.transaction.feePayer;
   if (!payer) throw new Error("The transaction has no fee payer.");
-  const noncePubkey = await ensureNonceAccount(connection, payer, signTransaction);
+  const cluster = assertSameCluster(connection, signTransaction);
+  const noncePubkey = usesDurableNonce(cluster) ? await ensureNonceAccount(connection, payer, signTransaction) : null;
   return sendAging(connection, prepared, signTransaction, landed, noncePubkey);
 }
 
@@ -655,10 +701,13 @@ export async function sendPrepared(
 export async function sendPreparedBundle(
   connection: Connection,
   prepared: PreparedTransaction[],
-  signTransaction: (transaction: Transaction) => Promise<Transaction>,
+  signTransaction: SignTransaction,
   landed: string[],
 ): Promise<string[]> {
   if (prepared.length === 0) return [];
+  if (assertSameCluster(connection, signTransaction) !== "mainnet-beta" && prepared.length > 1) {
+    throw new Error("A Jito bundle is a mainnet-only path. Nothing was signed.");
+  }
   if (prepared.length === 1) {
     return [await sendPrepared(connection, prepared[0], signTransaction, landed[0])];
   }

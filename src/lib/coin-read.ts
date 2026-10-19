@@ -1,6 +1,6 @@
 import { getMint, getTokenMetadata, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { DBC_PROGRAM_ID, WSOL } from "./constants";
+import { DBC_PROGRAM_ID, USDC_DEVNET, USDC_MAINNET, WSOL } from "./constants";
 import { loadPool } from "./load-pool";
 import { METEORA_TRADING_FEE_PERCENT } from "./platform";
 
@@ -44,6 +44,8 @@ export type PayFacts = {
   name: string;
   symbol: string;
   decimals: number;
+  /** The token program that owns the mint (SPL Token or Token-2022), read from the mint account. */
+  tokenProgram?: string;
 };
 
 /** Whole-fee split from the coin's stored creator percentage. */
@@ -126,24 +128,82 @@ export async function readClassicMint(connection: Connection, mint: string): Pro
   return readPayToken(connection, trimmed);
 }
 
-/** Any token the buyer can pay with. Tensor pays in this mint. */
+const TOKEN_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+
+/** Names the app knows by exact mint address, for tokens that carry no on-chain name. */
+const KNOWN_TOKENS: Record<string, { name: string; symbol: string }> = {
+  [WSOL]: { name: "SOL", symbol: "SOL" },
+  [USDC_MAINNET]: { name: "USD Coin", symbol: "USDC" },
+  [USDC_DEVNET]: { name: "USD Coin (Devnet)", symbol: "USDC" },
+};
+
+function cleanText(text: string | undefined | null): string {
+  return (text ?? "").replaceAll("\0", "").trim();
+}
+
+/** Metaplex Token Metadata (the name an ordinary SPL token carries): key, update authority, mint, then name and symbol. */
+export function parseTokenMetadataName(data: Uint8Array): { name: string; symbol: string } | null {
+  try {
+    const view = Buffer.from(data);
+    if (view.length < 69 || view[0] !== 4) return null;
+    let at = 65;
+    const nameLength = view.readUInt32LE(at);
+    at += 4;
+    if (nameLength > 200 || at + nameLength + 4 > view.length) return null;
+    const name = cleanText(view.subarray(at, at + nameLength).toString("utf8"));
+    at += nameLength;
+    const symbolLength = view.readUInt32LE(at);
+    at += 4;
+    if (symbolLength > 50 || at + symbolLength > view.length) return null;
+    const symbol = cleanText(view.subarray(at, at + symbolLength).toString("utf8"));
+    return name && symbol ? { name, symbol } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Any token the buyer can pay with: SPL Token or Token-2022. Decimals come from the mint on this network. The name
+ * comes from the Token-2022 metadata extension, then Metaplex Token Metadata, then the short list of known mints.
+ */
 export async function readPayToken(connection: Connection, mint: string): Promise<PayFacts> {
   const trimmed = mint.trim();
   if (!ADDRESS.test(trimmed)) throw new Error("Paste the token address.");
   const key = new PublicKey(trimmed);
-  const account = await getMint(connection, key).catch(() => null);
+  const info = await connection.getAccountInfo(key, "confirmed");
+  if (!info || !(info.owner.equals(TOKEN_PROGRAM_ID) || info.owner.equals(TOKEN_2022_PROGRAM_ID))) {
+    throw new Error("That address is not a token on this network.");
+  }
+  const tokenProgram = info.owner;
+  const account = await getMint(connection, key, "confirmed", tokenProgram).catch(() => null);
   if (!account) throw new Error("That address is not a token on this network.");
+  const known = KNOWN_TOKENS[trimmed];
   // Wrapped SOL has no name on the mint. The SOL button chooses this mint, so the review says SOL.
-  if (trimmed === WSOL) return { mint: key.toBase58(), name: "SOL", symbol: "SOL", decimals: account.decimals };
+  if (trimmed === WSOL && known) return { mint: key.toBase58(), name: known.name, symbol: known.symbol, decimals: account.decimals, tokenProgram: tokenProgram.toBase58() };
   let name = "";
   let symbol = "";
-  try {
-    const metadata = await getTokenMetadata(connection, key, "confirmed");
-    name = metadata?.name?.replaceAll("\0", "").trim() || "";
-    symbol = metadata?.symbol?.replaceAll("\0", "").trim() || "";
-  } catch {
-    // A token with no metadata still has a mint and decimals.
+  if (tokenProgram.equals(TOKEN_2022_PROGRAM_ID)) {
+    try {
+      const metadata = await getTokenMetadata(connection, key, "confirmed", TOKEN_2022_PROGRAM_ID);
+      name = cleanText(metadata?.name);
+      symbol = cleanText(metadata?.symbol);
+    } catch {
+      // A Token-2022 mint without the metadata extension can still carry Metaplex metadata.
+    }
+  }
+  if (!name || !symbol) {
+    const metadataKey = PublicKey.findProgramAddressSync([Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), key.toBuffer()], TOKEN_METADATA_PROGRAM)[0];
+    const metadata = await connection.getAccountInfo(metadataKey, "confirmed").catch(() => null);
+    const parsed = metadata && metadata.owner.equals(TOKEN_METADATA_PROGRAM) ? parseTokenMetadataName(metadata.data) : null;
+    if (parsed) {
+      name = parsed.name;
+      symbol = parsed.symbol;
+    }
+  }
+  if ((!name || !symbol) && known) {
+    name = known.name;
+    symbol = known.symbol;
   }
   if (!name || !symbol) throw new Error("That token has no name on chain. The review cannot name it.");
-  return { mint: key.toBase58(), name, symbol, decimals: account.decimals };
+  return { mint: key.toBase58(), name, symbol, decimals: account.decimals, tokenProgram: tokenProgram.toBase58() };
 }

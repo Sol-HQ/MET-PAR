@@ -1,6 +1,7 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { turboSignTransaction, useClusterWallet } from "@/lib/cluster-wallet";
 import { Keypair, PublicKey, Transaction, type Connection } from "@solana/web3.js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -23,7 +24,7 @@ import {
   sha256Hex,
 } from "@/lib/record";
 import { JITO_TIP_LAMPORTS, bytesWithDurableNonce, landingCost, prepareTransaction, sendPrepared, transactionBytes } from "@/lib/send";
-import { namedPay, readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
+import { namedPay, readClassicMint, readCoin, readPayToken, type CoinFacts, type PayFacts } from "@/lib/coin-read";
 import { sheetLead, sheetPageHtml } from "@/lib/sheet-html";
 import { parseTokenAmount } from "@/lib/tensor-sale";
 import {
@@ -44,6 +45,8 @@ import {
   salePath,
   saleUrl,
   saleVenueWords,
+  BURN_COIN_ONLY,
+  burnAllowed,
   CREATOR_BURN_DAYS,
   ESCROW_PATH,
   TENSOR_TAKER_FEE_PERCENT,
@@ -84,6 +87,16 @@ type Plan = {
   quoteMint: string;
   rail: TitleRail;
   venue: string;
+  /**
+   * The token the title is sold for. Equal to `mint` unless the creator of a coin-paired title picked another token
+   * on Claim (then the title's "paid in" line names it, and an escrow deposit is priced in it).
+   */
+  priceMint: string;
+  priceSymbol: string;
+  priceName: string;
+  priceDecimals: number;
+  /** Coin-paired Tensor path: the creator names the price token at listing. */
+  payAtListing: boolean;
   promises: string[];
   lines: string[];
   /** Attribute keys dropped so the full sheet link still fits. The sheet link is never in this list. */
@@ -359,18 +372,30 @@ function sheetJson(input: {
             kind: plan.rail === "escrow" ? (draft.sale === "auction" ? "auction" : "fixed price") : "tensor",
             soldThrough: saleVenueWords(plan.rail),
             soldThroughProgram: plan.rail === "escrow" ? ESCROW_PROGRAM[input.cluster === "devnet" ? "devnet" : "mainnet-beta"] : TENSOR_MARKETPLACE,
-            payIn: mint,
+            // The coin, or the token picked on Claim. For a title sold for its coin this is the coin, as before.
+            payIn: plan.payAtListing ? `${plan.priceMint}, or another token the creator names at listing` : plan.priceMint || mint,
             opensDaysAfterGraduation: plan.noCoin ? null : Number(draft.saleDays),
             opensUnit: plan.noCoin ? null : shortClock ? "seconds" : "days",
             burnPercent: plan.noCoin ? null : burnOf(draft),
             creatorPercent: plan.noCoin ? null : plan.rail === "escrow" ? creatorSalePercent(burnOf(draft)) : 100 - burnOf(draft),
             programPercent: plan.noCoin ? null : plan.rail === "escrow" ? SALE_PROGRAM_FEE_PERCENT : 0,
-            price: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "Set by the creator in this token.",
-            burnedBy: plan.noCoin ? "the creator's own promise, if the creator burns any of the price" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
+            price:
+              plan.priceMint && plan.priceMint !== mint
+                ? draft.titlePrice.trim()
+                  ? `${draft.titlePrice.trim()} ${plan.priceSymbol}`
+                  : `Set by the creator in ${plan.priceSymbol}.`
+                : draft.titlePrice.trim()
+                  ? `${draft.titlePrice.trim()} of this token`
+                  : "Set by the creator in this token.",
+            burnedBy: plan.noCoin ? "none: a title with no coin burns nothing" : plan.rail === "escrow" ? "the escrow program, at the sale" : `the creator, within ${CREATOR_BURN_DAYS} days of the sale`,
             auction:
               plan.rail === "escrow" && draft.sale === "auction"
                 ? {
-                    reserve: draft.titlePrice.trim() ? `${draft.titlePrice.trim()} of this token` : "",
+                    reserve: draft.titlePrice.trim()
+                      ? plan.priceMint && plan.priceMint !== mint
+                        ? `${draft.titlePrice.trim()} ${plan.priceSymbol}`
+                        : `${draft.titlePrice.trim()} of this token`
+                      : "",
                     clockStarts: "on the first bid at or above the reserve",
                     unit: shortClock ? "seconds" : "hours",
                     length: AUCTION_HOURS,
@@ -400,13 +425,13 @@ export function signSteps(edition: boolean, escrow: boolean): string[] {
   return [
     "You sign the promises. That is a message. No SOL moves.",
     "The pictures and the sheet upload. The wallet may ask you to approve the upload. That approval does not create the record or the title.",
-    "The first time this wallet creates a record here, the wallet asks for one short signature that opens a nonce account. A nonce is a timer you own. It keeps the next signatures from expiring while you read them. The rent in it stays yours. It is not the record and not the title. Only your wallet can use it.",
+    "On Solana Mainnet, the first time this wallet creates a record here, the wallet asks for one short signature that opens a nonce account. A nonce is a timer you own. It keeps the next signatures from expiring while you read them. The rent in it stays yours. It is not the record and not the title. Only your wallet can use it.",
     "You sign the record, then wait until this page says it landed. The master goes to the program vault and stays locked. It cannot be moved or burned.",
     ...(edition ? ["You sign the master edition, then wait. That edition allows one title and no more."] : []),
     escrow
       ? "You sign the title, then wait. Then you sign the escrow deposit, then wait."
       : "You sign the title, then wait. The title lands in your wallet, and it stays there until you list it.",
-    "If the wallet shows Advance nonce, that line only updates the timer inside the same signature you are reading. After it lands, that signature cannot be sent again. A piece already on chain is skipped, and you are not charged for it again.",
+    "On Solana Mainnet, if the wallet shows Advance nonce, that line only updates the timer inside the same signature you are reading. After it lands, that signature cannot be sent again. A piece already on chain is skipped, and you are not charged for it again.",
   ];
 }
 
@@ -422,6 +447,7 @@ export function RecordCreate({
   preparedKeys,
   coin,
   pay,
+  titlePaySymbol = "",
   onCreated,
 }: {
   draft: Draft;
@@ -435,10 +461,12 @@ export function RecordCreate({
   preparedKeys: Keys;
   coin: CoinFacts | null;
   pay: PayFacts | null;
+  /** Coin-paired: the symbol of the price token picked on Claim, when it is not the coin. For the preview only. */
+  titlePaySymbol?: string;
   onCreated?: () => void;
 }) {
   const { connection } = useConnection();
-  const wallet = useWallet();
+  const wallet = useClusterWallet();
   const { cluster } = useCluster();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [progress, setProgress] = useState<Progress[]>([]);
@@ -458,6 +486,8 @@ export function RecordCreate({
     shortClock: cluster === "devnet" && rail === "escrow",
     attached: Boolean(coin),
     paySymbol: coin?.symbol || namedPay(pay)?.symbol || draft.symbol,
+    priceSymbol: coin && titlePaySymbol ? titlePaySymbol : undefined,
+    payAtListing: Boolean(coin && rail !== "escrow" && draft.payAtListing),
   });
 
   useEffect(() => {
@@ -509,6 +539,16 @@ export function RecordCreate({
       if (read && (read.mint !== coin?.mint || read.pool !== coin.pool)) {
         throw new Error("That token address is not the coin you read. Press Read this coin again.");
       }
+      // Coin-paired: the title's price token, re-read on this network. The escrow refuses Token-2022 (readClassicMint).
+      const useRailNow = read ? rail : "creator";
+      const pickedMint = read && draft.titlePayMint && draft.titlePayMint !== read.mint ? draft.titlePayMint : "";
+      const picked = pickedMint ? await (useRailNow === "escrow" ? readClassicMint : readPayToken)(connection, pickedMint) : null;
+      const priceToken = picked ?? (read ? { mint: read.mint, name: read.name, symbol: read.symbol, decimals: read.decimals } : null);
+      const payAtListing = Boolean(read && useRailNow !== "escrow" && draft.payAtListing);
+      // A burn only ever burns the title's own coin: priced in another token, or named at listing, the burn is 0.
+      if (read && burnOf(draft) > 0 && (!burnAllowed(priceToken?.mint, read.mint) || payAtListing)) {
+        throw new Error(`${BURN_COIN_ONLY} Change it on Claim.`);
+      }
       const keys: Keys = preparedKeys;
       const mint = read?.mint || paid?.mint || "";
       const pool = read?.pool || "none";
@@ -527,8 +567,10 @@ export function RecordCreate({
         shortClock: cluster === "devnet" && rail === "escrow",
         attached,
         paySymbol: read?.symbol || paid?.symbol,
+        priceSymbol: picked ? picked.symbol : undefined,
+        payAtListing,
       });
-      const titlePrice = attached && rail === "escrow" ? parseTokenAmount(draft.titlePrice, read?.decimals) : null;
+      const titlePrice = attached && rail === "escrow" ? parseTokenAmount(draft.titlePrice, priceToken?.decimals) : null;
       if (attached && rail === "escrow" && !titlePrice) throw new Error("Type the title price in the token on the Claim step.");
 
       const draftPlan: Plan = {
@@ -557,6 +599,11 @@ export function RecordCreate({
         platformFeePercent: read?.platformFeePercent ?? 0,
         rail: attached ? rail : "creator",
         venue,
+        priceMint: priceToken?.mint || paid?.mint || "",
+        priceSymbol: priceToken?.symbol || paid?.symbol || "",
+        priceName: priceToken?.name || paid?.name || "",
+        priceDecimals: priceToken?.decimals ?? paid?.decimals ?? 6,
+        payAtListing,
         promises,
         lines: [],
         omitRecord: [],
@@ -675,7 +722,9 @@ export function RecordCreate({
         recordRent = simulated.value.accounts?.[0]?.lamports ?? 0;
       }
 
-      const useEdition = draftPlan.rail !== "escrow";
+      // Every RWA title is edition 1 of its own sealed collection, with or without a coin and on either rail. The escrow
+      // program's check_title accepts a sealed collection, so the escrow rail no longer needs a standalone title.
+      const useEdition = true;
       const titleFit = await fitNft(
         "title",
         titleAttributes({
@@ -692,6 +741,8 @@ export function RecordCreate({
           shortClock: cluster === "devnet" && draftPlan.rail === "escrow",
           sheet: sheetSlot,
           noCoin: draftPlan.noCoin,
+          priceMint: draftPlan.priceMint,
+          payAtListing: draftPlan.payAtListing,
         }),
         (attributes) =>
           new Transaction().add(
@@ -769,10 +820,16 @@ export function RecordCreate({
           ? `The title stays in your wallet (${creator}). You list it on the sale page through Tensor's marketplace program. Sale page written on the record and the title: ${venue}.`
           : `The title goes to the ${railWords(useRail)}${useRail === "creator" ? ` (${creator})` : ""}. It is sold through the ${saleVenueWords(useRail)}, because that path is selected on Claim. Sale page written on the record and the title: ${venue}.`,
         useRail === "escrow"
-          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.symbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.symbol} only: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
+          ? `The ${draft.sale === "auction" ? "reserve" : "price"} is ${draft.titlePrice.trim() || "unset"} ${draftPlan.priceSymbol}. The sale opens ${draft.saleDays} ${cluster === "devnet" ? "seconds" : "days"} after graduation. It is paid in ${draftPlan.priceSymbol} only${draftPlan.priceMint !== mint ? ` (token address ${draftPlan.priceMint}, not the coin)` : ""}: ${burnOf(draft)}% is burned by the escrow, ${creatorSalePercent(burnOf(draft))}% goes to you, and ${SALE_PROGRAM_FEE_PERCENT}% goes to the PAR program.`
           : draftPlan.noCoin
-            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. A burn, if you promised one, is your own promise.`
-            : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.`,
+            ? `On the sale page you list one price in ${draftPlan.symbol}. A buyer pays that price through Tensor's marketplace program. Tensor pays you the full price. The buyer pays Tensor about ${TENSOR_TAKER_FEE_PERCENT}% on top. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn.`
+            : `The sale opens ${draft.saleDays} days after graduation. Tensor pays you the full price. Within ${CREATOR_BURN_DAYS} days you burn ${burnOf(draft)}% of it and keep the rest.${
+                draftPlan.payAtListing
+                  ? ` You name the price token when you list. ${draftPlan.priceSymbol} is the default. The title says so on chain.`
+                  : draftPlan.priceMint !== mint
+                    ? ` The title is paid in ${draftPlan.priceName} (${draftPlan.priceSymbol}), token address ${draftPlan.priceMint}, not the coin.`
+                    : ""
+              }`,
         ...(useRail === "escrow" ? [] : [ESCROW_PATH]),
         `The record and the title each carry the token address ${mint}, sale page ${venue}, and a full sheet link. That link is the readable page on Arweave.`,
         "The wallet signs this message. These are the words, in this order.",
@@ -854,6 +911,12 @@ export function RecordCreate({
         ) {
           throw new Error("The coin on chain does not match the review. Press Review create again.");
         }
+        if (plan.priceMint !== plan.mint) {
+          const price = await (plan.rail === "escrow" ? readClassicMint : readPayToken)(connection, plan.priceMint);
+          if (price.mint !== plan.priceMint || price.symbol !== plan.priceSymbol || price.decimals !== plan.priceDecimals) {
+            throw new Error("The price token on chain does not match the review. Press Review create again.");
+          }
+        }
       }
       const recordAddress = keys.record.publicKey.toBase58();
       const titleAddress = keys.title.publicKey.toBase58();
@@ -868,7 +931,7 @@ export function RecordCreate({
       const { TurboFactory } = await import("@ardrive/turbo-sdk/web");
       const turbo = TurboFactory.authenticated({
         token: "solana",
-        walletAdapter: { publicKey: payer, signMessage, signTransaction },
+        walletAdapter: { publicKey: payer, signMessage, signTransaction: turboSignTransaction(cluster, signTransaction) },
       });
       const sheetPictureBytes = new Uint8Array(await picture.arrayBuffer());
       const sheetImageSha256 = await sha256Hex(sheetPictureBytes);
@@ -908,7 +971,7 @@ export function RecordCreate({
       mark("NFT image stored on Arweave", imageArweave);
 
       const pathLine = plan.noCoin
-        ? "Sale path: Tensor. The creator lists one price on the sale page. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of that sale. A burn, if the creator promised one, is the creator's own promise."
+        ? "Sale path: Tensor. The creator lists one price on the sale page. A buyer pays that price. Tensor pays the creator the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn."
         : plan.rail === "escrow"
           ? `Sale path: PAR escrow, because Escrow was selected on Claim. The title is ${draft.sale === "auction" ? "auctioned" : "sold"} only through the PAR escrow program.`
           : "Sale path: Tensor, because Tensor was selected on Claim. The title is listed through Tensor's marketplace program.";
@@ -993,6 +1056,8 @@ export function RecordCreate({
         shortClock,
         sheet: htmlArweave,
         noCoin: plan.noCoin,
+        priceMint: plan.priceMint,
+        payAtListing: plan.payAtListing,
       });
       assertOneStory({
         sheet,
@@ -1016,7 +1081,8 @@ export function RecordCreate({
         delayDays: Number(draft.saleDays),
       });
 
-      const useEdition = plan.rail !== "escrow";
+      // Same as the plan: every title is minted into its sealed collection.
+      const useEdition = true;
       const recordExists = Boolean(await connection.getAccountInfo(keys.record.publicKey, "confirmed"));
       const collectionExists = useEdition
         ? Boolean(await connection.getAccountInfo(keys.collection.publicKey, "confirmed"))
@@ -1115,7 +1181,7 @@ export function RecordCreate({
           throw new Error("The escrow path is not available on this network.");
         }
         await waitForAccount(connection, keys.title.publicKey);
-        const typedPrice = parseTokenAmount(draft.titlePrice, plan.decimals);
+        const typedPrice = parseTokenAmount(draft.titlePrice, plan.priceDecimals);
         if (!typedPrice) throw new Error("Type the title price in the token on the Claim step.");
         const depositTx = new Transaction().add(
           escrowDepositInstruction({
@@ -1123,8 +1189,12 @@ export function RecordCreate({
             creator: payer,
             title: keys.title.publicKey,
             record: keys.record.publicKey,
-            mint: new PublicKey(mint),
+            // The price token picked on Claim (the coin unless another was picked). `coin` is what the program checks
+            // against the pool, so the sale still opens only after the coin graduates.
+            mint: new PublicKey(plan.priceMint),
+            coin: new PublicKey(mint),
             pool: new PublicKey(pool),
+            collection: keys.collection.publicKey,
             price: typedPrice,
             delayDays: Number(draft.saleDays),
             burnPercent: burnOf(draft),
@@ -1185,7 +1255,7 @@ export function RecordCreate({
                 ? "Claim is set to Escrow, and the sale is an auction. These promises say the title is auctioned only through the PAR escrow program, because Escrow is the path selected."
                 : "Claim is set to Escrow, and the sale is a fixed price. These promises say the title is sold only through the PAR escrow program, because Escrow is the path selected."
               : "Claim is set to Tensor. The title stays in your wallet. These promises say you will list it through Tensor's marketplace program, because Tensor is the path selected."
-            : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. A burn, if you promised one, is your own promise. ${ESCROW_PATH}`}
+            : `The title stays in your wallet. You list it on the sale page through Tensor's marketplace program, at one price in the payment token. A buyer pays that price. Tensor pays you the full price. PAR takes none of that sale. Nothing is burned: a title with no coin has no token of its own to burn. ${ESCROW_PATH}`}
           {coin && cluster !== "devnet" && rail !== "escrow" ? ` ${ESCROW_PATH}` : ""}
         </p>
         <div className="record-promises">

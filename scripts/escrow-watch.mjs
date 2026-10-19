@@ -43,6 +43,15 @@ function envRpc() {
   return envValue("DEVNET_RPC_URL") || "https://api.devnet.solana.com";
 }
 
+/** The escrow is a devnet program. The watcher refuses any RPC whose genesis is not devnet's, so it never runs on mainnet. */
+const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+export async function requireDevnet(connection) {
+  const genesis = await connection.getGenesisHash();
+  if (genesis !== DEVNET_GENESIS) {
+    throw new Error("The escrow watcher runs only on devnet. DEVNET_RPC_URL points at another network, so nothing was sent.");
+  }
+}
+
 function indexDb() {
   const url = envValue("SUPABASE_URL").replace(/\/$/, "");
   const key = envValue("SUPABASE_SERVICE_ROLE_KEY");
@@ -140,6 +149,13 @@ async function send(connection, payer, instructions) {
   return sig;
 }
 
+/** The collection a Core title belongs to (update authority kind 2 at byte 33), or null. */
+async function titleCollection(connection, asset) {
+  const info = await connection.getAccountInfo(asset, "confirmed");
+  if (!info || !info.owner.equals(CORE) || info.data.length < 66 || info.data[33] !== 2) return null;
+  return new PublicKey(info.data.subarray(34, 66));
+}
+
 function markInstruction(asset, pool) {
   return new TransactionInstruction({
     programId: PROGRAM,
@@ -151,7 +167,7 @@ function markInstruction(asset, pool) {
   });
 }
 
-function settleInstruction(payer, listing) {
+export function settleInstruction(payer, listing) {
   const asset = new PublicKey(listing.asset);
   const mint = new PublicKey(listing.mint);
   const creator = new PublicKey(listing.creator);
@@ -178,12 +194,15 @@ function settleInstruction(payer, listing) {
       { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: CORE, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ...(payees.length
+      // A no-coin sale always passes its payout account, even with no named wallets; the program reads it on every sale.
+      ...(listing.payout
         ? [
             { pubkey: listing.payout, isSigner: false, isWritable: false },
             ...payees.map((payee) => ({ pubkey: ata(payee), isSigner: false, isWritable: true })),
           ]
         : []),
+      // A title in a collection moves only with its collection. The program finds it among these accounts.
+      ...(listing.collection ? [{ pubkey: listing.collection, isSigner: false, isWritable: true }] : []),
     ],
   });
 }
@@ -219,6 +238,7 @@ async function pass(connection, payer, graduationTried) {
     if (!mintInfo) continue;
     listing.tokenProgram = mintInfo.owner;
     try {
+      listing.collection = await titleCollection(connection, new PublicKey(listing.asset));
       const mintKey = new PublicKey(listing.mint);
       const creatorKey = new PublicKey(listing.creator);
       const mintOwner = listing.tokenProgram;
@@ -280,8 +300,9 @@ async function runPass(connection, payer, graduationTried) {
 }
 
 export async function watchOnce() {
-  const payer = loadPayer();
   const connection = new Connection(envRpc(), "confirmed");
+  await requireDevnet(connection);
+  const payer = loadPayer();
   console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, one pass`);
   return runPass(connection, payer, new Map());
 }
@@ -292,8 +313,9 @@ async function main() {
     return;
   }
   takeLock();
-  const payer = loadPayer();
   const connection = new Connection(envRpc(), "confirmed");
+  await requireDevnet(connection);
+  const payer = loadPayer();
   console.log(`watcher ${payer.publicKey.toBase58()} on the practice network, every ${INTERVAL_MS / 60000} minutes`);
   const graduationTried = new Map();
   for (;;) {
