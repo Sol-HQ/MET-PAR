@@ -14,3 +14,5 @@ scripts/_*.mjs
 scripts/_*.ts
 *.tsbuildinfo
 .vercel
+
+escrow/tests/fixtures/*.so

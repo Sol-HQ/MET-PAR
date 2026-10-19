@@ -2,9 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{Mint as SplMint, Token, TokenAccount as SplTokenAccount};
 use anchor_spl::token_interface::{self, Burn, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked};
-use mpl_core::accounts::{BaseAssetV1, PluginHeaderV1};
+use mpl_core::accounts::{BaseAssetV1, BaseCollectionV1, PluginHeaderV1};
 use mpl_core::instructions::TransferV1CpiBuilder;
-use mpl_core::types::{PluginAuthority, PluginType, UpdateAuthority};
+use mpl_core::types::{PluginAuthority, PluginType, Royalties, RuleSet, UpdateAuthority};
 use mpl_core::{DataBlob, PluginRegistryV1Safe};
 
 /// Practice program. One day is one second. The older program on the practice network was not upgraded.
@@ -46,6 +46,12 @@ const BPS: u64 = 10_000;
 /// The platform wallet. The program fee is paid to this wallet, in the sale token.
 pub const TREASURY: Pubkey = pubkey!("pa1Tt6RjP5YLbxjqDtKhFCmwRdtQvscxPrwfopWX18u");
 
+/// Wrapped SOL. The token program refuses to burn it, so a sale priced in it cannot carry a burn.
+pub const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+/// The app seals a title's collection by handing its update authority to this PDA of the Core program:
+/// `["par sealed", collection]`. Nothing can sign for it, so the collection and its title can never change again.
+pub const SEALED_SEED: &[u8] = b"par sealed";
+
 pub const LISTING_SEED: &[u8] = b"listing";
 pub const PAYOUT_SEED: &[u8] = b"payout";
 pub const MAX_PAYOUTS: usize = 3;
@@ -57,7 +63,16 @@ pub mod par_escrow {
     /// The creator moves the title into the escrow. It can only leave by a sale or, after a long wait, a reclaim.
     /// `burn_bps` is the share of the sale price that is burned. It is a whole percent, from 0 to 98.
     /// `sale_kind` is 0 for a fixed price or 1 for an auction. It is fixed at deposit.
-    pub fn deposit(ctx: Context<Deposit>, price: u64, delay_days: u16, burn_bps: u16, sale_kind: u8) -> Result<()> {
+    /// `mint` is the token the price is in. It can be the coin or any ordinary SPL token, wrapped SOL included.
+    /// `coin` is the title's coin and has to be the pool's base mint. A title in a collection passes the
+    /// collection in the remaining accounts.
+    pub fn deposit<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, Deposit<'info>>,
+        price: u64,
+        delay_days: u16,
+        burn_bps: u16,
+        sale_kind: u8,
+    ) -> Result<()> {
         require!(price > 0, EscrowError::ZeroPrice);
         require!(delay_days >= 1 && delay_days <= MAX_DELAY_DAYS, EscrowError::BadDelay);
         require!(burn_bps <= MAX_BURN_BPS && burn_bps % 100 == 0, EscrowError::BadBurn);
@@ -67,18 +82,21 @@ pub mod par_escrow {
             anchor_spl::token::ID,
             EscrowError::UnsupportedToken
         );
+        require_burnable(&ctx.accounts.mint.key(), burn_bps)?;
         require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
-        check_title(&ctx.accounts.asset.to_account_info(), &ctx.accounts.creator.key())?;
-        let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &ctx.accounts.mint.key())?;
+        let asset = ctx.accounts.asset.to_account_info();
+        let collection = title_collection(&asset, ctx.remaining_accounts)?;
+        check_title(&asset, &ctx.accounts.creator.key(), collection.as_ref())?;
+        let migrated = read_pool(&ctx.accounts.pool.to_account_info(), Some(&ctx.accounts.coin.key()))?;
         let now = Clock::get()?.unix_timestamp;
 
         let core = ctx.accounts.core_program.to_account_info();
-        let asset = ctx.accounts.asset.to_account_info();
         let creator = ctx.accounts.creator.to_account_info();
         let listing_info = ctx.accounts.listing.to_account_info();
         let system = ctx.accounts.system_program.to_account_info();
         TransferV1CpiBuilder::new(&core)
             .asset(&asset)
+            .collection(collection.as_ref())
             .payer(&creator)
             .authority(Some(&creator))
             .new_owner(&listing_info)
@@ -115,8 +133,9 @@ pub mod par_escrow {
 
     /// A title with no coin. The creator names an ordinary SPL token, a burn, and up to three fixed payouts.
     /// There is no pool and no graduation. The program still keeps 2% of the price. Token-2022 is refused.
-    pub fn deposit_open(
-        ctx: Context<DepositOpen>,
+    /// A title in a collection passes the collection in the remaining accounts.
+    pub fn deposit_open<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, DepositOpen<'info>>,
         price: u64,
         delay_days: u16,
         burn_bps: u16,
@@ -133,8 +152,11 @@ pub mod par_escrow {
             anchor_spl::token::ID,
             EscrowError::UnsupportedToken
         );
+        require_burnable(&ctx.accounts.mint.key(), burn_bps)?;
         require_keys_eq!(*ctx.accounts.record.owner, mpl_core::ID, EscrowError::BadRecord);
-        check_title(&ctx.accounts.asset.to_account_info(), &ctx.accounts.creator.key())?;
+        let asset = ctx.accounts.asset.to_account_info();
+        let collection = title_collection(&asset, ctx.remaining_accounts)?;
+        check_title(&asset, &ctx.accounts.creator.key(), collection.as_ref())?;
         let assigned = pack_payouts(&payout_wallets, &payout_amounts)?;
         let fee = share(price, PROGRAM_FEE_BPS)?;
         let burned = share(price, u64::from(burn_bps))?;
@@ -142,12 +164,12 @@ pub mod par_escrow {
         require!(assigned <= net, EscrowError::PayoutTooBig);
 
         let core = ctx.accounts.core_program.to_account_info();
-        let asset = ctx.accounts.asset.to_account_info();
         let creator = ctx.accounts.creator.to_account_info();
         let listing_info = ctx.accounts.listing.to_account_info();
         let system = ctx.accounts.system_program.to_account_info();
         TransferV1CpiBuilder::new(&core)
             .asset(&asset)
+            .collection(collection.as_ref())
             .payer(&creator)
             .authority(Some(&creator))
             .new_owner(&listing_info)
@@ -191,7 +213,8 @@ pub mod par_escrow {
     pub fn mark_graduated(ctx: Context<MarkGraduated>) -> Result<()> {
         let listing = &mut ctx.accounts.listing;
         require!(listing.graduated_at == 0, EscrowError::AlreadyGraduated);
-        let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &listing.mint)?;
+        // The pool's address is fixed on the listing and was checked against the coin at deposit.
+        let migrated = read_pool(&ctx.accounts.pool.to_account_info(), None)?;
         require!(migrated, EscrowError::NotGraduated);
         let now = Clock::get()?.unix_timestamp;
         listing.graduated_at = now;
@@ -280,6 +303,7 @@ pub mod par_escrow {
         release(
             &ctx.accounts.core_program.to_account_info(),
             &ctx.accounts.asset.to_account_info(),
+            ctx.remaining_accounts,
             &ctx.accounts.buyer.to_account_info(),
             &ctx.accounts.listing.to_account_info(),
             &ctx.accounts.buyer.to_account_info(),
@@ -481,6 +505,7 @@ pub mod par_escrow {
         release(
             &ctx.accounts.core_program.to_account_info(),
             &ctx.accounts.asset.to_account_info(),
+            ctx.remaining_accounts,
             &ctx.accounts.payer.to_account_info(),
             &ctx.accounts.listing.to_account_info(),
             &ctx.accounts.winner.to_account_info(),
@@ -499,11 +524,11 @@ pub mod par_escrow {
     }
 
     /// The creator takes the title back only after the waiting period, and only when no auction bid is live.
-    pub fn reclaim(ctx: Context<Reclaim>) -> Result<()> {
+    pub fn reclaim<'a, 'b, 'c, 'info>(ctx: Context<'a, 'b, 'c, 'info, Reclaim<'info>>) -> Result<()> {
         let listing = &ctx.accounts.listing;
         require!(listing.high_bid == 0, EscrowError::AuctionLive);
         if listing.pool != Pubkey::default() {
-            let migrated = read_pool(&ctx.accounts.pool.to_account_info(), &listing.mint)?;
+            let migrated = read_pool(&ctx.accounts.pool.to_account_info(), None)?;
             require!(!(migrated && listing.graduated_at == 0), EscrowError::MarkGraduationFirst);
         }
         let now = Clock::get()?.unix_timestamp;
@@ -515,6 +540,7 @@ pub mod par_escrow {
         release(
             &ctx.accounts.core_program.to_account_info(),
             &ctx.accounts.asset.to_account_info(),
+            ctx.remaining_accounts,
             &ctx.accounts.creator.to_account_info(),
             &ctx.accounts.listing.to_account_info(),
             &ctx.accounts.creator.to_account_info(),
@@ -580,17 +606,22 @@ fn pay_tokens<'info>(
     )
 }
 
+/// Sends the title out of the escrow. A title in a collection needs its collection, which the caller passes in
+/// the remaining accounts; Core checks it is the title's collection.
 fn release<'info>(
     core: &AccountInfo<'info>,
     asset: &AccountInfo<'info>,
+    remaining: &[AccountInfo<'info>],
     payer: &AccountInfo<'info>,
     listing: &AccountInfo<'info>,
     new_owner: &AccountInfo<'info>,
     system: &AccountInfo<'info>,
     seeds: &[&[u8]],
 ) -> Result<()> {
+    let collection = title_collection(asset, remaining)?;
     TransferV1CpiBuilder::new(core)
         .asset(asset)
+        .collection(collection.as_ref())
         .payer(payer)
         .authority(Some(listing))
         .new_owner(new_owner)
@@ -656,37 +687,106 @@ fn named_payouts(remaining: &[AccountInfo], asset: &Pubkey, program_id: &Pubkey,
     Ok(named)
 }
 
-/// Returns whether the pool has migrated. Fails unless this is a DBC pool for `mint`.
-fn read_pool(pool: &AccountInfo, mint: &Pubkey) -> Result<bool> {
+/// Returns whether the pool has migrated. Fails unless this is a DBC pool, and, when `coin` is given, its pool.
+fn read_pool(pool: &AccountInfo, coin: Option<&Pubkey>) -> Result<bool> {
     require_keys_eq!(*pool.owner, DBC_PROGRAM, EscrowError::WrongPool);
     let data = pool.try_borrow_data()?;
     require!(data.len() == POOL_SIZE, EscrowError::WrongPool);
     require!(data[..8] == POOL_DISCRIMINATOR, EscrowError::WrongPool);
-    require!(
-        data[POOL_BASE_MINT_AT..POOL_BASE_MINT_AT + 32] == mint.to_bytes(),
-        EscrowError::WrongPool
-    );
+    if let Some(coin) = coin {
+        require!(
+            data[POOL_BASE_MINT_AT..POOL_BASE_MINT_AT + 32] == coin.to_bytes(),
+            EscrowError::WrongPool
+        );
+    }
     Ok(data[POOL_MIGRATED_AT] == 1)
 }
 
+/// The token program will not burn wrapped SOL, so a burn there would make the sale impossible.
+fn require_burnable(mint: &Pubkey, burn_bps: u16) -> Result<()> {
+    require!(burn_bps == 0 || *mint != NATIVE_MINT, EscrowError::NativeBurn);
+    Ok(())
+}
+
+/// The title's collection account, taken from `remaining` when the title belongs to a collection.
+/// Returns None for a title with no collection. Fails when the title has one and it was not passed.
+fn title_collection<'info>(asset: &AccountInfo<'info>, remaining: &[AccountInfo<'info>]) -> Result<Option<AccountInfo<'info>>> {
+    require_keys_eq!(*asset.owner, mpl_core::ID, EscrowError::BadTitle);
+    let wanted = {
+        let data = asset.try_borrow_data()?;
+        let base = BaseAssetV1::from_bytes(&data).map_err(|_| error!(EscrowError::BadTitle))?;
+        match base.update_authority {
+            UpdateAuthority::Collection(key) => key,
+            _ => return Ok(None),
+        }
+    };
+    let found = remaining.iter().find(|account| account.key() == wanted).ok_or(error!(EscrowError::WrongCollection))?;
+    require_keys_eq!(*found.owner, mpl_core::ID, EscrowError::WrongCollection);
+    Ok(Some(found.clone()))
+}
+
 /// A title nobody can move, burn, or change behind the escrow's back.
-fn check_title(asset: &AccountInfo, creator: &Pubkey) -> Result<()> {
+///
+/// Two kinds pass, and nothing else:
+/// - a standalone title whose update authority is None (the older escrow titles), and
+/// - a title in its own sealed collection: update authority Collection(c), and c is a Core collection whose update
+///   authority is the `["par sealed", c]` PDA of the Core program, with exactly one asset ever minted into it.
+///
+/// No key exists for either authority, so nobody can update, re-delegate, freeze, burn, or move the title or its
+/// collection. Every plugin on the title (and on the collection) must be on a short list that cannot move, freeze, or
+/// burn it, with authority None (or the sealed update authority), and neither may carry external plugins (hooks,
+/// oracles) that could refuse a transfer. A royalty plugin passes only without a program allow or deny list.
+/// While the title sits in the escrow the listing owns it, so only this program could add an owner-managed delegate,
+/// and it never does.
+fn check_title(asset: &AccountInfo, creator: &Pubkey, collection: Option<&AccountInfo>) -> Result<()> {
     require_keys_eq!(*asset.owner, mpl_core::ID, EscrowError::BadTitle);
     let data = asset.try_borrow_data()?;
     let base = BaseAssetV1::from_bytes(&data).map_err(|_| error!(EscrowError::BadTitle))?;
     require_keys_eq!(base.owner, *creator, EscrowError::NotOwner);
-    require!(base.update_authority == UpdateAuthority::None, EscrowError::TitleChangeable);
+    let sealed = match base.update_authority {
+        UpdateAuthority::None => false,
+        UpdateAuthority::Collection(key) => {
+            let collection = collection.ok_or(error!(EscrowError::WrongCollection))?;
+            require_keys_eq!(collection.key(), key, EscrowError::WrongCollection);
+            check_sealed_collection(collection)?;
+            true
+        }
+        UpdateAuthority::Address(_) => return err!(EscrowError::TitleChangeable),
+    };
+    check_plugins(&data, base.len(), sealed, allowed_plugin)
+}
 
-    let base_len = base.len();
-    if data.len() > base_len {
-        let header = PluginHeaderV1::from_bytes(&data[base_len..]).map_err(|_| error!(EscrowError::BadTitle))?;
-        let at = usize::try_from(header.plugin_registry_offset).map_err(|_| error!(EscrowError::BadTitle))?;
-        require!(at < data.len(), EscrowError::BadTitle);
-        let registry = PluginRegistryV1Safe::from_bytes(&data[at..]).map_err(|_| error!(EscrowError::BadTitle))?;
-        require!(registry.external_registry.is_empty(), EscrowError::TitleHasHooks);
-        for record in registry.registry.iter() {
-            require!(allowed_plugin(record.plugin_type), EscrowError::TitleHasDelegate);
-            require!(record.authority == PluginAuthority::None, EscrowError::TitleChangeable);
+/// The title's collection: a Core collection, sealed, holding only this title, with nothing on it that reaches its assets.
+fn check_sealed_collection(collection: &AccountInfo) -> Result<()> {
+    require_keys_eq!(*collection.owner, mpl_core::ID, EscrowError::WrongCollection);
+    let data = collection.try_borrow_data()?;
+    let base = BaseCollectionV1::from_bytes(&data).map_err(|_| error!(EscrowError::WrongCollection))?;
+    require!(base.key == mpl_core::types::Key::CollectionV1, EscrowError::WrongCollection);
+    let (seal, _) = Pubkey::find_program_address(&[SEALED_SEED, collection.key.as_ref()], &mpl_core::ID);
+    require_keys_eq!(base.update_authority, seal, EscrowError::CollectionChangeable);
+    require!(base.num_minted == 1 && base.current_size == 1, EscrowError::CollectionNotSingle);
+    check_plugins(&data, base.len(), true, allowed_collection_plugin)
+}
+
+/// Walks the plugin registry after the base account. `sealed` lets a plugin keep the sealed update authority.
+fn check_plugins(data: &[u8], base_len: usize, sealed: bool, allowed: fn(u8) -> bool) -> Result<()> {
+    if data.len() <= base_len {
+        return Ok(());
+    }
+    let header = PluginHeaderV1::from_bytes(&data[base_len..]).map_err(|_| error!(EscrowError::BadTitle))?;
+    let at = usize::try_from(header.plugin_registry_offset).map_err(|_| error!(EscrowError::BadTitle))?;
+    require!(at < data.len(), EscrowError::BadTitle);
+    let registry = PluginRegistryV1Safe::from_bytes(&data[at..]).map_err(|_| error!(EscrowError::BadTitle))?;
+    require!(registry.external_registry.is_empty(), EscrowError::TitleHasHooks);
+    for record in registry.registry.iter() {
+        require!(allowed(record.plugin_type), EscrowError::TitleHasDelegate);
+        let locked = record.authority == PluginAuthority::None || (sealed && record.authority == PluginAuthority::UpdateAuthority);
+        require!(locked, EscrowError::TitleChangeable);
+        if record.plugin_type == PluginType::Royalties as u8 {
+            let start = usize::try_from(record.offset).map_err(|_| error!(EscrowError::BadTitle))?.checked_add(1).ok_or(EscrowError::Overflow)?;
+            require!(start <= data.len(), EscrowError::BadTitle);
+            let royalties = Royalties::deserialize(&mut &data[start..]).map_err(|_| error!(EscrowError::BadTitle))?;
+            require!(royalties.rule_set == RuleSet::None, EscrowError::TitleHasHooks);
         }
     }
     Ok(())
@@ -696,6 +796,17 @@ fn allowed_plugin(kind: u8) -> bool {
     kind == PluginType::Royalties as u8
         || kind == PluginType::Attributes as u8
         || kind == PluginType::Edition as u8
+        || kind == PluginType::AddBlocker as u8
+        || kind == PluginType::ImmutableMetadata as u8
+        || kind == PluginType::VerifiedCreators as u8
+        || kind == PluginType::Autograph as u8
+}
+
+/// Collection plugins reach every asset in it. Only ones that cannot move, freeze, burn, or update a title pass.
+fn allowed_collection_plugin(kind: u8) -> bool {
+    kind == PluginType::MasterEdition as u8
+        || kind == PluginType::Royalties as u8
+        || kind == PluginType::Attributes as u8
         || kind == PluginType::AddBlocker as u8
         || kind == PluginType::ImmutableMetadata as u8
         || kind == PluginType::VerifiedCreators as u8
@@ -743,8 +854,9 @@ pub struct Deposit<'info> {
     pub asset: UncheckedAccount<'info>,
     /// CHECK: The permanent record. Only its owner program is checked; the app checks its contents.
     pub record: UncheckedAccount<'info>,
+    /// The token the price is in.
     pub mint: InterfaceAccount<'info, Mint>,
-    /// CHECK: DBC pool, checked in `read_pool`.
+    /// CHECK: DBC pool, checked in `read_pool` against `coin`.
     pub pool: UncheckedAccount<'info>,
     #[account(
         init,
@@ -758,6 +870,8 @@ pub struct Deposit<'info> {
     #[account(address = mpl_core::ID)]
     pub core_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: The title's coin. Only its address is used: it has to be the pool's base mint (`read_pool`).
+    pub coin: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1002,7 +1116,7 @@ pub enum EscrowError {
     BadTitle,
     #[msg("Only the title's owner can deposit it.")]
     NotOwner,
-    #[msg("The title can still be changed. Its update authority and every plugin authority must be None.")]
+    #[msg("The title can still be changed. Its update authority must be None or its sealed collection, and every plugin authority must be None.")]
     TitleChangeable,
     #[msg("The title has a plugin that could move, burn, or freeze it.")]
     TitleHasDelegate,
@@ -1052,4 +1166,12 @@ pub enum EscrowError {
     PayoutTooBig,
     #[msg("A payout wallet or its token account is wrong.")]
     BadPayout,
+    #[msg("The title belongs to a collection. Pass that collection.")]
+    WrongCollection,
+    #[msg("The title's collection can still be changed. Its update authority must be the sealed address.")]
+    CollectionChangeable,
+    #[msg("The title's collection has to hold only this title.")]
+    CollectionNotSingle,
+    #[msg("Wrapped SOL cannot be burned. A sale priced in SOL has to have a burn of 0.")]
+    NativeBurn,
 }
