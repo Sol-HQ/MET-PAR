@@ -955,6 +955,10 @@ export type TitleRead = {
   collection: string | null;
   edition: number | null;
   collectionSealed: boolean;
+  /** Display only: the collection's on-chain name, when the collection account was read. */
+  collectionName: string | null;
+  /** Display only: Core royalties in basis points, from the title's or its collection's Royalties plugin. */
+  royaltyBasisPoints: number | null;
 };
 
 const NO_TITLE: TitleRead = {
@@ -968,6 +972,8 @@ const NO_TITLE: TitleRead = {
   collection: null,
   edition: null,
   collectionSealed: false,
+  collectionName: null,
+  royaltyBasisPoints: null,
 };
 
 /** `clean` means no plugin lets anyone move, burn, or freeze the title, the same rule the escrow enforces. */
@@ -992,6 +998,8 @@ export async function readTitle(endpoint: string, asset: string): Promise<TitleR
     const edition = found.edition ? Number(found.edition.number) : null;
     let collection: string | null = null;
     let collectionSealed = false;
+    let collectionName: string | null = null;
+    let royaltyBasisPoints: number | null = typeof found.royalties?.basisPoints === "number" ? found.royalties.basisPoints : null;
     if (found.updateAuthority.type === "Collection" && found.updateAuthority.address) {
       collection = found.updateAuthority.address.toString();
       try {
@@ -1001,6 +1009,9 @@ export async function readTitle(endpoint: string, asset: string): Promise<TitleR
           Number(parent.masterEdition?.maxSupply ?? 0) === 1 &&
           Number(parent.numMinted) === 1 &&
           edition === 1;
+        // Display only, and written so it cannot throw: a failure here must never flip collectionSealed above.
+        collectionName = typeof parent.name === "string" && parent.name.trim() ? parent.name.trim() : null;
+        if (royaltyBasisPoints === null && typeof parent.royalties?.basisPoints === "number") royaltyBasisPoints = parent.royalties.basisPoints;
       } catch {
         collectionSealed = false;
       }
@@ -1017,6 +1028,8 @@ export async function readTitle(endpoint: string, asset: string): Promise<TitleR
       collection,
       edition,
       collectionSealed,
+      collectionName,
+      royaltyBasisPoints,
     };
   } catch {
     return NO_TITLE;
