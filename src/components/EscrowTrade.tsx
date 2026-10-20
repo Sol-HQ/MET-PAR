@@ -11,6 +11,7 @@ import { useCluster } from "@/lib/cluster";
 import { explorerTx, type ClusterName } from "@/lib/constants";
 import { landingCost, prepareTransaction, sendPrepared } from "@/lib/send";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/tensor-sale";
+import { escrowOpenLine } from "@/lib/escrow-card";
 import { escrowBidInstruction, escrowBuyInstruction, escrowSetPriceInstruction, markGraduatedInstruction, SALE_PROGRAM_FEE_PERCENT, type SaleMode } from "@/lib/title";
 import { openTokenAccount, paymentInstructions, planTokenPayment, type TokenPayPlan } from "@/lib/token-pay";
 
@@ -176,7 +177,7 @@ export function EscrowTrade({
     const prepared = await prepareTransaction(connection, publicKey, transaction, []);
     confirm("Buy this title", [
       `You pay ${showAmount(reserve)} ${symbol}.`,
-      `${showAmount(parts.burned)} ${symbol} is burned.`,
+      ...(parts.burned > BigInt(0) ? [`${showAmount(parts.burned)} ${symbol} is burned.`] : []),
       ...named.map((row) => `${showAmount(row.amount)} ${symbol} goes to ${row.wallet.toBase58()}.`),
       `${showAmount(creatorPaid)} ${symbol} goes to the creator.`,
       `${showAmount(parts.fee)} ${symbol} goes to the PAR program.`,
@@ -250,6 +251,8 @@ export function EscrowTrade({
     ], prepared.transaction);
   }
 
+  const isCreator = publicKey?.toBase58() === creator;
+
   if (!program) return <p className="note">The escrow is not on this network.</p>;
   if (cluster !== pageCluster) {
     return <p className="error">Switch the network toggle to {pageCluster === "devnet" ? "Devnet" : "Mainnet"} before signing on this page.</p>;
@@ -261,30 +264,40 @@ export function EscrowTrade({
       <h2>Price on this title</h2>
       <p className="note">
         The price now is {showAmount(reserve)} {symbol}.
-        {sale === "auction"
-          ? " On an auction this number is the reserve. The creator can change it until the first bid. A bid locks it."
-          : " On a fixed price the creator can change it until a buyer pays."}
+        {sale === "auction" ? " On an auction this number is the reserve." : ""}
       </p>
-      {leading > BigInt(0) ? (
-        <p className="note">A bid of {showAmount(leading)} {symbol} is in, so this price stays.</p>
-      ) : publicKey?.toBase58() === creator ? (
-        <label>
-          New price in {symbol}
-          <input value={nextPrice} onChange={(event) => setNextPrice(event.target.value)} inputMode="decimal" />
-          <button type="button" className="solid" disabled={busy} onClick={() => void changePrice().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The price was not changed."))}>
-            {busy ? "Working…" : "Change the price"}
-          </button>
-        </label>
-      ) : (
-        <p className="note">Connect the creator wallet to change this price. The box appears for that wallet.</p>
-      )}
+      {/* Changing the price is the creator's control. Buyers and visitors see nothing about it. */}
+      {isCreator && leading > BigInt(0) ? (
+        <p className="note">A bid of {showAmount(leading)} {symbol} is in, so you can no longer change this price.</p>
+      ) : isCreator ? (
+        <>
+          <p className="note">
+            {sale === "auction"
+              ? "You listed this title. You can change the reserve until the first bid. A bid locks it."
+              : "You listed this title. You can change the price until a buyer pays."}
+          </p>
+          <label>
+            New price in {symbol}
+            <input value={nextPrice} onChange={(event) => setNextPrice(event.target.value)} inputMode="decimal" />
+            <button type="button" className="solid" disabled={busy} onClick={() => void changePrice().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The price was not changed."))}>
+              {busy ? "Working…" : "Change the price"}
+            </button>
+          </label>
+        </>
+      ) : null}
       {needsMark ? (
         <p className="note">The curve is full. Graduation has not been marked, so the sale wait has not started.</p>
       ) : open ? (
         <p className="note">
           {sale === "auction"
             ? `The auction is open. The reserve is ${showAmount(reserve)} ${symbol}.${leading > BigInt(0) ? ` The bid is ${showAmount(leading)} ${symbol}.` : ""}`
-            : `The sale is open at ${showAmount(reserve)} ${symbol}. ${showAmount(parts.burned)} is burned, ${showAmount(parts.fee)} goes to the PAR program, ${payees.map((row) => `${showAmount(BigInt(row.amount))} goes to ${row.wallet}`).join(", ")}${payees.length ? ", and " : ""}${showAmount(creatorPaid)} goes to the creator.`}
+            : escrowOpenLine({
+                price: `${showAmount(reserve)} ${symbol}`,
+                burned: parts.burned > BigInt(0) ? `${showAmount(parts.burned)} ${symbol}` : "",
+                fee: showAmount(parts.fee),
+                payees: payees.map((row) => ({ amount: showAmount(BigInt(row.amount)), wallet: row.wallet })),
+                creator: showAmount(creatorPaid),
+              })}
         </p>
       ) : (
         <p className="note">The buy stays closed until the sale wait ends.</p>

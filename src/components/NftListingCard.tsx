@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { explorerAccount, type ClusterName } from "@/lib/constants";
 import { shortAddress } from "@/lib/format";
 
-export type NftTrait = { type: string; value: string };
+/** A trait chip. With `address`, the value links to that account on the explorer. */
+export type NftTrait = { type: string; value: string; address?: string };
 export type NftDetail = { label: string; value: string; address?: string };
 export type NftPrice = { label: string; amount: string; symbol: string; note?: string };
 
@@ -119,7 +120,15 @@ export function NftListingCard({
             {traits.map((trait) => (
               <li key={`${trait.type}:${trait.value}`}>
                 <span>{trait.type}</span>
-                <strong>{trait.value}</strong>
+                <strong>
+                  {trait.address ? (
+                    <a href={explorerAccount(trait.address, cluster)} target="_blank" rel="noreferrer" title={trait.address}>
+                      {trait.value}
+                    </a>
+                  ) : (
+                    trait.value
+                  )}
+                </strong>
               </li>
             ))}
           </ul>
