@@ -20,7 +20,7 @@ import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
-import { escrowCardTraits, escrowSaleLine, mintedForTensor, SIGNED_FOR_TENSOR_NOTE } from "@/lib/escrow-card";
+import { escrowBurnLine, escrowCardTraits, escrowSaleLine, mintedForTensor, rwaName, shipAdvice, SIGNED_FOR_TENSOR_NOTE } from "@/lib/escrow-card";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
 import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, priceRuleAllows, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titlePriceRule, titleStatus } from "@/lib/title";
 
@@ -532,7 +532,35 @@ export default async function SalePage({
                 note: auction ? "Bids run inside the escrow program." : undefined,
               }
         }
-        traits={escrowCardTraits(title.attributes, listing)}
+        traits={escrowCardTraits({
+          name: rwaName(record.name, title.name),
+          edition: title.edition,
+          editionOfOne: title.collectionSealed && title.edition === 1,
+          coin: noCoin
+            ? null
+            : {
+                name: sheet.record?.token?.name || snapshot?.name,
+                symbol: record.attributes.symbol || snapshot?.symbol,
+                mint: record.attributes.mint,
+              },
+          soldIn: [listingPay.symbol],
+          sale: listing.sale,
+          burn:
+            !noCoin && listing.burnPercent > 0
+              ? {
+                  percent: listing.burnPercent,
+                  // The escrow program's own split: price × burn basis points / 10000 (EscrowTrade split()).
+                  amount: formatTokenAmount((listing.price * BigInt(Math.round(listing.burnPercent * 100))) / BigInt(10000), listingPay.decimals),
+                  symbol: listingPay.symbol,
+                }
+              : null,
+          opensAt,
+          endsAt: listing.endsAt,
+          now,
+          live: forSaleNow,
+          titleAttributes: title.attributes,
+          recordAttributes: record.attributes,
+        })}
         details={[
           { label: "Title (NFT)", value: shortAddress(address), address },
           ...(title.collection
@@ -637,7 +665,7 @@ export default async function SalePage({
             {handoffDays ? (
               <Fold end lead="Read the claim facts">
                 <p>{goodFaithDelivery(handoffDays)}</p>
-                <p>{SHIP_ADVICE}</p>
+                <p>{escrowCard || status?.tensor ? shipAdvice(escrowCard ? "escrow" : "tensor") : SHIP_ADVICE}</p>
               </Fold>
             ) : null}
           </div>
@@ -665,7 +693,11 @@ export default async function SalePage({
         <>
           <h2>The token</h2>
           <p>
-            {tokenSentence}
+            {escrowCard && listing && listingPay
+              ? burnLine
+                ? tokenSentence.replace(burnLine, escrowBurnLine(listing.burnPercent, listingPay.symbol))
+                : `${tokenSentence} ${escrowBurnLine(listing.burnPercent, listingPay.symbol)}`
+              : tokenSentence}
             {pool ? (
               <>
                 {" "}
