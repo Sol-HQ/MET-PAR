@@ -115,10 +115,16 @@ export function transactionCarriesJitoTip(raw: Uint8Array): boolean {
   }
 }
 
-export function landingCost(prepared: PreparedTransaction): string {
+/**
+ * `feeLamports` replaces `prepared.feeLamports` in the fee line. Pass walletFeeLamports(), the fee of the copy the
+ * wallet signs. Null says the fee could not be read instead of showing a number that is not the one paid. Callers that
+ * pass nothing get exactly the line they always got.
+ */
+export function landingCost(prepared: PreparedTransaction, feeLamports?: number | null): string {
   const parts: string[] = [];
   if (prepared.rentLamports > 0) parts.push(`Account rent: ${formatLamports(prepared.rentLamports)}`);
-  parts.push(`Network fee: ${formatLamports(prepared.feeLamports)}`);
+  if (feeLamports === null) parts.push("Network fee: could not be read from the network. Your wallet shows it before you approve");
+  else parts.push(`Network fee: ${formatLamports(feeLamports ?? prepared.feeLamports)}`);
   if (prepared.tipLamports > 0) {
     parts.push(
       `Jito tip: ${formatLamports(prepared.tipLamports)}. The tip sits inside this transaction, so it is paid when the transaction lands.`,
@@ -593,6 +599,31 @@ function walletCopy(
     return { transaction: packed, expectedMessage: Uint8Array.from(packed.serializeMessage()), durable: false };
   }
   return { transaction: ready.transaction, expectedMessage: ready.expectedMessage, durable: false };
+}
+
+/** Stands in for the wallet's nonce account when pricing. Same size as any account key, so the packet is the same size. */
+const FEE_NONCE_STAND_IN = new PublicKey(new Uint8Array(32).fill(8));
+
+/**
+ * The network fee of the copy the wallet is asked to sign. `prepared.feeLamports` prices the packet before the send
+ * adds the priority-fee price and, on mainnet, the durable-nonce advance, so it shows only the signature fee. This
+ * builds that copy with walletCopy itself, the same code sendPrepared uses, and asks the RPC to price it. A stand-in
+ * nonce (its value set to the prepared blockhash, so the RPC can price the message) takes the place of the wallet's
+ * nonce account: the fee depends on the signatures and the instructions, not on which nonce account is advanced.
+ * Display only. It changes nothing in `prepared` and nothing is signed or sent. Null when the fee cannot be read.
+ */
+export async function walletFeeLamports(connection: Connection, prepared: PreparedTransaction): Promise<number | null> {
+  const payer = prepared.transaction.feePayer;
+  const cluster = clusterOfEndpoint(connection.rpcEndpoint);
+  if (!payer || !cluster) return null;
+  const nonce = usesDurableNonce(cluster) ? { pubkey: FEE_NONCE_STAND_IN, value: prepared.blockhash } : null;
+  try {
+    const ready = walletCopy(prepared, prepared.blockhash, prepared.lastValidBlockHeight, payer, nonce);
+    const fee = await connection.getFeeForMessage(ready.transaction.compileMessage(), "confirmed");
+    return typeof fee?.value === "number" ? fee.value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Asks for the signature, sends it, and checks the chain over HTTP. A durable nonce does not age out while the wallet is open. */
