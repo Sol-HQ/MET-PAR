@@ -20,14 +20,13 @@ import { formatMoney, shortAddress } from "@/lib/format";
 import { curveSale, loadPool } from "@/lib/load-pool";
 import { RECORD_VAULT, REMOVED_TITLES, readRecord } from "@/lib/record";
 import { readCopy } from "@/lib/record-copy";
+import { escrowCardTraits, escrowSaleLine, mintedForTensor, SIGNED_FOR_TENSOR_NOTE } from "@/lib/escrow-card";
 import { buyerTotal, formatTokenAmount } from "@/lib/tensor-sale";
 import { creatorSalePercent, ESCROW_PROGRAM, goodFaithDelivery, poolPath, priceRuleAllows, readListing, readPayouts, readTitle, saleUrl, SALE_PROGRAM_FEE_PERCENT, SHIP_ADVICE, TENSOR_TAKER_FEE_PERCENT, titlePriceRule, titleStatus } from "@/lib/title";
 
 export const dynamic = "force-dynamic";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-/** Title attributes that are accounts, links, or long terms. They show under Details or the meta sheet, not as traits. */
-const NOT_TRAITS = new Set(["record", "mint", "pool", "creator", "full sheet", "sale page", "sheet sha256", "escrow program", "auction"]);
 
 type Sheet = {
   name?: string;
@@ -533,9 +532,7 @@ export default async function SalePage({
                 note: auction ? "Bids run inside the escrow program." : undefined,
               }
         }
-        traits={Object.entries(title.attributes)
-          .filter(([key, value]) => !NOT_TRAITS.has(key) && value.trim() && value.length <= 48 && !ADDRESS.test(value) && !/^https?:\/\//.test(value))
-          .map(([type, value]) => ({ type, value: value.trim() }))}
+        traits={escrowCardTraits(title.attributes, listing)}
         details={[
           { label: "Title (NFT)", value: shortAddress(address), address },
           ...(title.collection
@@ -597,7 +594,7 @@ export default async function SalePage({
             ? `This is a real-world asset. It is not paired with its own token. A buyer pays in ${symbol}.`
             : `${tokenLabel} is a token. It is not paired with a real-world asset.`}
       </p>
-      {stateLine !== saleLine ? <p className="note">{holderLine} {saleLine}</p> : <p className="note">{holderLine}</p>}
+      {stateLine !== saleLine ? <p className="note">{holderLine} {escrowCard && listing && noCoin ? escrowSaleLine(listing.sale) : saleLine}</p> : <p className="note">{holderLine}</p>}
       {escrowCard ?? (
           <section className="sale-listing">
             <article className="nft-mock-card">
@@ -857,6 +854,7 @@ export default async function SalePage({
       {sheet.record?.title?.promises?.length ? (
         <>
           <p className="eyebrow">What the creator signed</p>
+          {escrowCard && mintedForTensor(title.attributes) ? <p className="note">{SIGNED_FOR_TENSOR_NOTE}</p> : null}
           <ol className="record-lines">
             {sheet.record.title.promises.map((line) => (
               <li key={line}>{line}</li>
