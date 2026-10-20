@@ -9,7 +9,8 @@ import { MainnetGate } from "@/components/MainnetGate";
 import { useCluster } from "@/lib/cluster";
 import { readPayToken, type PayFacts } from "@/lib/coin-read";
 import { WSOL, explorerTx, quoteMintAddress, type ClusterName } from "@/lib/constants";
-import { landingCost, prepareTransaction, sendPrepared, type PreparedTransaction } from "@/lib/send";
+import { formatLamports } from "@/lib/format";
+import { landingCost, prepareTransaction, sendPrepared, walletFeeLamports, type PreparedTransaction } from "@/lib/send";
 import {
   buyOnTensorTransaction,
   buyerTotal,
@@ -17,6 +18,7 @@ import {
   formatTokenAmount,
   listOnTensorInstruction,
   parseTokenAmount,
+  tensorPayoutRent,
 } from "@/lib/tensor-sale";
 import { BURN_COIN_ONLY, CREATOR_BURN_DAYS, TENSOR_TAKER_FEE_PERCENT, burnAllowed } from "@/lib/title";
 import { planTokenPayment } from "@/lib/token-pay";
@@ -154,7 +156,9 @@ export function SaleTrade({
     try {
       const prepared = await prepareTransaction(connection, publicKey, transaction, []);
       if (cluster === "mainnet-beta") {
-        setGate({ title: titleText, lines: [...lines, landingCost(prepared)], prepared, landed: `${titleText}.` });
+        // The fee of the copy the wallet signs (priority price and nonce advance included), not of the bare packet.
+        const walletFee = await walletFeeLamports(connection, prepared);
+        setGate({ title: titleText, lines: [...lines, landingCost(prepared, walletFee)], prepared, landed: `${titleText}.` });
         return;
       }
       if (!signTransaction) return;
@@ -226,6 +230,13 @@ export function SaleTrade({
       );
       return;
     }
+    // Read on this page's network: the payout accounts Tensor would open inside the buy, at the buyer's cost.
+    const payoutRent = await tensorPayoutRent(connection, {
+      title: new PublicKey(title),
+      mint: mintKey,
+      seller: new PublicKey(listing.seller),
+      tokenProgram: plan.tokenProgram,
+    });
     const transaction = buyOnTensorTransaction({
       title: new PublicKey(title),
       mint: mintKey,
@@ -246,7 +257,13 @@ export function SaleTrade({
           ? [`${formatTokenAmount(plan.wrap, listingPay.decimals)} SOL is wrapped into your wrapped-SOL account first, in the same transaction. Tensor is paid from that account.`]
           : []),
         ...(plan.wrappedSol && !plan.existed ? ["The wrapped-SOL account opened for this buy is closed after it, so its rent comes back."] : []),
-        "If the creator or Tensor's fee vault has no account for this token yet, Tensor opens it inside the buy and your wallet pays its rent (about 0.003 SOL in a mainnet test). That rent is not in the account rent line below.",
+        ...(payoutRent === null
+          ? ["If the creator or Tensor's fee vault has no account for this token yet, Tensor opens it inside the buy and your wallet pays its rent. That rent is not in the lines below."]
+          : payoutRent.accounts > 0
+            ? [
+                `Tensor opens ${payoutRent.seller && payoutRent.feeVault ? "the creator's and Tensor's fee vault's token accounts" : payoutRent.seller ? "the creator's token account" : "Tensor's fee vault's token account"} for this token inside the buy. Your wallet pays the rent: ${formatLamports(payoutRent.lamports)}. That rent is not in the lines below.`,
+              ]
+            : []),
         "The title moves to your wallet.",
       ],
       transaction,

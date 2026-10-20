@@ -196,6 +196,47 @@ export async function wrappedSolShortfall(connection: Connection, mint: PublicKe
   return total > held ? total - held : BigInt(0);
 }
 
+/**
+ * The token accounts buy_core_spl pays into: the seller's and Tensor's fee vault's, for the listing's currency. The
+ * same addresses buyOnTensorInstruction names. When one does not exist yet, Tensor opens it inside the buy and the
+ * buyer pays its rent.
+ */
+export function tensorPayoutAccounts(input: { title: PublicKey; mint: PublicKey; seller: PublicKey; tokenProgram?: PublicKey }): PublicKey[] {
+  const tokenProgram = input.tokenProgram ?? TOKEN_PROGRAM_ID;
+  const feeVault = feeVaultAddress(tensorListAddress(input.title));
+  return [
+    getAssociatedTokenAddressSync(input.mint, input.seller, false, tokenProgram),
+    getAssociatedTokenAddressSync(input.mint, feeVault, true, tokenProgram),
+  ];
+}
+
+/** SPL Token account size. A Token-2022 account's size depends on the mint's extensions, so it is not priced here. */
+const SPL_TOKEN_ACCOUNT_BYTES = 165;
+
+/**
+ * Rent the buyer pays for the payout accounts Tensor opens in this buy, read on this connection's network: which of
+ * them are missing now, times the rent-exempt minimum for an SPL Token account. Null when it cannot be read, or for a
+ * currency that is not an SPL Token mint, so nothing is shown rather than a guess. Display only.
+ */
+export async function tensorPayoutRent(
+  connection: Connection,
+  input: { title: PublicKey; mint: PublicKey; seller: PublicKey; tokenProgram?: PublicKey },
+): Promise<{ seller: boolean; feeVault: boolean; accounts: number; lamports: number } | null> {
+  if (!(input.tokenProgram ?? TOKEN_PROGRAM_ID).equals(TOKEN_PROGRAM_ID)) return null;
+  try {
+    const infos = await connection.getMultipleAccountsInfo(tensorPayoutAccounts(input), "confirmed");
+    if (infos.length !== 2) return null;
+    const seller = !infos[0];
+    const feeVault = !infos[1];
+    const accounts = Number(seller) + Number(feeVault);
+    if (accounts === 0) return { seller, feeVault, accounts, lamports: 0 };
+    const each = await connection.getMinimumBalanceForRentExemption(SPL_TOKEN_ACCOUNT_BYTES, "confirmed");
+    return Number.isFinite(each) && each > 0 ? { seller, feeVault, accounts, lamports: accounts * each } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The creator takes the listing down. The title returns to the creator's wallet. */
 export function delistOnTensorInstruction(input: {
   title: PublicKey;
