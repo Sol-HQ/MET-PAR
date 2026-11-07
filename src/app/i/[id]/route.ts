@@ -10,9 +10,9 @@ const PICTURE_HEADERS = {
 } as const;
 
 /** Example Devnet cards keep a solid copy in the repo so they never depend on Blob or Arweave. */
-async function readBundledPicture(id: string): Promise<Buffer | null> {
+async function readBundledPicture(id: string): Promise<Uint8Array | null> {
   try {
-    return await readFile(path.join(process.cwd(), "public", "devnet", `${id}.jpg`));
+    return new Uint8Array(await readFile(path.join(process.cwd(), "public", "devnet", `${id}.jpg`)));
   } catch {
     return null;
   }
@@ -23,7 +23,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!/^[a-f0-9]{12}$/.test(id)) return new Response("Not found", { status: 404 });
   const stored = await readPicture(id).catch(() => null);
   if (stored) {
-    return new Response(Buffer.from(stored), { headers: PICTURE_HEADERS });
+    return new Response(new Uint8Array(stored), { headers: PICTURE_HEADERS });
   }
   const bundled = await readBundledPicture(id);
   if (bundled) {
