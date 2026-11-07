@@ -215,6 +215,9 @@ export function Desk() {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signMessage } = useClusterWallet();
   const [preset, setPreset] = useState<"meme" | "starter" | "solid" | "deep" | "thin" | "fixed" | "custom">("starter");
+  useEffect(() => {
+    if (cluster === "mainnet-beta" && preset === "thin") setPreset("starter");
+  }, [cluster, preset]);
   const [onPar, setOnPar] = useState(true);
   const [supplyText, setSupplyText] = useState(String(BILLION_SUPPLY));
   const [openText, setOpenText] = useState("0.00001");
@@ -1460,10 +1463,12 @@ export function Desk() {
         ) : null}
         <p className="note">
           {quoteKind === "sol"
-            ? `Buyers pay SOL. 0.002 and 0.0002 are fractions of one SOL. ${solUsd > 0 ? `One SOL is about ${formatDollars(solUsd)} right now.` : "The dollar line uses the live SOL price."} ${cluster === "devnet" ? "Practice SOL is not worth that. The dollar line uses the real-network price." : ""} Thin test locks 1 SOL, which a practice wallet can fill from the faucet. On the real network, Meteora opens a SOL curve by itself at 10 SOL.`
+            ? `Buyers pay SOL. 0.002 and 0.0002 are fractions of one SOL. ${solUsd > 0 ? `One SOL is about ${formatDollars(solUsd)} right now.` : "The dollar line uses the live SOL price."} ${cluster === "devnet" ? "Practice SOL is not worth that. The dollar line uses the real-network price. Thin test locks 1 SOL, which a practice wallet can fill from the faucet." : "On the real network, Meteora opens a SOL curve by itself at 10 SOL."}`
             : quoteKind === "other"
               ? `Buyers pay ${unit}. The amounts on the cards are ${unit}, not dollars. On the real network, Meteora opens a badged stock quote by itself once the quote collected is worth at least $750.`
-              : "Buyers pay USDC. Thin test locks $750. On the real network, that is the smallest USDC curve Meteora opens by itself. Practice USDC from Circle is about $20, so a $750 curve cannot be filled from that faucet."}
+              : cluster === "devnet"
+                ? "Buyers pay USDC. Thin test locks $750. On the real network, that is the smallest USDC curve Meteora opens by itself. Practice USDC from Circle is about $20, so a $750 curve cannot be filled from that faucet."
+                : "Buyers pay USDC. On the real network, Meteora opens a USDC curve by itself once it has collected at least $750."}
         </p>
         <div className="presets launch" role="group" aria-label="Launch">
           <button
@@ -1509,8 +1514,6 @@ export function Desk() {
               </span>
             </button>
           ))}
-        </div>
-        <div className="presets launch" role="group" aria-label="Par fixed, test, and custom">
           <button
             type="button"
             className={preset === "fixed" ? "preset selected" : "preset"}
@@ -1533,6 +1536,7 @@ export function Desk() {
                   : "One billion tokens. About 467 million lock with about $28,000."}
             </span>
           </button>
+          {cluster === "devnet" ? (
           <button
             type="button"
             className={preset === "thin" ? "preset selected" : "preset"}
@@ -1557,6 +1561,7 @@ export function Desk() {
                     : "A small $750 curve. That is the smallest size Meteora opens by itself on the real network. Turn PAR on for the shelf."}
             </span>
           </button>
+          ) : null}
           <button type="button" className={preset === "custom" ? "preset selected" : "preset"} aria-pressed={preset === "custom"} onClick={() => setPreset("custom")}>
             <span className="preset-kicker">Custom</span>
             <strong>Your supply and your prices</strong>
@@ -1610,7 +1615,9 @@ export function Desk() {
                 {preset === "meme"
                   ? "Meme keeps the climb. Pick another card for the shelf."
                   : onPar
-                    ? `PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks.`
+                    ? cluster === "devnet"
+                      ? "PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks."
+                      : "PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, and Deep, the amount on the card is what locks."
                     : preset === "custom"
                       ? "PAR is off. The price climbs from your opening price to your graduation price. Turn this on to hold the opening near par."
                       : `PAR is off. The price climbs from the first token to the last, and the ${unit} on the selected card is what locks. Turn this on to hold the opening near par.`}
