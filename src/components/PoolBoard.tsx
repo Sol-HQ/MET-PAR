@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { LockReady } from "@/components/CurveHandoff";
 import { ListingActions } from "@/components/ListingActions";
 import { useCluster } from "@/lib/cluster";
-import { ObjectPicture } from "@/components/AssetOnPool";
+import { devnetStandIn, ObjectPicture } from "@/components/AssetOnPool";
 import { objectPairing, titleSentence, tokenPairing } from "@/lib/asset-on-pool";
 import { HIDDEN_POOLS, meteoraPoolUrl, type ClusterName } from "@/lib/constants";
 import { formatDollars, formatMoney } from "@/lib/format";
@@ -100,7 +100,12 @@ function ListingCard({
   const ready = card.stage === "lock";
   return (
     <article className={ready ? "card ready-call" : "card"}>
-      <ObjectPicture src={card.image} alt={card.name} framed />
+      <ObjectPicture
+        src={card.image}
+        alt={card.name}
+        framed
+        fallback={cluster === "devnet" ? devnetStandIn(card.pool || card.mint || card.name) : ""}
+      />
       <Link href={sharePath} className="card-link">
         <h3>
           {card.name} {card.symbol ? <span>{card.symbol}</span> : null}

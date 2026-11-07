@@ -18,18 +18,28 @@ type AssetCard = {
   titleHref: string;
 };
 
+/** A practice token whose picture is gone gets one of these, and keeps that same one. */
+export function devnetStandIn(seed: string): string {
+  let n = 0;
+  for (let i = 0; i < seed.length; i += 1) n = (n + seed.charCodeAt(i)) % 2;
+  return n === 0 ? "/devnet/default-pirate.jpg" : "/devnet/default-coconut.jpg";
+}
+
 export function ObjectPicture({
   src,
   alt,
   quiet = false,
   framed = false,
   wide = false,
+  fallback = "",
 }: {
   src: string;
   alt: string;
   quiet?: boolean;
   framed?: boolean;
   wide?: boolean;
+  /** Shown when the real picture is missing or the host does not answer. */
+  fallback?: string;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [missing, setMissing] = useState(!src);
@@ -37,9 +47,14 @@ export function ObjectPicture({
     setMissing(!src);
     setAttempt(0);
   }, [src]);
+  const shot = framed ? "card-shot" : wide ? "sheet-picture" : "object-shot";
+  if ((!src || missing) && fallback) {
+    return <img className={shot} src={fallback} alt={alt} />;
+  }
   if (!src || missing) {
+    if (quiet) return null;
     if (framed) return <div className="card-shot" />;
-    return quiet ? null : <p className="note">No picture is stored for this object.</p>;
+    return <p className="note">No picture is stored for this object.</p>;
   }
   const shown = attempt > 0 ? `${src}${src.includes("?") ? "&" : "?"}try=${attempt}` : src;
   return (
