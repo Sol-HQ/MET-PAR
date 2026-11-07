@@ -9,6 +9,13 @@ const PICTURE_HEADERS = {
   "cache-control": "public, max-age=31536000, immutable",
 } as const;
 
+/** Copy into a fresh ArrayBuffer-backed view. Node Buffer/Uint8Array shapes fail the DOM BodyInit check. */
+function pictureBody(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const body = new Uint8Array(bytes.byteLength);
+  body.set(bytes);
+  return body;
+}
+
 /** Example Devnet cards keep a solid copy in the repo so they never depend on Blob or Arweave. */
 async function readBundledPicture(id: string): Promise<Uint8Array | null> {
   try {
@@ -23,11 +30,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!/^[a-f0-9]{12}$/.test(id)) return new Response("Not found", { status: 404 });
   const stored = await readPicture(id).catch(() => null);
   if (stored) {
-    return new Response(new Blob([new Uint8Array(stored)], { type: "image/jpeg" }), { headers: PICTURE_HEADERS });
+    return new Response(pictureBody(stored), { headers: PICTURE_HEADERS });
   }
   const bundled = await readBundledPicture(id);
   if (bundled) {
-    return new Response(new Blob([bundled], { type: "image/jpeg" }), { headers: PICTURE_HEADERS });
+    return new Response(pictureBody(bundled), { headers: PICTURE_HEADERS });
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN) return new Response("Not found", { status: 404 });
   try {
