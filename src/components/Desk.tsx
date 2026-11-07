@@ -1477,7 +1477,10 @@ export function Desk() {
             aria-pressed={preset === "meme"}
             onClick={applyMeme}
           >
-            <span className="preset-kicker">Meme</span>
+            <span className="preset-head">
+              <span className="preset-kicker">Meme</span>
+              <span className="preset-stamp unavailable">PAR is unavailable</span>
+            </span>
             <strong>
               {quoteKind === "sol"
                 ? "10 to 50 SOL"
@@ -1486,7 +1489,7 @@ export function Desk() {
                   : "$10,000 to $50,000"}
             </strong>
             <span>
-              One billion tokens. The climb stays one shape. The slider sets how much locks. The fee starts at 10% and falls on a curve to 1% over 48 hours, then 1% after the lock. A 5% bag unlocks when you sign the lock. Change the fee, the bag, or the claims below.
+              PAR is unavailable here. The switch cannot turn it on. One billion tokens. The price rises the whole way. The slider sets how much locks. The fee starts at 10% and falls on a curve to 1% over 48 hours, then 1% after the lock. A 5% bag unlocks when you sign the lock.
             </span>
           </button>
           {(quoteKind === "sol" ? SOL_CLIMB_PRESETS : CLIMB_PRESETS).map((item) => (
@@ -1497,7 +1500,10 @@ export function Desk() {
               aria-pressed={preset === item.name.toLowerCase()}
               onClick={() => setPreset(item.name.toLowerCase() as "starter" | "solid" | "deep")}
             >
-              <span className="preset-kicker">{item.name}</span>
+              <span className="preset-head">
+                <span className="preset-kicker">{item.name}</span>
+                <span className={onPar ? "preset-stamp" : "preset-stamp off"}>{onPar ? "PAR is on" : "PAR is off"}</span>
+              </span>
               <strong>
                 {quoteKind === "sol"
                   ? `${grouped(item.raise)} SOL locked`
@@ -1507,10 +1513,10 @@ export function Desk() {
               </strong>
               <span>
                 {onPar
-                  ? "PAR is on. One billion tokens. The prices below are the ones that lock this amount. The sliders move the price. The lock stays."
+                  ? "One billion tokens. PAR is on. Most of the sale stays within 10% of one price, then the last slice walks up to the lock. The switch below can turn it off, and the price then climbs the whole way. The sliders move the price. The lock stays the amount on this card."
                   : quoteKind === "other"
-                    ? `One billion tokens. The price climbs from the open to the pool and locks about ${grouped(item.raise)} ${unit}.`
-                    : item.detail}
+                    ? `PAR is off. One billion tokens. The price climbs the whole way and locks about ${grouped(item.raise)} ${unit}. The switch below can turn PAR on. Then most of the sale stays within 10% of one price, and the lock stays this amount.`
+                    : `PAR is off. ${item.detail} The switch below can turn PAR on. Then most of the sale stays within 10% of one price, and the lock stays this amount.`}
               </span>
             </button>
           ))}
@@ -1520,7 +1526,10 @@ export function Desk() {
             aria-pressed={preset === "fixed"}
             onClick={() => setPreset("fixed")}
           >
-            <span className="preset-kicker">Par fixed</span>
+            <span className="preset-head">
+              <span className="preset-kicker">Par fixed</span>
+              <span className="preset-stamp">PAR is on</span>
+            </span>
             <strong>
               {quoteKind === "sol"
                 ? "0.00005 SOL to 0.00006 SOL"
@@ -1530,10 +1539,10 @@ export function Desk() {
             </strong>
             <span>
               {quoteKind === "sol"
-                ? "One billion tokens. About 467 million lock with about 27,995 SOL. That is not a small test."
+                ? "One billion tokens. About 467 million lock with about 27,995 SOL. That is not a small test. PAR stays on. There is no switch. Most of the sale stays within 10% of the opening price, then the last slice walks up to the pool. The prices do not move."
                 : quoteKind === "other"
-                  ? `One billion tokens. About 467 million lock with about 28,000 ${unit}.`
-                  : "One billion tokens. About 467 million lock with about $28,000."}
+                  ? `One billion tokens. About 467 million lock with about 28,000 ${unit}. PAR stays on. There is no switch. Most of the sale stays within 10% of the opening price, then the last slice walks up to the pool. The prices do not move.`
+                  : "One billion tokens. About 467 million lock with about $28,000. PAR stays on. There is no switch. Most of the sale stays within 10% of the opening price, then the last slice walks up to the pool. The prices do not move."}
             </span>
           </button>
           {cluster === "devnet" ? (
@@ -1543,7 +1552,10 @@ export function Desk() {
             aria-pressed={preset === "thin"}
             onClick={() => setPreset("thin")}
           >
-            <span className="preset-kicker">Thin test</span>
+            <span className="preset-head">
+              <span className="preset-kicker">Thin test</span>
+              <span className={onPar ? "preset-stamp" : "preset-stamp off"}>{onPar ? "PAR is on" : "PAR is off"}</span>
+            </span>
             <strong>
               {quoteKind === "sol"
                 ? "1,000,000,000 tokens, 1 SOL locked"
@@ -1553,19 +1565,26 @@ export function Desk() {
             </strong>
             <span>
               {onPar
-                ? "PAR is on. The prices below are the ones that lock this amount. The sliders move the price. The lock stays."
+                ? "A practice curve. PAR is on. Most of the sale stays within 10% of one price, then the last slice walks up to the lock. The switch below can turn it off, and the price then climbs the whole way. The sliders move the price. The lock stays the amount on this card."
                 : quoteKind === "sol"
-                  ? "A 1 SOL curve. A practice wallet can fill it. On the real network this is under 10 SOL, so someone signs once to open the trading pool. Turn PAR on for the shelf."
+                  ? "PAR is off. A 1 SOL climb. A practice wallet can fill it. On the real network this is under 10 SOL, so someone signs once to open the trading pool. The switch below can turn PAR on. Then most of the sale stays within 10% of one price, and the lock stays 1 SOL."
                   : quoteKind === "other"
-                    ? `A 750 ${unit} curve. On the real network, Meteora opens a badged stock quote by itself once that quote is worth at least $750. Turn PAR on for the shelf.`
-                    : "A small $750 curve. That is the smallest size Meteora opens by itself on the real network. Turn PAR on for the shelf."}
+                    ? `PAR is off. A 750 ${unit} climb. On the real network, Meteora opens a badged stock quote by itself once that quote is worth at least $750. The switch below can turn PAR on. Then most of the sale stays within 10% of one price, and the lock stays this amount.`
+                    : "PAR is off. A $750 climb. That is the smallest size Meteora opens by itself on the real network. The switch below can turn PAR on. Then most of the sale stays within 10% of one price, and the lock stays $750."}
             </span>
           </button>
           ) : null}
           <button type="button" className={preset === "custom" ? "preset selected" : "preset"} aria-pressed={preset === "custom"} onClick={() => setPreset("custom")}>
-            <span className="preset-kicker">Custom</span>
-            <strong>Your supply and your prices</strong>
-            <span>{onPar ? "PAR is on. Type the supply and the two prices. A rejected number turns red." : "PAR is off. The price climbs from your opening price to your graduation price."}</span>
+            <span className="preset-head">
+              <span className="preset-kicker">Custom</span>
+              <span className={onPar ? "preset-stamp" : "preset-stamp off"}>{onPar ? "PAR is on" : "PAR is off"}</span>
+            </span>
+            <strong>Open supply and open prices</strong>
+            <span>
+              {onPar
+                ? "This is the open card. You type the supply and both prices. PAR is on, so those numbers have to be a shelf. Most of the sale stays within 10% of par, and the pool price stays above that band and at most double par. A number that does not fit turns red, and Review create stays closed. The switch below can turn PAR off. Then the same boxes take any climb Meteora will build."
+                : "This is the open card. You type the supply, the opening price, and the graduation price. PAR is off, so any pair Meteora's curve will build is allowed, as long as the price rises. A number the curve cannot hold turns red, and Review create stays closed. The switch below can turn PAR on. Then the same numbers have to fit a shelf."}
+            </span>
           </button>
         </div>
         <CurveSketch chart={chart} />
@@ -1613,14 +1632,14 @@ export function Desk() {
               <strong>Keep the opening on par</strong>
               <span>
                 {preset === "meme"
-                  ? "Meme keeps the climb. Pick another card for the shelf."
-                  : onPar
-                    ? cluster === "devnet"
-                      ? "PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, Deep, and Thin, the amount on the card is what locks."
-                      : "PAR is on. Most tokens sold to buyers stay within 10% of par. On Starter, Solid, and Deep, the amount on the card is what locks."
-                    : preset === "custom"
-                      ? "PAR is off. The price climbs from your opening price to your graduation price. Turn this on to hold the opening near par."
-                      : `PAR is off. The price climbs from the first token to the last, and the ${unit} on the selected card is what locks. Turn this on to hold the opening near par.`}
+                  ? "PAR is unavailable here. This card keeps the climb."
+                  : preset === "custom"
+                    ? onPar
+                      ? "PAR is on. The supply and the two prices have to fit a shelf. Most tokens sold to buyers stay within 10% of par, and the pool price stays at most double par. Turn this off and the same boxes take any climb Meteora will build."
+                      : "PAR is off. The supply and the two prices can be any climb Meteora will build, as long as the price rises. Turn this on and those numbers have to fit a shelf."
+                    : onPar
+                      ? "PAR is on. Most tokens sold to buyers stay within 10% of par. The amount printed on this card is what locks. Turn this off and the price climbs the whole way."
+                      : `PAR is off. The price climbs from the first token to the last, and the ${unit} on this card is what locks. Turn this on and most of the sale stays within 10% of one price.`}
               </span>
             </span>
           </label>
@@ -2004,7 +2023,10 @@ export function Desk() {
       {message ? <p className="status">{message}</p> : null}
       {cluster === "devnet" ? (
         <p className="note">
-          Turn PAR on for the shelf. Leave it off and the selected card sets the {unit} lock. Par fixed is one
+          {onPar
+            ? "PAR is on. Most of the sale stays within 10% of one price. The switch can turn it off on Starter, Solid, Deep, Thin, and Custom."
+            : "PAR is off. The price climbs the whole way. The switch can turn the shelf on for Starter, Solid, Deep, Thin, and Custom."}{" "}
+          Par fixed stays on. It is one
           billion tokens at {quoteKind === "sol" ? "0.00005 SOL, locking at 0.00006 SOL" : quoteKind === "other" ? `0.00005 ${unit}, locking at 0.00006 ${unit}` : "$0.00005, locking at $0.00006"}. Practice USDC comes from the{" "}
           <a href="https://faucet.circle.com/">Circle faucet</a>, about $20, and practice SOL from the{" "}
           <a href="https://faucet.solana.com/">Solana faucet</a>. The trading fee opens at{" "}
