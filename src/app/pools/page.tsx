@@ -15,6 +15,9 @@ export default function PoolsPage() {
         <p className="tagline">{network}. Every launch on this network.</p>
         <p>
           Tokens and real-world assets are both here. A token is filling or trading. A real-world asset names the token it is paired with, and where the title is. Once the title is purchased, the card says the title is claimed and the handoff is still ahead. The handoff is the promise on the sheet. The token can still be traded. Open a real-world asset to go to its sale page. Open a token to buy or sell it on this site.
+          {cluster === "mainnet-beta"
+            ? " Every token on this network has a Jupiter link. Once any of the curve has filled, that token can be bought and sold there."
+            : ""}
         </p>
         <div className="asset-nav">
           <Link href="/" className="asset-link">

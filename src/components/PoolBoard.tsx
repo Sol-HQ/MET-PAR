@@ -131,7 +131,9 @@ function ListingCard({
               ? "The creator supply is locked. Open this token to sign the trading pool. The practice network has no keepers."
               : "The creator supply is locked. Meteora's keepers can open the trading pool. Open this token to sign it now."
             : card.stage === "filling"
-              ? "Still on the curve. Open this token to buy or sell on this site. The Meteora pool is not open yet."
+              ? cluster === "devnet"
+                ? "Still on the curve. Open this token to buy or sell on this site. The Meteora pool is not open yet."
+                : "Still on the curve. Buy and sell on this site or on Jupiter. Any fill can be bought and sold there. The Meteora pool opens when the curve is full."
               : cluster === "devnet"
                 ? "The trading pool is open. Open this token to buy or sell on this site."
                 : "The trading pool is open. Open this token to buy or sell on this site. Meteora pool opens Meteora on the real network."}

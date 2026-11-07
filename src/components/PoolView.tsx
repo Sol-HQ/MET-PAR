@@ -1094,7 +1094,9 @@ export function PoolView({ address }: { address: string }) {
                   ? "The curve is full. Trading is stopped. The gold box takes the lock signature."
                   : snapshot.canMigrate
                     ? "The creator supply is locked. The trading pool is the next signature."
-                    : "The curve is still filling. Buys and sells on this page move the price."}{" "}
+                    : cluster === "devnet"
+                      ? "The curve is still filling. Buys and sells on this page move the price."
+                      : "The curve is still filling. Buys and sells on this page and on Jupiter move the price."}{" "}
               {cluster === "devnet" ? "Practice network." : "Real network."}{" "}
               <a href={explorerAccount(snapshot.baseMint, cluster)}>Token</a>
               {" · "}
