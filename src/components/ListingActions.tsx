@@ -59,7 +59,7 @@ export function ListingActions({
       <button type="button" onClick={() => void copyMint()} disabled={!mint}>
         {copied ? "Copied" : "Copy mint"}
       </button>
-      {cluster === "mainnet-beta" && meteoraHref ? (
+      {cluster === "mainnet-beta" ? (
         mint ? (
           <a href={jupiterTokenUrl(mint)} target="_blank" rel="noreferrer" title="Opens this token on Jupiter.">
             Trade on Jupiter
