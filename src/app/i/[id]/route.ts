@@ -1,18 +1,33 @@
 import { head } from "@vercel/blob";
+import { readFile } from "fs/promises";
+import path from "path";
 import { readPicture } from "@/lib/store";
+
+const PICTURE_HEADERS = {
+  "content-type": "image/jpeg",
+  "access-control-allow-origin": "*",
+  "cache-control": "public, max-age=31536000, immutable",
+} as const;
+
+/** Example Devnet cards keep a solid copy in the repo so they never depend on Blob or Arweave. */
+async function readBundledPicture(id: string): Promise<Buffer | null> {
+  try {
+    return await readFile(path.join(process.cwd(), "public", "devnet", `${id}.jpg`));
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   if (!/^[a-f0-9]{12}$/.test(id)) return new Response("Not found", { status: 404 });
   const stored = await readPicture(id).catch(() => null);
   if (stored) {
-    return new Response(Buffer.from(stored), {
-      headers: {
-        "content-type": "image/jpeg",
-        "access-control-allow-origin": "*",
-        "cache-control": "public, max-age=31536000, immutable",
-      },
-    });
+    return new Response(Buffer.from(stored), { headers: PICTURE_HEADERS });
+  }
+  const bundled = await readBundledPicture(id);
+  if (bundled) {
+    return new Response(bundled, { headers: PICTURE_HEADERS });
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN) return new Response("Not found", { status: 404 });
   try {

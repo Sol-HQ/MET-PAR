@@ -1,6 +1,6 @@
 import { getMint } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { rpcUrl, type ClusterName } from "./constants";
+import { WSOL, rpcUrl, type ClusterName } from "./constants";
 import { curveSale } from "./load-pool";
 import { readCopy } from "./record-copy";
 import { REMOVED_RECORDS, readRecord } from "./record";
@@ -87,6 +87,7 @@ function tokenAmount(amount: bigint, decimals: number): string {
 }
 
 async function paymentDecimals(connection: Connection, attributes: Record<string, string>): Promise<number> {
+  if (attributes.mint === WSOL) return 9;
   const recorded = Number.parseInt(attributes.decimals || "", 10);
   if (Number.isInteger(recorded) && recorded >= 0 && recorded <= 9) return recorded;
   try {
