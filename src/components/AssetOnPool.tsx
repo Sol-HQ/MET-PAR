@@ -25,6 +25,21 @@ export function devnetStandIn(seed: string): string {
   return n === 0 ? "/devnet/default-pirate.jpg" : "/devnet/default-coconut.jpg";
 }
 
+/**
+ * These three pictures used to be the coconut and the pirate at the same address.
+ * Browsers were told to keep that answer for a year, so the cards now use a new address.
+ */
+const KEPT_PICTURES: Record<string, string> = {
+  e293e683a3b1: "/devnet/e293e683a3b1.jpg?v=3",
+  "89737c1fbfb1": "/devnet/89737c1fbfb1.jpg?v=3",
+  "34228c19fed2": "/devnet/34228c19fed2.jpg?v=3",
+};
+
+export function keptPicture(src: string): string {
+  const match = src.match(/(?:\/i\/|\/devnet\/)([a-f0-9]{12})/);
+  return (match && KEPT_PICTURES[match[1]]) || "";
+}
+
 export function ObjectPicture({
   src,
   alt,
@@ -48,6 +63,10 @@ export function ObjectPicture({
     setAttempt(0);
   }, [src]);
   const shot = framed ? "card-shot" : wide ? "sheet-picture" : "object-shot";
+  const kept = keptPicture(src);
+  if (kept) {
+    return <img className={shot} src={kept} alt={alt} />;
+  }
   if ((!src || missing) && fallback) {
     return <img className={shot} src={fallback} alt={alt} />;
   }

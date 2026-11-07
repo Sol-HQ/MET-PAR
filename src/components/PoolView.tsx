@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LockReady, OpenPool } from "@/components/CurveHandoff";
 import { MainnetGate } from "@/components/MainnetGate";
 import { ListingActions } from "@/components/ListingActions";
-import { AssetOnPool, devnetStandIn, ObjectPicture } from "@/components/AssetOnPool";
+import { AssetOnPool, devnetStandIn, keptPicture, ObjectPicture } from "@/components/AssetOnPool";
 import { RecordPanel } from "@/components/RecordPanel";
 import { isAdminWallet, PLATFORM_FEE_CLAIMER } from "@/lib/admins";
 import { useCluster } from "@/lib/cluster";
@@ -1077,7 +1077,7 @@ export function PoolView({ address }: { address: string }) {
               alt={snapshot.name}
               framed
               quiet
-              fallback={cluster === "devnet" ? devnetStandIn(snapshot.address || snapshot.baseMint) : ""}
+              fallback={cluster === "devnet" && !keptPicture(snapshot.image) ? devnetStandIn(snapshot.address || snapshot.baseMint) : ""}
             />
             <h1>
               {snapshot.name} <span>{snapshot.symbol}</span>

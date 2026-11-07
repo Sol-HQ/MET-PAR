@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { LockReady } from "@/components/CurveHandoff";
 import { ListingActions } from "@/components/ListingActions";
 import { useCluster } from "@/lib/cluster";
-import { devnetStandIn, ObjectPicture } from "@/components/AssetOnPool";
+import { devnetStandIn, keptPicture, ObjectPicture } from "@/components/AssetOnPool";
 import { objectPairing, titleSentence, tokenPairing } from "@/lib/asset-on-pool";
 import { HIDDEN_POOLS, meteoraPoolUrl, type ClusterName } from "@/lib/constants";
 import { formatDollars, formatMoney } from "@/lib/format";
@@ -104,7 +104,7 @@ function ListingCard({
         src={card.image}
         alt={card.name}
         framed
-        fallback={cluster === "devnet" ? devnetStandIn(card.pool || card.mint || card.name) : ""}
+        fallback={cluster === "devnet" && !keptPicture(card.image) ? devnetStandIn(card.pool || card.mint || card.name) : ""}
       />
       <Link href={sharePath} className="card-link">
         <h3>
