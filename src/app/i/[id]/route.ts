@@ -23,11 +23,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!/^[a-f0-9]{12}$/.test(id)) return new Response("Not found", { status: 404 });
   const stored = await readPicture(id).catch(() => null);
   if (stored) {
-    return new Response(new Uint8Array(stored), { headers: PICTURE_HEADERS });
+    return new Response(new Blob([new Uint8Array(stored)], { type: "image/jpeg" }), { headers: PICTURE_HEADERS });
   }
   const bundled = await readBundledPicture(id);
   if (bundled) {
-    return new Response(bundled, { headers: PICTURE_HEADERS });
+    return new Response(new Blob([bundled], { type: "image/jpeg" }), { headers: PICTURE_HEADERS });
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN) return new Response("Not found", { status: 404 });
   try {
