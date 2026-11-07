@@ -1032,10 +1032,9 @@ export function Desk() {
         <p className="eyebrow">Meteora bonding curve</p>
         <h1>PAR</h1>
         <p className="tagline">Buyers come in at one price.</p>
-        <p>A plain PAR token is created on this page. A real-world asset is a separate page.</p>
+        <p>This page creates a Solana token on Meteora's Dynamic Bonding Curve. With PAR on, the initial sale is on one shelf: most of it stays within 10% of one price, then the last slice walks up to the lock. With PAR off, it is a regular curve and the price rises the whole way based on settings chosen. The token can stand alone or be paired to an RWA. The real-world asset page records one true object as an "RWA", and that RWA can stand alone as a Core NFT, or be paired to a custom Solana token.</p>
         <p>
-          PAR on keeps most of the sale within 10% of one price, then the last slice rises to the pool. PAR off rises
-          the whole way. Both lock when the curve is full. The full account of each part is on the{" "}
+          Both PAR on and PAR off creations end in a locked Meteora DAMM v2 liquidity pool. The full account of each part of this process is on the{" "}
           <Link href="/faqs">FAQs</Link> page.
         </p>
         <div className="asset-nav">
