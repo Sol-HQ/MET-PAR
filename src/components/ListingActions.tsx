@@ -59,19 +59,21 @@ export function ListingActions({
       <button type="button" onClick={() => void copyMint()} disabled={!mint}>
         {copied ? "Copied" : "Copy mint"}
       </button>
-      {mint ? (
-        <a href={jupiterTokenUrl(mint)} target="_blank" rel="noreferrer" title="Opens this token on Jupiter.">
-          {cluster === "devnet" ? "Jupiter, real network" : "Trade on Jupiter"}
-        </a>
-      ) : (
-        <button type="button" disabled>
-          Trade on Jupiter
-        </button>
-      )}
+      {cluster === "mainnet-beta" && meteoraHref ? (
+        mint ? (
+          <a href={jupiterTokenUrl(mint)} target="_blank" rel="noreferrer" title="Opens this token on Jupiter.">
+            Trade on Jupiter
+          </a>
+        ) : (
+          <button type="button" disabled>
+            Trade on Jupiter
+          </button>
+        )
+      ) : null}
       <a href={viewHref}>View PAR pool</a>
-      {meteoraHref ? (
+      {cluster === "mainnet-beta" && meteoraHref ? (
         <a href={meteoraHref} target="_blank" rel="noreferrer" title={meteoraHref}>
-          {cluster === "devnet" ? "Meteora practice pool" : "Meteora pool"}
+          Meteora pool
         </a>
       ) : null}
       <a href={xShareUrl(name, fullAt, pageUrl, quoteMint === WSOL, opensAt, endsAt)} target="_blank" rel="noreferrer" title="Opens X with a link back to this token on PAR.">

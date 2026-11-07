@@ -133,7 +133,7 @@ function ListingCard({
             : card.stage === "filling"
               ? "Still on the curve. Open this token to buy or sell on this site. The Meteora pool is not open yet."
               : cluster === "devnet"
-                ? "The trading pool is open. Open this token to buy or sell on this site. Meteora practice pool opens the practice site."
+                ? "The trading pool is open. Open this token to buy or sell on this site."
                 : "The trading pool is open. Open this token to buy or sell on this site. Meteora pool opens Meteora on the real network."}
       </p>
       {ready ? <LockReady pool={card.pool} symbol={card.symbol} fullAt={card.fullAt} framed={false} compact onDone={onLocked} /> : null}
@@ -331,7 +331,7 @@ export function PoolBoard({
                 </Link>
                 <p>{objectPairing(asset.kind || "", asset.symbol, asset.coin)}</p>
                 <p className="object-status">{titleSentence(asset.status)}</p>
-                <p>
+                <p className="card-foot">
                   {asset.standing === "sold" && realPool(asset.pool) ? "The token can still be traded. " : null}
                   <Link href={asset.titleHref}>Open the sales page</Link>
                 </p>
